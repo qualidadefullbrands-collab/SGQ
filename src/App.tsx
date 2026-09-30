@@ -156,6 +156,7 @@ export default function App() {
   const [qrDataUrl, setQrDataUrl] = useState('')
 
   const [inspection, setInspection] = useState({
+    processoId: '',
     codigo: '',
     cliente: '',
     notaFiscal: '',
@@ -187,6 +188,7 @@ export default function App() {
 
   const canWrite = profile && profile.perfil !== 'consulta'
   const canManageIts = profile && ['administrador', 'gestor'].includes(profile.perfil)
+  const canDelete = profile && ['administrador', 'gestor'].includes(profile.perfil)
 
   const statisticalLot = useMemo(() => {
     const valid = skuRows
@@ -207,6 +209,11 @@ export default function App() {
   const totalBoxesToInspect = useMemo(
     () => skuRows.reduce((sum, r) => sum + boxesToInspect(boxesReceived(r.quantidade, r.quantidadePorCaixa)), 0),
     [skuRows],
+  )
+
+  const previewPlan = useMemo(
+    () => samplingPlan(statisticalLot, inspection.inspectionLevel),
+    [statisticalLot, inspection.inspectionLevel],
   )
 
   useEffect(() => {
