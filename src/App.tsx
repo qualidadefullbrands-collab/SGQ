@@ -41,6 +41,7 @@ export default function App() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [login, setLogin] = useState({ email: '', password: '' })
+  const [firstAccess, setFirstAccess] = useState(false)
   const [counts, setCounts] = useState({ processos: 0, inspecoes: 0, amostras: 0, laudos: 0 })
   const [itVersions, setItVersions] = useState<ItVersion[]>([])
   const [groups, setGroups] = useState<Group[]>([])
@@ -138,8 +139,42 @@ export default function App() {
   async function signIn(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+    setMessage('')
     const { error } = await supabase.auth.signInWithPassword(login)
     if (error) setError(error.message)
+  }
+
+  async function createFirstAccess(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+    setMessage('')
+    const normalizedEmail = login.email.trim().toLowerCase()
+
+    if (normalizedEmail !== 'vanessa.casarin@fullbrands.com.br') {
+      setError('Este primeiro acesso está liberado apenas para o administrador autorizado.')
+      return
+    }
+
+    const { data, error } = await supabase.auth.signUp({
+      email: normalizedEmail,
+      password: login.password,
+      options: {
+        data: { nome: 'Vanessa Casarin' },
+        emailRedirectTo: window.location.origin,
+      },
+    })
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    if (data.session) {
+      setMessage('Acesso administrativo criado. Você já está autenticada.')
+    } else {
+      setMessage('Acesso criado. Confirme o e-mail recebido e depois entre no SGQ.')
+      setFirstAccess(false)
+    }
   }
 
   async function createProcess(e: React.FormEvent) {
@@ -293,14 +328,18 @@ export default function App() {
   if (!userId) {
     return (
       <main className="login-shell">
-        <form className="login-card" onSubmit={signIn}>
+        <form className="login-card" onSubmit={firstAccess ? createFirstAccess : signIn}>
           <div className="brand-mark"><ShieldCheck size={28} /><span>SGQ</span></div>
-          <h1>Qualidade Full Brands</h1>
-          <p>Acesso restrito ao time de Qualidade.</p>
-          <label>E-mail<input type="email" value={login.email} onChange={(e) => setLogin({ ...login, email: e.target.value })} required /></label>
-          <label>Senha<input type="password" value={login.password} onChange={(e) => setLogin({ ...login, password: e.target.value })} required /></label>
+          <h1>{firstAccess ? 'Criar primeiro acesso' : 'Qualidade Full Brands'}</h1>
+          <p>{firstAccess ? 'Administrador inicial autorizado: Vanessa Casarin.' : 'Acesso restrito ao time de Qualidade.'}</p>
+          <label>E-mail<input type="email" value={login.email} onChange={(e) => setLogin({ ...login, email: e.target.value })} placeholder={firstAccess ? 'vanessa.casarin@fullbrands.com.br' : 'E-mail'} required /></label>
+          <label>Senha<input type="password" minLength={8} value={login.password} onChange={(e) => setLogin({ ...login, password: e.target.value })} required /></label>
           {error && <div className="alert error">{error}</div>}
-          <button className="primary" type="submit">Entrar</button>
+          {message && <div className="alert success">{message}</div>}
+          <button className="primary" type="submit">{firstAccess ? 'Criar acesso de Administrador' : 'Entrar'}</button>
+          <button className="link-button" type="button" onClick={() => { setFirstAccess(!firstAccess); setError(''); setMessage(''); setLogin({ email: firstAccess ? '' : 'vanessa.casarin@fullbrands.com.br', password: '' }) }}>
+            {firstAccess ? 'Voltar para login' : 'Primeiro acesso da Vanessa'}
+          </button>
         </form>
       </main>
     )
