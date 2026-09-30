@@ -451,49 +451,72 @@ export default function App() {
     }
     if (!inspection.itVersionId) return setError('Selecione a IT aplicável.')
     if (skuRows.some((r) => !r.sku.trim() || !r.nome.trim() || Number(r.quantidade) <= 0 || Number(r.quantidadePorCaixa) <= 0)) {
-      return setError('Em cada SKU informe SKU, descrição, quantidade recebida e quantidade por caixa.')
+      return setError('Em cada produto informe Código, Descrição, Quantidade recebida e Quantidade por caixa.')
     }
     if (statisticalLot <= 0) return setError('Não foi possível calcular o lote estatístico.')
 
-    const { data: proc, error: procErr } = await supabase.from('processos').insert({
-      codigo: inspection.codigo.trim(),
-      cliente: inspection.cliente.trim(),
-      nota_fiscal: inspection.notaFiscal.trim() || null,
-      origem: inspection.origem.trim() || null,
-      transporte: inspection.transporte.trim() || null,
-      chegada_cd: inspection.chegadaCd || null,
-      status: 'aberto',
-      data_processo: inspection.dataInspecao,
-      criado_por: userId,
-    }).select('id').single()
-    if (procErr || !proc) return setError(procErr?.message ?? 'Falha ao criar processo.')
+    let processId = inspection.processoId
+    const existingByCode = processes.find((p) => p.codigo.toLowerCase() === inspection.codigo.trim().toLowerCase())
+    if (!processId && existingByCode) processId = existingByCode.id
 
+    if (processId) {
+      const { error } = await supabase.from('processos').update({
+        cliente: inspection.cliente.trim(),
+        nota_fiscal: inspection.notaFiscal.trim() || null,
+        origem: inspection.origem.trim() || null,
+        transporte: inspection.transporte.trim() || null,
+        chegada_cd: inspection.chegadaCd || null,
+        status: 'em_inspecao',
+        atualizado_em: new Date().toISOString(),
+      }).eq('id', processId)
+      if (error) return setError(error.message)
+    } else {
+      const created = await supabase.from('processos').insert({
+        codigo: inspection.codigo.trim(),
+        cliente: inspection.cliente.trim(),
+        nota_fiscal: inspection.notaFiscal.trim() || null,
+        origem: inspection.origem.trim() || null,
+        transporte: inspection.transporte.trim() || null,
+        chegada_cd: inspection.chegadaCd || null,
+        status: 'em_inspecao',
+        data_processo: inspection.dataInspecao,
+        criado_por: userId,
+      }).select('id').single()
+      if (created.error || !created.data) return setError(created.error?.message ?? 'Falha ao criar processo.')
+      processId = created.data.id
+    }
+
+    const groupCount = await supabase.from('grupos_inspecao').select('*', { count: 'exact', head: true }).eq('processo_id', processId)
+    const groupCode = `G${String((groupCount.count ?? 0) + 1).padStart(2, '0')}`
     const groupName = skuRows.map((r) => r.nome.trim()).join(' + ')
-    const { data: group, error: groupErr } = await supabase.from('grupos_inspecao').insert({
-      processo_id: proc.id,
-      codigo: 'G01',
+    const group = await supabase.from('grupos_inspecao').insert({
+      processo_id: processId,
+      codigo: groupCode,
       nome: groupName,
       tipo: isComponentSet ? 'kit_componentes' : 'individual',
       tamanho_lote_estatistico: statisticalLot,
       status: 'em_inspecao',
     }).select('id').single()
-    if (groupErr || !group) return setError(groupErr?.message ?? 'Falha ao iniciar inspeção.')
+    if (group.error || !group.data) return setError(group.error?.message ?? 'Falha ao iniciar inspeção.')
 
     let firstItemId: string | null = null
-
     for (const row of skuRows) {
       let productId: string
-      const existing = await supabase.from('produtos').select('id').eq('sku', row.sku.trim()).maybeSingle()
-      if (existing.data?.id) productId = existing.data.id
-      else {
+      const existing = await supabase.from('produtos').select('id,nome').eq('sku', row.sku.trim()).maybeSingle()
+      if (existing.data?.id) {
+        productId = existing.data.id
+        if (existing.data.nome !== row.nome.trim()) {
+          await supabase.from('produtos').update({ nome: row.nome.trim() }).eq('id', productId)
+        }
+      } else {
         const created = await supabase.from('produtos').insert({ sku: row.sku.trim(), nome: row.nome.trim() }).select('id').single()
-        if (created.error || !created.data) return setError(created.error?.message ?? 'Falha ao cadastrar SKU.')
+        if (created.error || !created.data) return setError(created.error?.message ?? 'Falha ao cadastrar código.')
         productId = created.data.id
       }
 
       const receivedBoxes = boxesReceived(row.quantidade, row.quantidadePorCaixa)
       const item = await supabase.from('processo_itens').insert({
-        processo_id: proc.id,
+        processo_id: processId,
         produto_id: productId,
         codigo_cliente: row.codigoCliente.trim() || null,
         lote: row.lote.trim() || null,
@@ -503,54 +526,61 @@ export default function App() {
         quantidade_por_caixa: Number(row.quantidadePorCaixa),
         caixas_recebidas: receivedBoxes,
       }).select('id').single()
-      if (item.error || !item.data) return setError(item.error?.message ?? 'Falha ao cadastrar item.')
+      if (item.error || !item.data) return setError(item.error?.message ?? 'Falha ao cadastrar produto.')
       if (!firstItemId) firstItemId = item.data.id
 
-      const link = await supabase.from('grupo_inspecao_itens').insert({
-        grupo_inspecao_id: group.id,
+      const linkItem = await supabase.from('grupo_inspecao_itens').insert({
+        grupo_inspecao_id: group.data.id,
         processo_item_id: item.data.id,
         quantidade_componente: Number(row.quantidade),
         unidades_por_conjunto: Number(row.unidadesPorConjunto || 1),
       })
-      if (link.error) return setError(link.error.message)
+      if (linkItem.error) return setError(linkItem.error.message)
     }
 
     const linkIt = await supabase.from('grupo_inspecao_its').insert({
-      grupo_inspecao_id: group.id,
+      grupo_inspecao_id: group.data.id,
       it_versao_id: inspection.itVersionId,
       principal: true,
     })
     if (linkIt.error) return setError(linkIt.error.message)
 
+    const plan = samplingPlan(statisticalLot, inspection.inspectionLevel)
     const inspectionNumber = `INS-${new Date().getFullYear()}-${Date.now().toString().slice(-7)}`
     const createdInspection = await supabase.from('inspecoes').insert({
       numero: inspectionNumber,
       processo_item_id: firstItemId,
-      grupo_inspecao_id: group.id,
+      grupo_inspecao_id: group.data.id,
       it_versao_id: inspection.itVersionId,
       status: 'em_andamento',
+      resultado: 'pendente',
       tamanho_lote: statisticalLot,
+      tamanho_amostra: plan.sample,
+      limite_aceitacao: plan.ac,
+      limite_rejeicao: plan.re,
       nivel_inspecao: inspection.inspectionLevel,
       nivel_inspecao_origem: 'it',
       regime_inspecao: 'normal',
       tipo_plano: 'simples',
+      codigo_amostragem: plan.code,
+      nqa_critico: 0.40,
+      nqa_grave: 1.50,
+      nqa_toleravel: 4.00,
       caixas_recebidas: totalBoxesReceived,
       caixas_avaliar: totalBoxesToInspect,
       data_inspecao: inspection.dataInspecao,
       responsavel_id: userId,
       iniciada_em: new Date().toISOString(),
+      parametros_amostragem: { formula_caixas: 'ceil(sqrt(n+1))' },
     }).select('id').single()
-
-    if (createdInspection.error) return setError(createdInspection.error.message)
+    if (createdInspection.error || !createdInspection.data) {
+      return setError(createdInspection.error?.message ?? 'Falha ao criar inspeção.')
+    }
 
     setMessage(`Inspeção ${inspectionNumber} iniciada.`)
-    setInspection({
-      codigo: '', cliente: '', notaFiscal: '', origem: '', transporte: '', chegadaCd: '',
-      dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I',
-    })
-    setSkuRows([emptySku()])
+    resetNewInspection()
     await loadApp()
-    setTab('painel')
+    await openInspection(createdInspection.data.id)
   }
 
   async function uploadIt(e: React.FormEvent) {
