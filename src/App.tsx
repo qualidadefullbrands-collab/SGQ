@@ -312,6 +312,134 @@ export default function App() {
     }
   }
 
+  function resetNewInspection() {
+    setInspection({
+      processoId: '', codigo: '', cliente: '', notaFiscal: '', origem: '', transporte: '', chegadaCd: '',
+      dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I',
+    })
+    setSkuRows([emptySku()])
+  }
+
+  function reuseProcess(p: ProcessRow) {
+    setInspection((x) => ({
+      ...x,
+      processoId: p.id,
+      codigo: p.codigo,
+      cliente: p.cliente ?? '',
+      notaFiscal: p.nota_fiscal ?? '',
+      origem: p.origem ?? '',
+      transporte: p.transporte ?? '',
+      chegadaCd: p.chegada_cd ?? '',
+      dataInspecao: new Date().toISOString().slice(0,10),
+    }))
+    setSkuRows([emptySku()])
+    setTab('nova')
+    setMessage('Dados gerais reutilizados. Informe o novo código/produto desta inspeção.')
+  }
+
+  async function lookupProduct(index: number) {
+    const code = skuRows[index].sku.trim()
+    if (!code) return
+    const found = await supabase.from('produtos').select('id,sku,nome').eq('sku', code).maybeSingle()
+    if (!found.data) {
+      setMessage('Código ainda não existe no cadastro local. A descrição pode ser informada manualmente.')
+      return
+    }
+    setSkuRows((rows) => rows.map((r,i) => i===index ? { ...r, nome: found.data!.nome } : r))
+    const items = await supabase.from('processo_itens').select('id').eq('produto_id', found.data.id)
+    const ids = (items.data ?? []).map((x:any) => x.id)
+    if (!ids.length) return
+    const links = await supabase.from('grupo_inspecao_itens').select('grupo_inspecao_id').in('processo_item_id', ids)
+    const gids = [...new Set((links.data ?? []).map((x:any) => x.grupo_inspecao_id))] as string[]
+    if (!gids.length) return
+    const oldIns = await supabase.from('inspecoes').select('id').in('grupo_inspecao_id', gids)
+    const inspIds = (oldIns.data ?? []).map((x:any) => x.id)
+    if (!inspIds.length) return
+    const nc = await supabase.from('inspecao_nao_conformidades').select('id').in('inspecao_id', inspIds).limit(1)
+    if ((nc.data ?? []).length) {
+      setInspection((x) => ({ ...x, inspectionLevel: 'II' }))
+      setMessage('Histórico de não conformidade encontrado para este código: Nível II sugerido.')
+    }
+  }
+
+  async function saveProcessEdit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editingProcess) return
+    const { error } = await supabase.from('processos').update({
+      cliente: editingProcess.cliente,
+      nota_fiscal: editingProcess.nota_fiscal,
+      origem: editingProcess.origem,
+      transporte: editingProcess.transporte,
+      chegada_cd: editingProcess.chegada_cd,
+      atualizado_em: new Date().toISOString(),
+    }).eq('id', editingProcess.id)
+    if (error) return setError(error.message)
+    setEditingProcess(null)
+    setMessage('Processo atualizado.')
+    await loadApp()
+  }
+
+  async function deleteProcess(p: ProcessRow) {
+    if (!canDelete || !userId) return
+    if (!window.confirm(`Excluir o processo ${p.codigo} da visão operacional? O histórico será preservado para auditoria.`)) return
+    const { error } = await supabase.from('processos').update({
+      excluido_em: new Date().toISOString(),
+      excluido_por: userId,
+      status: 'cancelado',
+    }).eq('id', p.id)
+    if (error) return setError(error.message)
+    setMessage('Processo removido da visão operacional.')
+    await loadApp()
+  }
+
+  async function openInspection(id: string) {
+    setError('')
+    setSelectedInspectionId(id)
+    const ins = await supabase.from('inspecoes')
+      .select('*,grupos_inspecao(*,processos(*)),it_versoes(*,instrucoes_trabalho(*))')
+      .eq('id', id).single()
+    if (ins.error || !ins.data) return setError(ins.error?.message ?? 'Inspeção não encontrada.')
+    const groupId = ins.data.grupo_inspecao_id
+    const itId = ins.data.it_versao_id
+    const [items, checklist, checkResults, params, dimResults, tests, testResults, photos, registers, ncs, retained] = await Promise.all([
+      supabase.from('grupo_inspecao_itens').select('id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,codigo_cliente,material,capacidade,quantidade_por_caixa,caixas_recebidas,produtos(id,sku,nome))').eq('grupo_inspecao_id', groupId),
+      supabase.from('it_checklist').select('*').eq('it_versao_id', itId).eq('ativo', true).order('ordem'),
+      supabase.from('inspecao_checklist_resultados').select('*').eq('inspecao_id', id),
+      supabase.from('it_parametros_dimensionais').select('*').eq('it_versao_id', itId).eq('ativo', true).order('ordem'),
+      supabase.from('inspecao_dimensionais').select('*').eq('inspecao_id', id),
+      supabase.from('it_testes_especiais').select('*').eq('it_versao_id', itId).eq('ativo', true).order('ordem'),
+      supabase.from('inspecao_testes_resultados').select('*').eq('inspecao_id', id),
+      supabase.from('inspecao_fotos').select('*').eq('inspecao_id', id).order('criado_em'),
+      supabase.from('inspecao_registros').select('*').eq('inspecao_id', id).order('sequencia'),
+      supabase.from('inspecao_nao_conformidades').select('*').eq('inspecao_id', id).order('criado_em'),
+      supabase.from('amostras').select('*').eq('inspecao_id', id),
+    ])
+    const next = {
+      ...ins.data,
+      items: items.data ?? [],
+      checklist: checklist.data ?? [],
+      checklistResults: checkResults.data ?? [],
+      params: params.data ?? [],
+      dimResults: dimResults.data ?? [],
+      tests: tests.data ?? [],
+      testResults: testResults.data ?? [],
+      photos: photos.data ?? [],
+      registers: registers.data ?? [],
+      ncs: ncs.data ?? [],
+      retained: retained.data ?? [],
+    }
+    setDetail(next)
+    setFinalObservation(ins.data.observacoes ?? '')
+    const retention: Record<string,{retain:boolean;qty:string;address:string}> = {}
+    for (const link of next.items as any[]) {
+      const item = link.processo_itens
+      const existing = (next.retained as any[]).find((x) => x.produto_id === item?.produto_id)
+      retention[item.id] = { retain: !existing, qty: '', address: '' }
+    }
+    setRetentionRows(retention)
+    setTab('execucao')
+  }
+
   async function createInspection(e: React.FormEvent) {
     e.preventDefault()
     if (!canWrite || !userId) return
