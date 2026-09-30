@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Boxes, ClipboardCheck, FileText, LogOut, PackageSearch, Plus, QrCode, ShieldCheck } from 'lucide-react'
+import { Boxes, ClipboardCheck, FileText, LogOut, PackageSearch, Plus, QrCode, ShieldCheck, Upload, X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { supabase } from './lib/supabase'
 
@@ -7,7 +7,11 @@ type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'ge
 type ItVersion = {
   id: string
   versao: string
+  status: string
+  vigencia: string | null
   nivel_inspecao_padrao: string | null
+  leitura_ia_status: string
+  arquivo_nome: string | null
   instrucoes_trabalho: { codigo: string; titulo: string } | null
 }
 type Group = {
@@ -31,13 +35,34 @@ type Sample = {
   grupo_inspecao_id: string | null
 }
 
-const emptySku = () => ({ sku: '', nome: '', lote: '', quantidade: '', unidadesPorConjunto: '1', papel: '' })
+const emptySku = () => ({
+  sku: '',
+  nome: '',
+  codigoCliente: '',
+  lote: '',
+  material: '',
+  capacidade: '',
+  quantidade: '',
+  quantidadePorCaixa: '',
+  unidadesPorConjunto: '1',
+})
+
+function boxesReceived(quantity: string, perBox: string) {
+  const q = Number(quantity)
+  const p = Number(perBox)
+  return q > 0 && p > 0 ? Math.ceil(q / p) : 0
+}
+
+function boxesToInspect(totalBoxes: number) {
+  if (totalBoxes <= 0) return 0
+  return Math.min(totalBoxes, Math.floor(Math.sqrt(totalBoxes)) + 1)
+}
 
 export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [tab, setTab] = useState<'painel' | 'processos' | 'amostras'>('painel')
+  const [tab, setTab] = useState<'painel' | 'nova' | 'its' | 'amostras'>('painel')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [login, setLogin] = useState({ email: '', password: '' })
@@ -49,17 +74,26 @@ export default function App() {
   const [selectedSample, setSelectedSample] = useState<Sample | null>(null)
   const [qrDataUrl, setQrDataUrl] = useState('')
 
-  const [processForm, setProcessForm] = useState({
+  const [inspection, setInspection] = useState({
     codigo: '',
     cliente: '',
-    groupCode: 'G01',
-    groupName: '',
-    groupType: 'individual',
-    statisticalLot: '',
+    notaFiscal: '',
+    origem: '',
+    transporte: '',
+    chegadaCd: '',
+    dataInspecao: new Date().toISOString().slice(0, 10),
     itVersionId: '',
-    inspectionLevel: '',
+    inspectionLevel: 'I',
   })
   const [skuRows, setSkuRows] = useState([emptySku()])
+
+  const [itForm, setItForm] = useState({
+    codigo: '',
+    titulo: '',
+    versao: '',
+    vigencia: '',
+  })
+  const [itFile, setItFile] = useState<File | null>(null)
 
   const [sampleForm, setSampleForm] = useState({
     groupId: '',
@@ -71,6 +105,28 @@ export default function App() {
   })
 
   const canWrite = profile && profile.perfil !== 'consulta'
+  const canManageIts = profile && ['administrador', 'gestor'].includes(profile.perfil)
+
+  const statisticalLot = useMemo(() => {
+    const valid = skuRows
+      .map((r) => {
+        const q = Number(r.quantidade)
+        const perSet = Math.max(Number(r.unidadesPorConjunto) || 1, 0.000001)
+        return q > 0 ? Math.floor(q / perSet) : 0
+      })
+      .filter((n) => n > 0)
+    return valid.length ? Math.min(...valid) : 0
+  }, [skuRows])
+
+  const isComponentSet = skuRows.length > 1
+  const totalBoxesReceived = useMemo(
+    () => skuRows.reduce((sum, r) => sum + boxesReceived(r.quantidade, r.quantidadePorCaixa), 0),
+    [skuRows],
+  )
+  const totalBoxesToInspect = useMemo(
+    () => skuRows.reduce((sum, r) => sum + boxesToInspect(boxesReceived(r.quantidade, r.quantidadePorCaixa)), 0),
+    [skuRows],
+  )
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -106,8 +162,7 @@ export default function App() {
       setQrDataUrl('')
       return
     }
-    const url = sampleUrl(selectedSample)
-    QRCode.toDataURL(url, { margin: 1, width: 220 }).then(setQrDataUrl)
+    QRCode.toDataURL(sampleUrl(selectedSample), { margin: 1, width: 220 }).then(setQrDataUrl)
   }, [selectedSample])
 
   async function loadApp() {
@@ -119,13 +174,13 @@ export default function App() {
         supabase.from('inspecoes').select('*', { count: 'exact', head: true }),
         supabase.from('amostras').select('*', { count: 'exact', head: true }),
         supabase.from('laudos').select('*', { count: 'exact', head: true }),
-        supabase.from('it_versoes').select('id,versao,nivel_inspecao_padrao,instrucoes_trabalho(codigo,titulo)').eq('status', 'publicada'),
+        supabase.from('it_versoes').select('id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)').order('criado_em', { ascending: false }),
         supabase.from('grupos_inspecao').select('id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)').order('criado_em', { ascending: false }),
         supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id').order('codigo', { ascending: false }),
       ])
 
     if (!p) {
-      setError('Seu usuário existe no Auth, mas ainda não possui perfil liberado no SGQ.')
+      setError('Seu usuário ainda não possui perfil liberado no SGQ.')
       return
     }
 
@@ -149,69 +204,66 @@ export default function App() {
     setError('')
     setMessage('')
     const normalizedEmail = login.email.trim().toLowerCase()
-
     if (normalizedEmail !== 'vanessa.casarin@fullbrands.com.br') {
       setError('Este primeiro acesso está liberado apenas para o administrador autorizado.')
       return
     }
-
     const { data, error } = await supabase.auth.signUp({
       email: normalizedEmail,
       password: login.password,
-      options: {
-        data: { nome: 'Vanessa Casarin' },
-        emailRedirectTo: window.location.origin,
-      },
+      options: { data: { nome: 'Vanessa Casarin' }, emailRedirectTo: window.location.origin },
     })
-
-    if (error) {
-      setError(error.message)
-      return
-    }
-
-    if (data.session) {
-      setMessage('Acesso administrativo criado. Você já está autenticada.')
-    } else {
-      setMessage('Acesso criado. Confirme o e-mail recebido e depois entre no SGQ.')
+    if (error) return setError(error.message)
+    if (data.session) setMessage('Acesso administrativo criado.')
+    else {
+      setMessage('Acesso criado. Confirme o e-mail e depois entre no SGQ.')
       setFirstAccess(false)
     }
   }
 
-  async function createProcess(e: React.FormEvent) {
+  async function createInspection(e: React.FormEvent) {
     e.preventDefault()
     if (!canWrite || !userId) return
     setError('')
     setMessage('')
 
-    if (!processForm.codigo || !processForm.groupName || !processForm.statisticalLot) {
-      setError('Preencha processo, grupo de inspeção e tamanho do lote estatístico.')
-      return
+    if (!inspection.codigo.trim() || !inspection.cliente.trim() || !inspection.dataInspecao) {
+      return setError('Preencha Processo FST, Cliente e Data da inspeção.')
     }
-    if (skuRows.some((r) => !r.sku || !r.nome || !r.quantidade)) {
-      setError('Preencha SKU, nome e quantidade de todos os itens.')
-      return
+    if (!inspection.itVersionId) return setError('Selecione a IT aplicável.')
+    if (skuRows.some((r) => !r.sku.trim() || !r.nome.trim() || Number(r.quantidade) <= 0 || Number(r.quantidadePorCaixa) <= 0)) {
+      return setError('Em cada SKU informe SKU, descrição, quantidade recebida e quantidade por caixa.')
     }
+    if (statisticalLot <= 0) return setError('Não foi possível calcular o lote estatístico.')
 
     const { data: proc, error: procErr } = await supabase.from('processos').insert({
-      codigo: processForm.codigo.trim(),
-      cliente: processForm.cliente.trim() || null,
+      codigo: inspection.codigo.trim(),
+      cliente: inspection.cliente.trim(),
+      nota_fiscal: inspection.notaFiscal.trim() || null,
+      origem: inspection.origem.trim() || null,
+      transporte: inspection.transporte.trim() || null,
+      chegada_cd: inspection.chegadaCd || null,
       status: 'aberto',
-      data_processo: new Date().toISOString().slice(0, 10),
+      data_processo: inspection.dataInspecao,
       criado_por: userId,
     }).select('id').single()
     if (procErr || !proc) return setError(procErr?.message ?? 'Falha ao criar processo.')
 
+    const groupName = skuRows.map((r) => r.nome.trim()).join(' + ')
     const { data: group, error: groupErr } = await supabase.from('grupos_inspecao').insert({
       processo_id: proc.id,
-      codigo: processForm.groupCode.trim() || 'G01',
-      nome: processForm.groupName.trim(),
-      tipo: processForm.groupType,
-      tamanho_lote_estatistico: Number(processForm.statisticalLot),
+      codigo: 'G01',
+      nome: groupName,
+      tipo: isComponentSet ? 'kit_componentes' : 'individual',
+      tamanho_lote_estatistico: statisticalLot,
+      status: 'em_inspecao',
     }).select('id').single()
-    if (groupErr || !group) return setError(groupErr?.message ?? 'Falha ao criar grupo de inspeção.')
+    if (groupErr || !group) return setError(groupErr?.message ?? 'Falha ao iniciar inspeção.')
+
+    let firstItemId: string | null = null
 
     for (const row of skuRows) {
-      let productId: string | null = null
+      let productId: string
       const existing = await supabase.from('produtos').select('id').eq('sku', row.sku.trim()).maybeSingle()
       if (existing.data?.id) productId = existing.data.id
       else {
@@ -220,36 +272,105 @@ export default function App() {
         productId = created.data.id
       }
 
+      const receivedBoxes = boxesReceived(row.quantidade, row.quantidadePorCaixa)
       const item = await supabase.from('processo_itens').insert({
         processo_id: proc.id,
         produto_id: productId,
+        codigo_cliente: row.codigoCliente.trim() || null,
         lote: row.lote.trim() || null,
+        material: row.material.trim() || null,
+        capacidade: row.capacidade.trim() || null,
         quantidade: Number(row.quantidade),
+        quantidade_por_caixa: Number(row.quantidadePorCaixa),
+        caixas_recebidas: receivedBoxes,
       }).select('id').single()
-      if (item.error || !item.data) return setError(item.error?.message ?? 'Falha ao cadastrar item do processo.')
+      if (item.error || !item.data) return setError(item.error?.message ?? 'Falha ao cadastrar item.')
+      if (!firstItemId) firstItemId = item.data.id
 
       const link = await supabase.from('grupo_inspecao_itens').insert({
         grupo_inspecao_id: group.id,
         processo_item_id: item.data.id,
         quantidade_componente: Number(row.quantidade),
         unidades_por_conjunto: Number(row.unidadesPorConjunto || 1),
-        papel: row.papel.trim() || null,
       })
       if (link.error) return setError(link.error.message)
     }
 
-    if (processForm.itVersionId) {
-      const linkIt = await supabase.from('grupo_inspecao_its').insert({
-        grupo_inspecao_id: group.id,
-        it_versao_id: processForm.itVersionId,
-        principal: true,
-      })
-      if (linkIt.error) return setError(linkIt.error.message)
+    const linkIt = await supabase.from('grupo_inspecao_its').insert({
+      grupo_inspecao_id: group.id,
+      it_versao_id: inspection.itVersionId,
+      principal: true,
+    })
+    if (linkIt.error) return setError(linkIt.error.message)
+
+    const inspectionNumber = `INS-${new Date().getFullYear()}-${Date.now().toString().slice(-7)}`
+    const createdInspection = await supabase.from('inspecoes').insert({
+      numero: inspectionNumber,
+      processo_item_id: firstItemId,
+      grupo_inspecao_id: group.id,
+      it_versao_id: inspection.itVersionId,
+      status: 'em_andamento',
+      tamanho_lote: statisticalLot,
+      nivel_inspecao: inspection.inspectionLevel,
+      nivel_inspecao_origem: 'it',
+      regime_inspecao: 'normal',
+      tipo_plano: 'simples',
+      caixas_recebidas: totalBoxesReceived,
+      caixas_avaliar: totalBoxesToInspect,
+      data_inspecao: inspection.dataInspecao,
+      responsavel_id: userId,
+      iniciada_em: new Date().toISOString(),
+    }).select('id').single()
+
+    if (createdInspection.error) return setError(createdInspection.error.message)
+
+    setMessage(`Inspeção ${inspectionNumber} iniciada.`)
+    setInspection({
+      codigo: '', cliente: '', notaFiscal: '', origem: '', transporte: '', chegadaCd: '',
+      dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I',
+    })
+    setSkuRows([emptySku()])
+    await loadApp()
+    setTab('painel')
+  }
+
+  async function uploadIt(e: React.FormEvent) {
+    e.preventDefault()
+    if (!canManageIts || !itFile) return
+    setError('')
+    setMessage('')
+
+    if (!itForm.codigo.trim() || !itForm.titulo.trim() || !itForm.versao.trim()) {
+      return setError('Informe código, título e versão da IT.')
     }
 
-    setMessage('Processo e grupo de inspeção criados com sucesso.')
-    setProcessForm({ codigo: '', cliente: '', groupCode: 'G01', groupName: '', groupType: 'individual', statisticalLot: '', itVersionId: '', inspectionLevel: '' })
-    setSkuRows([emptySku()])
+    const safeName = itFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const path = `${itForm.codigo.replace(/\s+/g, '_')}/${Date.now()}-${safeName}`
+    const upload = await supabase.storage.from('it-documentos').upload(path, itFile, { contentType: itFile.type || undefined })
+    if (upload.error) return setError(upload.error.message)
+
+    const it = await supabase.from('instrucoes_trabalho').upsert({
+      codigo: itForm.codigo.trim(),
+      titulo: itForm.titulo.trim(),
+      ativo: true,
+    }, { onConflict: 'codigo' }).select('id').single()
+    if (it.error || !it.data) return setError(it.error?.message ?? 'Falha ao cadastrar IT.')
+
+    const version = await supabase.from('it_versoes').insert({
+      instrucao_trabalho_id: it.data.id,
+      versao: itForm.versao.trim(),
+      vigencia: itForm.vigencia || null,
+      status: 'rascunho',
+      arquivo_nome: itFile.name,
+      arquivo_storage_path: path,
+      arquivo_mime: itFile.type || null,
+      leitura_ia_status: 'aguardando',
+    })
+    if (version.error) return setError(version.error.message)
+
+    setItForm({ codigo: '', titulo: '', versao: '', vigencia: '' })
+    setItFile(null)
+    setMessage('IT enviada. Aguardando leitura e revisão.')
     await loadApp()
   }
 
@@ -260,8 +381,7 @@ export default function App() {
     setMessage('')
     const group = groups.find((g) => g.id === sampleForm.groupId)
     if (!group || !sampleForm.quantidade || !sampleForm.endereco) {
-      setError('Selecione o grupo e informe quantidade e endereço.')
-      return
+      return setError('Selecione a inspeção e informe quantidade e endereço.')
     }
 
     const code = `AMO-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`
@@ -312,7 +432,7 @@ export default function App() {
 ^FO35,196^A0N,22,22^FDQtd: ${sample.saldo} ${sample.unidade_controle}^FS
 ^FO35,240^A0N,30,30^FDENDERECO: ${sample.endereco || '-'}^FS
 ^FO575,88^BQN,2,6^FDLA,${url}^FS
-^FO35,340^A0N,18,18^FDQR abre a ficha rastreavel da amostra^FS
+^FO35,340^A0N,18,18^FDQR abre a ficha da amostra^FS
 ^XZ`
     const blob = new Blob([zpl], { type: 'text/plain;charset=utf-8' })
     const href = URL.createObjectURL(blob)
@@ -329,15 +449,14 @@ export default function App() {
     return (
       <main className="login-shell">
         <form className="login-card" onSubmit={firstAccess ? createFirstAccess : signIn}>
-          <div className="brand-mark"><ShieldCheck size={28} /><span>SGQ</span></div>
+          <div className="brand-mark"><ShieldCheck size={28}/><span>SGQ</span></div>
           <h1>{firstAccess ? 'Criar primeiro acesso' : 'Qualidade Full Brands'}</h1>
-          <p>{firstAccess ? 'Administrador inicial autorizado: Vanessa Casarin.' : 'Acesso restrito ao time de Qualidade.'}</p>
-          <label>E-mail<input type="email" value={login.email} onChange={(e) => setLogin({ ...login, email: e.target.value })} placeholder={firstAccess ? 'vanessa.casarin@fullbrands.com.br' : 'E-mail'} required /></label>
-          <label>Senha<input type="password" minLength={8} value={login.password} onChange={(e) => setLogin({ ...login, password: e.target.value })} required /></label>
+          <label>E-mail<input type="email" value={login.email} onChange={(e)=>setLogin({...login,email:e.target.value})} required/></label>
+          <label>Senha<input type="password" minLength={8} value={login.password} onChange={(e)=>setLogin({...login,password:e.target.value})} required/></label>
           {error && <div className="alert error">{error}</div>}
           {message && <div className="alert success">{message}</div>}
-          <button className="primary" type="submit">{firstAccess ? 'Criar acesso de Administrador' : 'Entrar'}</button>
-          <button className="link-button" type="button" onClick={() => { setFirstAccess(!firstAccess); setError(''); setMessage(''); setLogin({ email: firstAccess ? '' : 'vanessa.casarin@fullbrands.com.br', password: '' }) }}>
+          <button className="primary" type="submit">{firstAccess ? 'Criar acesso' : 'Entrar'}</button>
+          <button className="link-button" type="button" onClick={()=>{setFirstAccess(!firstAccess);setError('');setMessage('');setLogin({email:firstAccess?'':'vanessa.casarin@fullbrands.com.br',password:''})}}>
             {firstAccess ? 'Voltar para login' : 'Primeiro acesso da Vanessa'}
           </button>
         </form>
@@ -350,81 +469,135 @@ export default function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand-mark"><PackageSearch size={24}/><span>APP SGQ</span></div>
+        <div className="brand-mark"><PackageSearch size={24}/><span>SGQ</span></div>
         <nav>
-          <button className={tab === 'painel' ? 'active' : ''} onClick={() => setTab('painel')}>Painel</button>
-          <button className={tab === 'processos' ? 'active' : ''} onClick={() => setTab('processos')}>Processos</button>
-          <button className={tab === 'amostras' ? 'active' : ''} onClick={() => setTab('amostras')}>Amostras</button>
+          <button className={tab==='painel'?'active':''} onClick={()=>setTab('painel')}>Painel</button>
+          <button className={tab==='nova'?'active':''} onClick={()=>setTab('nova')}>Nova inspeção</button>
+          <button className={tab==='its'?'active':''} onClick={()=>setTab('its')}>ITs</button>
+          <button className={tab==='amostras'?'active':''} onClick={()=>setTab('amostras')}>Amostras</button>
         </nav>
-        <div className="userbox"><span>{profile.nome || 'Usuário'} · {profile.perfil}</span><button title="Sair" onClick={() => supabase.auth.signOut()}><LogOut size={18}/></button></div>
+        <div className="userbox"><span>{profile.nome || 'Usuário'} · {profile.perfil}</span><button title="Sair" onClick={()=>supabase.auth.signOut()}><LogOut size={18}/></button></div>
       </header>
 
       {error && <div className="alert error">{error}</div>}
       {message && <div className="alert success">{message}</div>}
 
       {tab === 'painel' && (
-        <>
-          <section className="hero">
-            <div><span className="eyebrow">CONTROLE DA QUALIDADE</span><h1>Inspeção, amostragem e retenção em um único fluxo.</h1><p>Estrutura preparada para grupos de inspeção, ITs versionadas, NBR 5426 e rastreabilidade por QR.</p></div>
-            <PackageSearch size={54} strokeWidth={1.4}/>
-          </section>
+        <section className="workspace">
+          <div className="page-title">
+            <div><span className="eyebrow">SGQ</span><h1>Painel</h1></div>
+            <button className="primary" onClick={()=>setTab('nova')}><Plus size={18}/> Nova inspeção</button>
+          </div>
           <section className="metrics">
             <Metric icon={ClipboardCheck} label="Processos" value={counts.processos}/>
             <Metric icon={ShieldCheck} label="Inspeções" value={counts.inspecoes}/>
             <Metric icon={Boxes} label="Amostras" value={counts.amostras}/>
             <Metric icon={FileText} label="Laudos" value={counts.laudos}/>
           </section>
-          <section className="info-grid">
-            <article className="panel"><h2>Regra de conjunto</h2><p>Frasco + tampa, por exemplo, formam um grupo. O lote estatístico é a quantidade de conjuntos, enquanto os dimensionais permanecem separados por SKU.</p></article>
-            <article className="panel"><h2>IT + NBR</h2><p>A IT define o que e como inspecionar. A NBR 5426 fornece a lógica estatística. A NBR 5425 entra como apoio consultivo quando relevante.</p></article>
-          </section>
-        </>
+          <div className="list">
+            {groups.slice(0,8).map((g)=><article className="row-card" key={g.id}>
+              <div><strong>{g.processos?.codigo} · {g.nome}</strong><span>{g.processos?.cliente || 'Sem cliente'} · lote {g.tamanho_lote_estatistico.toLocaleString('pt-BR')}</span></div>
+              <span className="pill">{g.tipo === 'kit_componentes' ? 'Componentes' : '1 SKU'}</span>
+            </article>)}
+            {!groups.length && <div className="empty">Nenhuma inspeção iniciada.</div>}
+          </div>
+        </section>
       )}
 
-      {tab === 'processos' && (
+      {tab === 'nova' && (
         <section className="workspace">
-          <div className="section-head"><div><span className="eyebrow">PROCESSOS</span><h1>Novo grupo de inspeção</h1></div></div>
-          <form className="panel form-grid" onSubmit={createProcess}>
-            <label>Processo FST<input value={processForm.codigo} onChange={(e)=>setProcessForm({...processForm,codigo:e.target.value})} placeholder="FST..." disabled={!canWrite}/></label>
-            <label>Cliente<input value={processForm.cliente} onChange={(e)=>setProcessForm({...processForm,cliente:e.target.value})} disabled={!canWrite}/></label>
-            <label>Código do grupo<input value={processForm.groupCode} onChange={(e)=>setProcessForm({...processForm,groupCode:e.target.value})} disabled={!canWrite}/></label>
-            <label>Nome do grupo<input value={processForm.groupName} onChange={(e)=>setProcessForm({...processForm,groupName:e.target.value})} placeholder="Ex.: Frasco + Tampa" disabled={!canWrite}/></label>
-            <label>Tipo<select value={processForm.groupType} onChange={(e)=>setProcessForm({...processForm,groupType:e.target.value})} disabled={!canWrite}><option value="individual">SKU independente</option><option value="kit_componentes">Kit / componentes</option></select></label>
-            <label>Lote estatístico<input type="number" min="1" value={processForm.statisticalLot} onChange={(e)=>setProcessForm({...processForm,statisticalLot:e.target.value})} placeholder="Ex.: 10000" disabled={!canWrite}/></label>
-            <label className="span-2">IT principal<select value={processForm.itVersionId} onChange={(e)=>setProcessForm({...processForm,itVersionId:e.target.value})} disabled={!canWrite}><option value="">Selecionar depois</option>{itVersions.map((it)=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo} · {it.versao}{it.nivel_inspecao_padrao ? ` · Nível ${it.nivel_inspecao_padrao}` : ''}</option>)}</select></label>
+          <div className="page-title"><div><span className="eyebrow">INSPEÇÃO</span><h1>Nova inspeção</h1></div></div>
+          <form onSubmit={createInspection} className="inspection-form">
+            <section className="panel section-card">
+              <h2>Identificação</h2>
+              <div className="form-grid">
+                <label>Processo FST<input value={inspection.codigo} onChange={(e)=>setInspection({...inspection,codigo:e.target.value})} placeholder="FST..." disabled={!canWrite}/></label>
+                <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})} disabled={!canWrite}/></label>
+                <label>Nota fiscal<input value={inspection.notaFiscal} onChange={(e)=>setInspection({...inspection,notaFiscal:e.target.value})} disabled={!canWrite}/></label>
+                <label>Chegada no CD<input type="date" value={inspection.chegadaCd} onChange={(e)=>setInspection({...inspection,chegadaCd:e.target.value})} disabled={!canWrite}/></label>
+                <label>Origem<input value={inspection.origem} onChange={(e)=>setInspection({...inspection,origem:e.target.value})} disabled={!canWrite}/></label>
+                <label>Transporte<input value={inspection.transporte} onChange={(e)=>setInspection({...inspection,transporte:e.target.value})} disabled={!canWrite}/></label>
+                <label>Data da inspeção<input type="date" value={inspection.dataInspecao} onChange={(e)=>setInspection({...inspection,dataInspecao:e.target.value})} disabled={!canWrite}/></label>
+                <label>IT aplicável<select value={inspection.itVersionId} onChange={(e)=>setInspection({...inspection,itVersionId:e.target.value})} disabled={!canWrite}>
+                  <option value="">Selecione</option>
+                  {itVersions.filter((it)=>it.status==='publicada').map((it)=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo} · {it.versao}</option>)}
+                </select></label>
+                <label>Nível de inspeção<select value={inspection.inspectionLevel} onChange={(e)=>setInspection({...inspection,inspectionLevel:e.target.value})} disabled={!canWrite}>
+                  <option value="I">Nível I</option><option value="II">Nível II</option><option value="S2">Especial S2</option>
+                </select></label>
+              </div>
+            </section>
 
-            <div className="span-2 sku-block">
-              <div className="sku-head"><h3>SKUs do grupo</h3><button type="button" className="secondary" onClick={()=>setSkuRows([...skuRows,emptySku()])} disabled={!canWrite}><Plus size={16}/> SKU</button></div>
-              {skuRows.map((row,i)=>(
-                <div className="sku-row" key={i}>
-                  <input placeholder="SKU" value={row.sku} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,sku:e.target.value}:r))}/>
-                  <input placeholder="Descrição" value={row.nome} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,nome:e.target.value}:r))}/>
-                  <input placeholder="Lote" value={row.lote} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,lote:e.target.value}:r))}/>
-                  <input type="number" min="0" placeholder="Qtd componente" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/>
-                  <input type="number" min="0.01" step="0.01" placeholder="Unid./conjunto" value={row.unidadesPorConjunto} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPorConjunto:e.target.value}:r))}/>
-                  <input placeholder="Papel: frasco, tampa…" value={row.papel} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,papel:e.target.value}:r))}/>
-                </div>
-              ))}
-            </div>
-            <button className="primary span-2" type="submit" disabled={!canWrite}>{canWrite ? 'Criar processo e grupo' : 'Perfil somente consulta'}</button>
+            <section className="panel section-card">
+              <div className="sku-head"><h2>Produto / SKU</h2><button type="button" className="secondary" onClick={()=>setSkuRows([...skuRows,emptySku()])} disabled={!canWrite}><Plus size={16}/> Adicionar SKU</button></div>
+              <div className="sku-editor">
+                {skuRows.map((row,i)=>{
+                  const boxes = boxesReceived(row.quantidade,row.quantidadePorCaixa)
+                  const inspect = boxesToInspect(boxes)
+                  return <article className="sku-card" key={i}>
+                    <div className="sku-card-head"><strong>SKU {i+1}</strong>{skuRows.length>1 && <button type="button" className="icon-button" onClick={()=>setSkuRows(skuRows.filter((_,j)=>j!==i))}><X size={16}/></button>}</div>
+                    <div className="form-grid">
+                      <label>SKU<input value={row.sku} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,sku:e.target.value}:r))}/></label>
+                      <label>Produto / descrição<input value={row.nome} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,nome:e.target.value}:r))}/></label>
+                      <label>Código do cliente<input value={row.codigoCliente} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,codigoCliente:e.target.value}:r))}/></label>
+                      <label>Lote<input value={row.lote} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,lote:e.target.value}:r))}/></label>
+                      <label>Material<input value={row.material} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,material:e.target.value}:r))}/></label>
+                      <label>Capacidade<input value={row.capacidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,capacidade:e.target.value}:r))}/></label>
+                      <label>Quantidade recebida<input type="number" min="1" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/></label>
+                      <label>Quantidade por caixa<input type="number" min="1" value={row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidadePorCaixa:e.target.value}:r))}/></label>
+                      {isComponentSet && <label>Unidades por conjunto<input type="number" min="0.01" step="0.01" value={row.unidadesPorConjunto} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPorConjunto:e.target.value}:r))}/></label>}
+                    </div>
+                    <div className="computed"><span>Caixas recebidas <b>{boxes || '—'}</b></span><span>Caixas a inspecionar <b>{inspect || '—'}</b></span></div>
+                  </article>
+                })}
+              </div>
+            </section>
+
+            <section className="calc-strip">
+              <div><small>Tipo</small><strong>{isComponentSet ? 'Componentes / conjunto' : 'SKU individual'}</strong></div>
+              <div><small>Lote estatístico</small><strong>{statisticalLot ? statisticalLot.toLocaleString('pt-BR') : '—'}</strong></div>
+              <div><small>Caixas recebidas</small><strong>{totalBoxesReceived || '—'}</strong></div>
+              <div><small>Caixas a inspecionar</small><strong>{totalBoxesToInspect || '—'}</strong></div>
+            </section>
+
+            <div className="actions"><button className="primary" type="submit" disabled={!canWrite}>Iniciar inspeção</button></div>
           </form>
+        </section>
+      )}
 
+      {tab === 'its' && (
+        <section className="workspace">
+          <div className="page-title"><div><span className="eyebrow">DOCUMENTOS</span><h1>Biblioteca de ITs</h1></div></div>
+          {canManageIts && <form className="panel section-card" onSubmit={uploadIt}>
+            <h2>Nova IT</h2>
+            <div className="form-grid">
+              <label>Código<input value={itForm.codigo} onChange={(e)=>setItForm({...itForm,codigo:e.target.value})} placeholder="IT 015"/></label>
+              <label>Título<input value={itForm.titulo} onChange={(e)=>setItForm({...itForm,titulo:e.target.value})}/></label>
+              <label>Versão<input value={itForm.versao} onChange={(e)=>setItForm({...itForm,versao:e.target.value})} placeholder="01/2026"/></label>
+              <label>Vigência<input type="date" value={itForm.vigencia} onChange={(e)=>setItForm({...itForm,vigencia:e.target.value})}/></label>
+              <label className="span-2">Arquivo Word ou PDF<input type="file" accept=".doc,.docx,.pdf" onChange={(e)=>setItFile(e.target.files?.[0] ?? null)} /></label>
+            </div>
+            <div className="actions"><button className="primary" type="submit" disabled={!itFile}><Upload size={17}/> Enviar para leitura</button></div>
+          </form>}
           <div className="list">
-            {groups.map(g=><article className="row-card" key={g.id}><div><strong>{g.processos?.codigo} · {g.nome}</strong><span>{g.tipo === 'kit_componentes' ? 'Kit/componentes' : 'Independente'} · lote estatístico {g.tamanho_lote_estatistico.toLocaleString('pt-BR')}</span></div><span className="pill">{g.codigo}</span></article>)}
+            {itVersions.map((it)=><article className="row-card" key={it.id}>
+              <div><strong>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo}</strong><span>Versão {it.versao}{it.arquivo_nome ? ` · ${it.arquivo_nome}` : ''}</span></div>
+              <span className="pill">{it.leitura_ia_status.replaceAll('_',' ')}</span>
+            </article>)}
           </div>
         </section>
       )}
 
       {tab === 'amostras' && (
         <section className="workspace">
-          <div className="section-head"><div><span className="eyebrow">RETENÇÃO</span><h1>Amostras rastreáveis</h1></div></div>
+          <div className="page-title"><div><span className="eyebrow">RETENÇÃO</span><h1>Amostras</h1></div></div>
           <form className="panel form-grid" onSubmit={createSample}>
-            <label className="span-2">Grupo de inspeção<select value={sampleForm.groupId} onChange={(e)=>setSampleForm({...sampleForm,groupId:e.target.value})} disabled={!canWrite}><option value="">Selecione</option>{groups.map(g=><option key={g.id} value={g.id}>{g.processos?.codigo} · {g.nome}</option>)}</select></label>
+            <label className="span-2">Inspeção<select value={sampleForm.groupId} onChange={(e)=>setSampleForm({...sampleForm,groupId:e.target.value})} disabled={!canWrite}><option value="">Selecione</option>{groups.map(g=><option key={g.id} value={g.id}>{g.processos?.codigo} · {g.nome}</option>)}</select></label>
             <label>Descrição<input value={sampleForm.descricao} onChange={(e)=>setSampleForm({...sampleForm,descricao:e.target.value})} disabled={!canWrite}/></label>
             <label>Lote<input value={sampleForm.lote} onChange={(e)=>setSampleForm({...sampleForm,lote:e.target.value})} disabled={!canWrite}/></label>
             <label>Quantidade<input type="number" min="0.01" step="0.01" value={sampleForm.quantidade} onChange={(e)=>setSampleForm({...sampleForm,quantidade:e.target.value})} disabled={!canWrite}/></label>
             <label>Unidade<select value={sampleForm.unidade} onChange={(e)=>setSampleForm({...sampleForm,unidade:e.target.value})} disabled={!canWrite}><option value="conjunto">conjunto</option><option value="unidade">unidade</option><option value="kit">kit</option></select></label>
-            <label className="span-2">Endereço<input value={sampleForm.endereco} onChange={(e)=>setSampleForm({...sampleForm,endereco:e.target.value})} placeholder="Endereço único da amostra" disabled={!canWrite}/></label>
+            <label className="span-2">Endereço<input value={sampleForm.endereco} onChange={(e)=>setSampleForm({...sampleForm,endereco:e.target.value})} disabled={!canWrite}/></label>
             <button className="primary span-2" type="submit" disabled={!canWrite}>Reter amostra</button>
           </form>
 
@@ -432,18 +605,15 @@ export default function App() {
             {samples.map(s=><article className="sample-card" key={s.id} onClick={()=>setSelectedSample(s)}>
               <div><span className="eyebrow">{s.codigo}</span><h3>{s.descricao || 'Amostra'}</h3></div>
               <div className="sample-meta"><span>Saldo <b>{s.saldo} {s.unidade_controle}</b></span><span>Endereço <b>{s.endereco || '-'}</b></span></div>
-              <button className="secondary" onClick={(e)=>{e.stopPropagation();downloadZpl(s)}}><QrCode size={16}/> ZPL 100×50</button>
+              <button className="secondary" onClick={(e)=>{e.stopPropagation();downloadZpl(s)}}><QrCode size={16}/> Etiqueta</button>
             </article>)}
           </div>
 
           {selectedSample && <div className="modal-backdrop" onClick={()=>setSelectedSample(null)}><article className="sample-detail" onClick={(e)=>e.stopPropagation()}>
             <button className="close" onClick={()=>setSelectedSample(null)}>×</button>
-            <span className="eyebrow">FICHA DA AMOSTRA</span>
-            <h2>{selectedSample.codigo}</h2>
-            <p>{selectedSample.descricao}</p>
-            <div className="detail-grid"><div><small>Endereço</small><strong>{selectedSample.endereco || '-'}</strong></div><div><small>Saldo atual</small><strong>{selectedSample.saldo} {selectedSample.unidade_controle}</strong></div><div><small>Lote</small><strong>{selectedSample.lote || '-'}</strong></div></div>
+            <span className="eyebrow">AMOSTRA</span><h2>{selectedSample.codigo}</h2>
+            <div className="detail-grid"><div><small>Endereço</small><strong>{selectedSample.endereco || '-'}</strong></div><div><small>Saldo</small><strong>{selectedSample.saldo} {selectedSample.unidade_controle}</strong></div><div><small>Lote</small><strong>{selectedSample.lote || '-'}</strong></div></div>
             {qrDataUrl && <img className="qr" src={qrDataUrl} alt="QR da amostra"/>}
-            <code>{sampleUrl(selectedSample)}</code>
             <button className="primary" onClick={()=>downloadZpl(selectedSample)}>Gerar etiqueta Zebra 100×50</button>
           </article></div>}
         </section>
