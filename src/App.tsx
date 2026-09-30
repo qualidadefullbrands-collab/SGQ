@@ -95,6 +95,40 @@ function boxesToInspect(totalBoxes: number) {
   return Math.min(totalBoxes, Math.ceil(Math.sqrt(totalBoxes + 1)))
 }
 
+const LOT_CODES = [
+  { min:2,max:8,I:'A',II:'A',S2:'A' }, { min:9,max:15,I:'A',II:'B',S2:'A' },
+  { min:16,max:25,I:'B',II:'C',S2:'A' }, { min:26,max:50,I:'C',II:'D',S2:'B' },
+  { min:51,max:90,I:'C',II:'E',S2:'B' }, { min:91,max:150,I:'D',II:'F',S2:'B' },
+  { min:151,max:280,I:'E',II:'G',S2:'C' }, { min:281,max:500,I:'F',II:'H',S2:'C' },
+  { min:501,max:1200,I:'G',II:'J',S2:'C' }, { min:1201,max:3200,I:'H',II:'K',S2:'D' },
+  { min:3201,max:10000,I:'J',II:'L',S2:'D' }, { min:10001,max:35000,I:'K',II:'M',S2:'D' },
+  { min:35001,max:150000,I:'L',II:'N',S2:'E' }, { min:150001,max:500000,I:'M',II:'P',S2:'E' },
+  { min:500001,max:Number.MAX_SAFE_INTEGER,I:'N',II:'Q',S2:'E' },
+]
+const SAMPLE_SIZE: Record<string,number> = { A:2,B:3,C:5,D:8,E:13,F:20,G:32,H:50,J:80,K:125,L:200,M:315,N:500,P:800,Q:1250,R:2000 }
+const AC_RE_15: Record<string,{ac:number;re:number}> = {
+  F:{ac:1,re:2},G:{ac:1,re:2},H:{ac:2,re:3},J:{ac:3,re:4},K:{ac:5,re:6},
+  L:{ac:7,re:8},M:{ac:10,re:11},N:{ac:14,re:15},P:{ac:21,re:22}
+}
+function samplingPlan(lot:number, level:string) {
+  if (!lot) return { code:'', sample:0, ac:null as number|null, re:null as number|null }
+  if (lot < 281) return { code:'100%', sample:lot, ac:0, re:1 }
+  const row=LOT_CODES.find((x)=>lot>=x.min&&lot<=x.max)
+  const code=row ? String((row as any)[level] ?? row.I) : ''
+  const sample=SAMPLE_SIZE[code] ?? 0
+  if (level==='S2') return { code, sample, ac:null, re:null }
+  const rule=AC_RE_15[code]
+  return { code, sample, ac:rule?.ac ?? null, re:rule?.re ?? null }
+}
+function statusLabel(value:string|null|undefined) {
+  const map:Record<string,string> = {
+    em_andamento:'Em andamento',aberta:'Aberta',concluida:'Concluída',cancelada:'Cancelada',
+    aprovado:'Aprovado',reprovado:'Reprovado',pendente:'Pendente',
+    conforme:'Conforme',nao_conforme:'Não conforme',nao_aplicavel:'Não aplicável'
+  }
+  return value ? (map[value] ?? value.replaceAll('_',' ')) : '—'
+}
+
 export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
