@@ -70,3 +70,6 @@ input:focus, select:focus { border-color: #4ab0d9; box-shadow: 0 0 0 3px #4ab0d9
 .sample-detail code { display:block; padding:10px; border-radius:10px; background:#071016; color:#9ccbdd; overflow-wrap:anywhere; margin-bottom:16px; font-size:11px; }
 @media(max-width:950px){ .topbar{grid-template-columns:1fr auto}.topbar nav{order:3;grid-column:1/-1;margin-bottom:12px}.userbox span{display:none}.metrics{grid-template-columns:1fr 1fr}.sample-grid{grid-template-columns:1fr 1fr}.sku-row{grid-template-columns:1fr 1fr 1fr}.hero>svg{display:none} }
 @media(max-width:650px){ .app-shell{width:min(100% - 18px,1280px)}.form-grid,.info-grid{grid-template-columns:1fr}.span-2{grid-column:auto}.metrics,.sample-grid{grid-template-columns:1fr}.sku-row{grid-template-columns:1fr 1fr}.hero{padding:25px;min-height:220px}.detail-grid{grid-template-columns:1fr}.topbar{gap:10px}.topbar nav button{padding:8px 9px;font-size:12px} }
+
+.link-button { margin-top: 12px; width: 100%; border: 0; background: transparent; color: #7ecfee; padding: 9px; font-weight: 800; }
+.link-button:hover { text-decoration: underline; }
