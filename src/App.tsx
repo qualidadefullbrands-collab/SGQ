@@ -583,6 +583,228 @@ export default function App() {
     await openInspection(createdInspection.data.id)
   }
 
+  async function recordUnit(conforme: boolean) {
+    if (!detail || !selectedInspectionId) return
+    if (!conforme) {
+      setNcDraft({ open: true, severity: 'grave', description: '', itemId: '' })
+      return
+    }
+    await persistUnit(true)
+  }
+
+  async function persistUnit(conforme: boolean, nc?: { severity: string; description: string; itemId: string }) {
+    if (!detail || !selectedInspectionId || !userId) return
+    const seq = (detail.registers?.length ?? 0) + 1
+    const reg = await supabase.from('inspecao_registros').insert({
+      inspecao_id: selectedInspectionId,
+      sequencia: seq,
+      conforme,
+    }).select('id').single()
+    if (reg.error || !reg.data) return setError(reg.error?.message ?? 'Falha ao registrar unidade.')
+
+    if (!conforme && nc) {
+      const created = await supabase.from('inspecao_nao_conformidades').insert({
+        inspecao_id: selectedInspectionId,
+        inspecao_registro_id: reg.data.id,
+        processo_item_id: nc.itemId || null,
+        descricao: nc.description.trim() || 'Não conformidade identificada',
+        severidade: nc.severity,
+        tipo: 'amostragem',
+      })
+      if (created.error) return setError(created.error.message)
+    }
+
+    const total = seq
+    const ncCount = (detail.registers ?? []).filter((x:any) => x.conforme === false).length + (conforme ? 0 : 1)
+    const okCount = total - ncCount
+    await supabase.from('inspecoes').update({
+      total_inspecionado: total,
+      total_conforme: okCount,
+      total_nao_conforme: ncCount,
+    }).eq('id', selectedInspectionId)
+
+    setNcDraft({ open: false, severity: 'grave', description: '', itemId: '' })
+    await openInspection(selectedInspectionId)
+    if (detail.limite_rejeicao && ncCount >= detail.limite_rejeicao) {
+      setMessage('Limite de rejeição atingido. Você pode encerrar agora ou continuar até completar a amostra.')
+    }
+  }
+
+  async function saveChecklist(checkId: string, result: string, severity?: string) {
+    if (!selectedInspectionId || !userId) return
+    const existing = detail?.checklistResults?.find((x:any) => x.checklist_id === checkId)
+    const payload = {
+      inspecao_id: selectedInspectionId,
+      checklist_id: checkId,
+      resultado: result,
+      severidade_confirmada: result === 'nao_conforme' ? (severity || existing?.severidade_confirmada || 'grave') : null,
+      registrado_por: userId,
+      registrado_em: new Date().toISOString(),
+    }
+    const q = await supabase.from('inspecao_checklist_resultados').upsert(payload, { onConflict: 'inspecao_id,checklist_id' })
+    if (q.error) return setError(q.error.message)
+    await openInspection(selectedInspectionId)
+  }
+
+  async function saveChecklistSeverity(checkId: string, severity: string) {
+    if (!selectedInspectionId) return
+    const q = await supabase.from('inspecao_checklist_resultados')
+      .update({ severidade_confirmada: severity })
+      .eq('inspecao_id', selectedInspectionId)
+      .eq('checklist_id', checkId)
+    if (q.error) return setError(q.error.message)
+    await openInspection(selectedInspectionId)
+  }
+
+  async function saveDimension(itemId: string, param: any, seq: number, value: string) {
+    if (!selectedInspectionId || !value.trim()) return
+    const q = await supabase.from('inspecao_dimensionais').upsert({
+      inspecao_id: selectedInspectionId,
+      processo_item_id: itemId,
+      parametro_id: param.id,
+      sequencia_amostra: seq,
+      valor: Number(value.replace(',', '.')),
+      unidade: param.unidade || null,
+    }, { onConflict: 'inspecao_id,processo_item_id,parametro_id,sequencia_amostra' })
+    if (q.error) setError(q.error.message)
+  }
+
+  async function markDimensionalsDone() {
+    if (!selectedInspectionId) return
+    const q = await supabase.from('inspecoes').update({ dimensionais_finalizados: true }).eq('id', selectedInspectionId)
+    if (q.error) return setError(q.error.message)
+    await openInspection(selectedInspectionId)
+  }
+
+  async function saveTest(testId: string, result: string) {
+    if (!selectedInspectionId || !userId) return
+    const q = await supabase.from('inspecao_testes_resultados').upsert({
+      inspecao_id: selectedInspectionId,
+      teste_id: testId,
+      resultado: result,
+      registrado_por: userId,
+      registrado_em: new Date().toISOString(),
+    }, { onConflict: 'inspecao_id,teste_id' })
+    if (q.error) return setError(q.error.message)
+    await openInspection(selectedInspectionId)
+  }
+
+  async function markTestsDone() {
+    if (!selectedInspectionId) return
+    const q = await supabase.from('inspecoes').update({ testes_finalizados: true }).eq('id', selectedInspectionId)
+    if (q.error) return setError(q.error.message)
+    await openInspection(selectedInspectionId)
+  }
+
+  async function uploadInspectionPhotos(files: FileList | null) {
+    if (!files || !selectedInspectionId) return
+    for (const file of Array.from(files)) {
+      const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const path = `${selectedInspectionId}/${Date.now()}-${safe}`
+      const up = await supabase.storage.from('inspecao-fotos').upload(path, file, { contentType: file.type || undefined })
+      if (up.error) return setError(up.error.message)
+      const row = await supabase.from('inspecao_fotos').insert({
+        inspecao_id: selectedInspectionId,
+        storage_path: path,
+        legenda: file.name,
+      })
+      if (row.error) return setError(row.error.message)
+    }
+    await openInspection(selectedInspectionId)
+  }
+
+  async function finishInspection(result: 'aprovado' | 'reprovado') {
+    if (!detail || !selectedInspectionId) return
+
+    const checklistDone = (detail.checklist?.length ?? 0) === 0 ||
+      (detail.checklistResults?.length ?? 0) >= detail.checklist.length
+    const samplingDone = (detail.total_inspecionado ?? 0) >= (detail.tamanho_amostra ?? 0) ||
+      (!!detail.limite_rejeicao && detail.total_nao_conforme >= detail.limite_rejeicao)
+    const dimsDone = (detail.params?.length ?? 0) === 0 || detail.dimensionais_finalizados
+    const testsDone = (detail.tests?.length ?? 0) === 0 || detail.testes_finalizados
+
+    if (!checklistDone) return setError('Finalize todas as verificações C / NC / NA.')
+    if (!samplingDone) return setError('A amostragem ainda não foi concluída.')
+    if (!dimsDone) return setError('Finalize as análises dimensionais.')
+    if (!testsDone) return setError('Finalize os testes especiais.')
+
+    const thresholdExceeded = !!detail.limite_rejeicao && detail.total_nao_conforme >= detail.limite_rejeicao
+    if (thresholdExceeded && result === 'aprovado' && !finalObservation.trim()) {
+      return setError('O limite de rejeição foi atingido. Para aprovar, registre a justificativa.')
+    }
+
+    const q = await supabase.from('inspecoes').update({
+      status: 'concluida',
+      resultado: result,
+      observacoes: finalObservation.trim() || null,
+      justificativa_decisao: thresholdExceeded ? (finalObservation.trim() || null) : null,
+      concluida_em: new Date().toISOString(),
+    }).eq('id', selectedInspectionId)
+    if (q.error) return setError(q.error.message)
+
+    await supabase.from('grupos_inspecao').update({ status: 'concluido' }).eq('id', detail.grupo_inspecao_id)
+    setMessage('Inspeção finalizada. Agora defina a retenção das amostras.')
+    await loadApp()
+    await openInspection(selectedInspectionId)
+  }
+
+  async function saveRetention() {
+    if (!detail || !selectedInspectionId || !userId) return
+    const selected = (detail.items ?? []).filter((link:any) => retentionRows[link.processo_itens.id]?.retain)
+
+    if (!selected.length) {
+      if (!retentionReason.trim()) return setError('Informe o motivo para não reter amostra.')
+      await supabase.from('inspecoes').update({
+        retencao_decisao: false,
+        retencao_motivo: retentionReason.trim(),
+      }).eq('id', selectedInspectionId)
+      setMessage('Inspeção encerrada sem retenção, com justificativa registrada.')
+      await openInspection(selectedInspectionId)
+      return
+    }
+
+    for (const link of selected as any[]) {
+      const item = link.processo_itens
+      const draft = retentionRows[item.id]
+      if (!draft?.qty || !draft.address.trim()) {
+        return setError(`Informe quantidade e endereço para ${item.produtos?.nome ?? 'o produto'}.`)
+      }
+      const exists = (detail.retained ?? []).find((x:any) => x.produto_id === item.produto_id)
+      if (exists) continue
+
+      const code = `AMO-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`
+      const created = await supabase.from('amostras').insert({
+        codigo: code,
+        inspecao_id: selectedInspectionId,
+        produto_id: item.produto_id,
+        processo_id: detail.grupos_inspecao.processo_id,
+        grupo_inspecao_id: detail.grupo_inspecao_id,
+        lote: item.lote,
+        quantidade_inicial: Number(draft.qty),
+        status: 'ativa',
+        endereco: draft.address.trim(),
+        unidade_controle: 'unidade',
+        descricao: item.produtos?.nome ?? null,
+      }).select('id').single()
+      if (created.error || !created.data) return setError(created.error?.message ?? 'Falha ao reter amostra.')
+
+      const mov = await supabase.from('amostra_movimentacoes').insert({
+        amostra_id: created.data.id,
+        tipo: 'entrada',
+        quantidade: Number(draft.qty),
+        endereco_destino: draft.address.trim(),
+        motivo: 'Retenção após finalização da inspeção',
+        usuario_id: userId,
+      })
+      if (mov.error) return setError(mov.error.message)
+    }
+
+    await supabase.from('inspecoes').update({ retencao_decisao: true, retencao_motivo: null }).eq('id', selectedInspectionId)
+    setMessage('Amostras enviadas ao estoque.')
+    await loadApp()
+    await openInspection(selectedInspectionId)
+  }
+
   async function uploadIt(e: React.FormEvent) {
     e.preventDefault()
     if (!canManageIts || !itFile) return
