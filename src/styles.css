@@ -1,20 +1,72 @@
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #e2e8f0;
-  background: #020617;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  color: #ecf3ff; background: #071018; font-synthesis: none; text-rendering: optimizeLegibility;
 }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at top, #172554 0, #020617 52%); }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 20% 0%, #123047 0, #071018 42%, #050b10 100%); }
 button, input, select, textarea { font: inherit; }
-.app-shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 64px; }
-.hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 32px; border: 1px solid rgba(148,163,184,.18); border-radius: 24px; background: rgba(15,23,42,.78); box-shadow: 0 24px 70px rgba(0,0,0,.24); backdrop-filter: blur(14px); }
-.eyebrow { font-size: 12px; font-weight: 800; letter-spacing: .18em; color: #60a5fa; }
-h1 { margin: 8px 0 8px; font-size: clamp(32px, 5vw, 58px); line-height: 1; }
-.hero p, .card p { color: #94a3b8; }
-.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 20px; }
-.card { min-height: 190px; padding: 24px; border: 1px solid rgba(148,163,184,.15); border-radius: 20px; background: rgba(15,23,42,.7); }
-.card h2 { margin: 22px 0 8px; font-size: 18px; }
-@media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 580px) { .app-shell { width: min(100% - 20px, 1180px); padding-top: 20px; } .hero { align-items: flex-start; padding: 24px; } .hero > svg { display: none; } .grid { grid-template-columns: 1fr; } }
+button { cursor: pointer; }
+.center-screen, .login-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.login-card { width: min(430px, 100%); padding: 34px; border: 1px solid #243646; border-radius: 24px; background: rgba(10,21,30,.94); box-shadow: 0 30px 90px #0008; }
+.login-card h1 { margin: 28px 0 8px; font-size: 32px; }
+.login-card p { color: #91a4b6; margin: 0 0 26px; }
+label { display: grid; gap: 8px; color: #aebdcc; font-size: 13px; font-weight: 700; }
+input, select { width: 100%; border: 1px solid #2a4052; border-radius: 12px; background: #0a1720; color: #eef6ff; padding: 12px 13px; outline: none; }
+input:focus, select:focus { border-color: #4ab0d9; box-shadow: 0 0 0 3px #4ab0d922; }
+.login-card label + label { margin-top: 16px; }
+.brand-mark { display: inline-flex; align-items: center; gap: 10px; font-weight: 900; letter-spacing: .08em; }
+.app-shell { width: min(1280px, calc(100% - 32px)); margin: 0 auto; padding-bottom: 64px; }
+.topbar { min-height: 72px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 24px; border-bottom: 1px solid #21313e; }
+.topbar nav { display: flex; gap: 4px; padding: 5px; background: #0b1720; border: 1px solid #21313e; border-radius: 12px; }
+.topbar nav button, .userbox button { border: 0; background: transparent; color: #91a4b6; padding: 9px 13px; border-radius: 9px; }
+.topbar nav button.active { background: #163247; color: white; }
+.userbox { justify-self: end; display: flex; align-items: center; gap: 8px; color: #91a4b6; font-size: 13px; }
+.hero { margin-top: 28px; display: flex; justify-content: space-between; align-items: center; gap: 24px; min-height: 260px; padding: 38px; border-radius: 26px; border: 1px solid #294052; background: linear-gradient(135deg, #10283a 0%, #0a1822 60%); box-shadow: 0 24px 70px #0005; }
+.hero h1, .workspace h1 { margin: 8px 0 10px; max-width: 850px; font-size: clamp(32px, 4vw, 56px); line-height: 1.02; }
+.hero p { max-width: 760px; color: #9aafc0; line-height: 1.6; }
+.eyebrow { color: #5bc0e6; font-size: 11px; font-weight: 900; letter-spacing: .16em; }
+.metrics { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-top: 18px; }
+.metric { display: flex; align-items: center; gap: 15px; padding: 20px; border: 1px solid #233746; border-radius: 18px; background: #0b171fdd; }
+.metric strong { display:block; font-size: 28px; }
+.metric span { color:#8da2b3; font-size:12px; }
+.info-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
+.panel { border:1px solid #233746; border-radius:20px; background:#0b171fee; padding:24px; }
+.panel h2 { margin-top:0; }
+.panel p { color:#96aabb; line-height:1.6; }
+.workspace { padding-top:32px; }
+.section-head { display:flex; justify-content:space-between; align-items:end; margin-bottom:18px; }
+.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.span-2 { grid-column:1 / -1; }
+.sku-block { border-top:1px solid #223746; padding-top:18px; }
+.sku-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.sku-row { display:grid; grid-template-columns: .75fr 1.4fr .8fr .8fr .8fr 1fr; gap:8px; margin-top:8px; }
+.primary, .secondary { border:0; border-radius:12px; padding:12px 16px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+.primary { background:#56bee5; color:#041019; }
+.secondary { background:#142b3a; color:#d9edf7; border:1px solid #2a4659; }
+.primary:disabled, .secondary:disabled { opacity:.45; cursor:not-allowed; }
+.list { margin-top:16px; display:grid; gap:10px; }
+.row-card { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:18px 20px; border:1px solid #213543; border-radius:16px; background:#0a151ddd; }
+.row-card strong, .row-card span { display:block; }
+.row-card span { color:#8fa5b6; font-size:13px; margin-top:5px; }
+.pill { padding:7px 10px; border-radius:999px; background:#153348; color:#8fdbf5!important; }
+.alert { margin-top:16px; padding:12px 14px; border-radius:12px; font-size:13px; }
+.alert.error { background:#3a1518; border:1px solid #6d2b32; color:#ffd4d8; }
+.alert.success { background:#103125; border:1px solid #255943; color:#c8ffe7; }
+.sample-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:16px; }
+.sample-card { display:grid; gap:18px; padding:20px; border:1px solid #213543; border-radius:18px; background:#0a151ddd; cursor:pointer; }
+.sample-card h3 { margin:6px 0 0; }
+.sample-meta { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.sample-meta span { color:#8ea4b5; font-size:12px; }
+.sample-meta b { display:block; color:#f1f7fb; margin-top:3px; }
+.modal-backdrop { position:fixed; inset:0; display:grid; place-items:center; padding:20px; background:#000b; z-index:20; }
+.sample-detail { position:relative; width:min(520px,100%); padding:30px; border-radius:24px; border:1px solid #2a4456; background:#0b1821; box-shadow:0 30px 100px #000b; }
+.sample-detail h2 { font-size:32px; margin:8px 0; }
+.sample-detail p { color:#93a8b9; }
+.close { position:absolute; right:18px; top:14px; border:0; background:transparent; color:white; font-size:28px; }
+.detail-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin:20px 0; }
+.detail-grid div { padding:12px; background:#09131a; border-radius:12px; }
+.detail-grid small { display:block; color:#7f95a6; margin-bottom:5px; }
+.qr { width:180px; background:white; padding:8px; border-radius:14px; display:block; margin:20px auto; }
+.sample-detail code { display:block; padding:10px; border-radius:10px; background:#071016; color:#9ccbdd; overflow-wrap:anywhere; margin-bottom:16px; font-size:11px; }
+@media(max-width:950px){ .topbar{grid-template-columns:1fr auto}.topbar nav{order:3;grid-column:1/-1;margin-bottom:12px}.userbox span{display:none}.metrics{grid-template-columns:1fr 1fr}.sample-grid{grid-template-columns:1fr 1fr}.sku-row{grid-template-columns:1fr 1fr 1fr}.hero>svg{display:none} }
+@media(max-width:650px){ .app-shell{width:min(100% - 18px,1280px)}.form-grid,.info-grid{grid-template-columns:1fr}.span-2{grid-column:auto}.metrics,.sample-grid{grid-template-columns:1fr}.sku-row{grid-template-columns:1fr 1fr}.hero{padding:25px;min-height:220px}.detail-grid{grid-template-columns:1fr}.topbar{gap:10px}.topbar nav button{padding:8px 9px;font-size:12px} }
