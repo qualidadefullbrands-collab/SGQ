@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Boxes, ClipboardCheck, FileText, LogOut, PackageSearch, Plus, QrCode, ShieldCheck, Upload, X } from 'lucide-react'
+import { Boxes, Camera, CheckCircle2, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Trash2, Upload, Warehouse, X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { supabase } from './lib/supabase'
 
@@ -22,6 +22,43 @@ type Group = {
   tamanho_lote_estatistico: number
   processo_id: string
   processos?: { codigo: string; cliente: string | null } | null
+}
+type ProcessRow = {
+  id: string
+  codigo: string
+  cliente: string | null
+  nota_fiscal: string | null
+  origem: string | null
+  transporte: string | null
+  chegada_cd: string | null
+  data_processo: string
+  status: string
+  criado_em: string
+}
+type InspectionRow = {
+  id: string
+  numero: string
+  status: string
+  resultado: string | null
+  tamanho_lote: number | null
+  tamanho_amostra: number | null
+  total_inspecionado: number
+  total_nao_conforme: number
+  nivel_inspecao: string | null
+  codigo_amostragem: string | null
+  criado_em: string
+  grupos_inspecao?: {
+    id: string
+    nome: string
+    tipo: string
+    processo_id: string
+    processos?: ProcessRow | null
+  } | null
+  it_versoes?: {
+    id: string
+    versao: string
+    instrucoes_trabalho?: { codigo: string; titulo: string } | null
+  } | null
 }
 type Sample = {
   id: string
@@ -55,19 +92,29 @@ function boxesReceived(quantity: string, perBox: string) {
 
 function boxesToInspect(totalBoxes: number) {
   if (totalBoxes <= 0) return 0
-  return Math.min(totalBoxes, Math.floor(Math.sqrt(totalBoxes)) + 1)
+  return Math.min(totalBoxes, Math.ceil(Math.sqrt(totalBoxes + 1)))
 }
 
 export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [tab, setTab] = useState<'painel' | 'nova' | 'its' | 'amostras'>('painel')
+  const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque'>('painel')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [login, setLogin] = useState({ email: '', password: '' })
   const [firstAccess, setFirstAccess] = useState(false)
   const [counts, setCounts] = useState({ processos: 0, inspecoes: 0, amostras: 0, laudos: 0 })
+  const [processes, setProcesses] = useState<ProcessRow[]>([])
+  const [inspections, setInspections] = useState<InspectionRow[]>([])
+  const [editingProcess, setEditingProcess] = useState<ProcessRow | null>(null)
+  const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null)
+  const [detail, setDetail] = useState<any>(null)
+  const [ncDraft, setNcDraft] = useState({ open: false, severity: 'grave', description: '', itemId: '' })
+  const [finalObservation, setFinalObservation] = useState('')
+  const [retentionRows, setRetentionRows] = useState<Record<string,{retain:boolean;qty:string;address:string}>>({})
+  const [retentionReason, setRetentionReason] = useState('')
+  const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
   const [itVersions, setItVersions] = useState<ItVersion[]>([])
   const [groups, setGroups] = useState<Group[]>([])
   const [samples, setSamples] = useState<Sample[]>([])
@@ -153,7 +200,7 @@ export default function App() {
     const found = samples.find((s) => s.qr_token === token)
     if (found) {
       setSelectedSample(found)
-      setTab('amostras')
+      setTab('estoque')
     }
   }, [samples])
 
@@ -167,28 +214,31 @@ export default function App() {
 
   async function loadApp() {
     setError('')
-    const [{ data: p }, { count: processos }, { count: inspecoes }, { count: amostras }, { count: laudos }, its, gs, ss] =
-      await Promise.all([
-        supabase.from('profiles').select('nome,perfil').eq('id', userId).single(),
-        supabase.from('processos').select('*', { count: 'exact', head: true }),
-        supabase.from('inspecoes').select('*', { count: 'exact', head: true }),
-        supabase.from('amostras').select('*', { count: 'exact', head: true }),
-        supabase.from('laudos').select('*', { count: 'exact', head: true }),
-        supabase.from('it_versoes').select('id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)').order('criado_em', { ascending: false }),
-        supabase.from('grupos_inspecao').select('id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)').order('criado_em', { ascending: false }),
-        supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id').order('codigo', { ascending: false }),
-      ])
-
-    if (!p) {
+    const [p, proc, ins, its, gs, ss, laudos] = await Promise.all([
+      supabase.from('profiles').select('nome,perfil').eq('id', userId).single(),
+      supabase.from('processos').select('id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em').is('excluido_em', null).order('criado_em', { ascending: false }),
+      supabase.from('inspecoes').select('id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))').order('criado_em', { ascending: false }),
+      supabase.from('it_versoes').select('id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)').order('criado_em', { ascending: false }),
+      supabase.from('grupos_inspecao').select('id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)').order('criado_em', { ascending: false }),
+      supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id').order('codigo', { ascending: false }),
+      supabase.from('laudos').select('*', { count: 'exact', head: true }),
+    ])
+    if (!p.data) {
       setError('Seu usuário ainda não possui perfil liberado no SGQ.')
       return
     }
-
-    setProfile(p as Profile)
-    setCounts({ processos: processos ?? 0, inspecoes: inspecoes ?? 0, amostras: amostras ?? 0, laudos: laudos ?? 0 })
+    setProfile(p.data as Profile)
+    setProcesses((proc.data ?? []) as ProcessRow[])
+    setInspections((ins.data ?? []) as unknown as InspectionRow[])
     setItVersions((its.data ?? []) as unknown as ItVersion[])
     setGroups((gs.data ?? []) as unknown as Group[])
     setSamples((ss.data ?? []).map((s: any) => ({ ...s, saldo: Number(s.saldo ?? 0) })))
+    setCounts({
+      processos: (proc.data ?? []).length,
+      inspecoes: (ins.data ?? []).length,
+      amostras: (ss.data ?? []).length,
+      laudos: laudos.count ?? 0,
+    })
   }
 
   async function signIn(e: React.FormEvent) {
