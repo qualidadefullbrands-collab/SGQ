@@ -1008,157 +1008,505 @@ export default function App() {
 
   if (!profile) return <div className="center-screen">{error || 'Carregando perfil…'}</div>
 
+  const checklistDone = detail ? (detail.checklist?.length ?? 0) === 0 || (detail.checklistResults?.length ?? 0) >= detail.checklist.length : false
+  const dimsDone = detail ? (detail.params?.length ?? 0) === 0 || detail.dimensionais_finalizados : false
+  const testsDone = detail ? (detail.tests?.length ?? 0) === 0 || detail.testes_finalizados : false
+  const samplingDone = detail ? (detail.total_inspecionado ?? 0) >= (detail.tamanho_amostra ?? 0) || (!!detail.limite_rejeicao && detail.total_nao_conforme >= detail.limite_rejeicao) : false
+
   return (
     <main className="app-shell">
       <header className="topbar">
         <div className="brand-mark"><PackageSearch size={24}/><span>SGQ</span></div>
         <nav>
           <button className={tab==='painel'?'active':''} onClick={()=>setTab('painel')}>Painel</button>
+          <button className={tab==='inspecoes'?'active':''} onClick={()=>setTab('inspecoes')}>Inspeções</button>
           <button className={tab==='nova'?'active':''} onClick={()=>setTab('nova')}>Nova inspeção</button>
           <button className={tab==='its'?'active':''} onClick={()=>setTab('its')}>ITs</button>
-          <button className={tab==='amostras'?'active':''} onClick={()=>setTab('amostras')}>Amostras</button>
+          <button className={tab==='estoque'?'active':''} onClick={()=>setTab('estoque')}>Estoque</button>
         </nav>
-        <div className="userbox"><span>{profile.nome || 'Usuário'} · {profile.perfil}</span><button title="Sair" onClick={()=>supabase.auth.signOut()}><LogOut size={18}/></button></div>
+        <div className="userbox">
+          <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
+          <button title="Sair" onClick={()=>supabase.auth.signOut()}><LogOut size={18}/></button>
+        </div>
       </header>
 
       {error && <div className="alert error">{error}</div>}
       {message && <div className="alert success">{message}</div>}
 
-      {tab === 'painel' && (
+      {tab==='painel' && (
         <section className="workspace">
           <div className="page-title">
             <div><span className="eyebrow">SGQ</span><h1>Painel</h1></div>
-            <button className="primary" onClick={()=>setTab('nova')}><Plus size={18}/> Nova inspeção</button>
+            <button className="primary" onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
           </div>
           <section className="metrics">
-            <Metric icon={ClipboardCheck} label="Processos" value={counts.processos}/>
-            <Metric icon={ShieldCheck} label="Inspeções" value={counts.inspecoes}/>
-            <Metric icon={Boxes} label="Amostras" value={counts.amostras}/>
-            <Metric icon={FileText} label="Laudos" value={counts.laudos}/>
+            <Metric icon={ClipboardCheck} label="Processos" value={processes.length}/>
+            <Metric icon={ShieldCheck} label="Inspeções" value={inspections.length}/>
+            <Metric icon={Boxes} label="Estoque" value={samples.length}/>
+            <Metric icon={FileText} label="Concluídas" value={inspections.filter((i)=>i.status==='concluida').length}/>
           </section>
-          <div className="list">
-            {groups.slice(0,8).map((g)=><article className="row-card" key={g.id}>
-              <div><strong>{g.processos?.codigo} · {g.nome}</strong><span>{g.processos?.cliente || 'Sem cliente'} · lote {g.tamanho_lote_estatistico.toLocaleString('pt-BR')}</span></div>
-              <span className="pill">{g.tipo === 'kit_componentes' ? 'Componentes' : '1 SKU'}</span>
-            </article>)}
-            {!groups.length && <div className="empty">Nenhuma inspeção iniciada.</div>}
+
+          <section className="panel queue">
+            <div className="section-title">
+              <h2>Inspeções em andamento</h2>
+              <button className="secondary" onClick={()=>setTab('inspecoes')}>Ver todas</button>
+            </div>
+            {inspections.filter((i)=>i.status==='em_andamento').slice(0,8).map((i)=>(
+              <div className="queue-row" key={i.id}>
+                <div>
+                  <strong>{i.numero} · {i.grupos_inspecao?.processos?.codigo}</strong>
+                  <span>{i.grupos_inspecao?.nome} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0} unidades</span>
+                </div>
+                <button className="primary small" onClick={()=>openInspection(i.id)}><Play size={15}/> Continuar</button>
+              </div>
+            ))}
+            {!inspections.some((i)=>i.status==='em_andamento') && <div className="empty">Nenhuma inspeção em andamento.</div>}
+          </section>
+        </section>
+      )}
+
+      {tab==='inspecoes' && (
+        <section className="workspace">
+          <div className="page-title">
+            <div><span className="eyebrow">PROCESSOS</span><h1>Inspeções</h1></div>
+            <button className="primary" onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={17}/> Nova inspeção</button>
+          </div>
+
+          <div className="process-list">
+            {processes.map((p)=>{
+              const related=inspections.filter((i)=>i.grupos_inspecao?.processo_id===p.id)
+              return (
+                <article className="process-card" key={p.id}>
+                  <div className="process-head">
+                    <div>
+                      <span className="eyebrow">{p.codigo}</span>
+                      <h2>{p.cliente || 'Sem cliente'}</h2>
+                      <p>NF {p.nota_fiscal || '—'} · chegada {p.chegada_cd || '—'} · {p.origem || 'origem não informada'}</p>
+                    </div>
+                    <div className="row-actions">
+                      <button className="secondary" onClick={()=>reuseProcess(p)}><Copy size={15}/> Nova inspeção neste processo</button>
+                      <button className="secondary icon-only" title="Editar processo" onClick={()=>setEditingProcess({...p})}><Edit3 size={16}/></button>
+                      {canDelete && <button className="danger icon-only" title="Excluir processo" onClick={()=>deleteProcess(p)}><Trash2 size={16}/></button>}
+                    </div>
+                  </div>
+                  <div className="inspection-sublist">
+                    {related.map((i)=>(
+                      <div className="inspection-row" key={i.id}>
+                        <div>
+                          <strong>{i.numero}</strong>
+                          <span>{i.grupos_inspecao?.nome} · {statusLabel(i.status)} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0}</span>
+                        </div>
+                        <div className="row-actions">
+                          {i.resultado && i.resultado!=='pendente' && <span className={'result-badge '+i.resultado}>{statusLabel(i.resultado)}</span>}
+                          <button className="primary small" onClick={()=>openInspection(i.id)}>{i.status==='concluida'?'Abrir':'Continuar'}</button>
+                        </div>
+                      </div>
+                    ))}
+                    {!related.length && <span className="muted">Nenhuma inspeção neste processo.</span>}
+                  </div>
+                </article>
+              )
+            })}
+            {!processes.length && <div className="empty">Nenhum processo cadastrado.</div>}
           </div>
         </section>
       )}
 
-      {tab === 'nova' && (
+      {tab==='nova' && (
         <section className="workspace">
-          <div className="page-title"><div><span className="eyebrow">INSPEÇÃO</span><h1>Nova inspeção</h1></div></div>
+          <div className="page-title">
+            <div><span className="eyebrow">INSPEÇÃO</span><h1>Nova inspeção</h1></div>
+            <div className="row-actions">
+              {processes[0] && <button className="secondary" onClick={()=>reuseProcess(processes[0])}><Copy size={16}/> Reutilizar últimos dados gerais</button>}
+              {inspection.processoId && <button className="secondary" onClick={resetNewInspection}>Novo processo</button>}
+            </div>
+          </div>
+
           <form onSubmit={createInspection} className="inspection-form">
             <section className="panel section-card">
-              <h2>Identificação</h2>
+              <div className="section-title">
+                <h2>Dados gerais</h2>
+                {inspection.processoId && <span className="pill">Processo existente</span>}
+              </div>
               <div className="form-grid">
-                <label>Processo FST<input value={inspection.codigo} onChange={(e)=>setInspection({...inspection,codigo:e.target.value})} placeholder="FST..." disabled={!canWrite}/></label>
-                <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})} disabled={!canWrite}/></label>
-                <label>Nota fiscal<input value={inspection.notaFiscal} onChange={(e)=>setInspection({...inspection,notaFiscal:e.target.value})} disabled={!canWrite}/></label>
-                <label>Chegada no CD<input type="date" value={inspection.chegadaCd} onChange={(e)=>setInspection({...inspection,chegadaCd:e.target.value})} disabled={!canWrite}/></label>
-                <label>Origem<input value={inspection.origem} onChange={(e)=>setInspection({...inspection,origem:e.target.value})} disabled={!canWrite}/></label>
-                <label>Transporte<input value={inspection.transporte} onChange={(e)=>setInspection({...inspection,transporte:e.target.value})} disabled={!canWrite}/></label>
-                <label>Data da inspeção<input type="date" value={inspection.dataInspecao} onChange={(e)=>setInspection({...inspection,dataInspecao:e.target.value})} disabled={!canWrite}/></label>
-                <label>IT aplicável<select value={inspection.itVersionId} onChange={(e)=>setInspection({...inspection,itVersionId:e.target.value})} disabled={!canWrite}>
-                  <option value="">Selecione</option>
-                  {itVersions.filter((it)=>it.status==='publicada').map((it)=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo} · {it.versao}</option>)}
-                </select></label>
-                <label>Nível de inspeção<select value={inspection.inspectionLevel} onChange={(e)=>setInspection({...inspection,inspectionLevel:e.target.value})} disabled={!canWrite}>
-                  <option value="I">Nível I</option><option value="II">Nível II</option><option value="S2">Especial S2</option>
-                </select></label>
+                <label>Processo FST<input value={inspection.codigo} onChange={(e)=>setInspection({...inspection,codigo:e.target.value})} placeholder="FST..."/></label>
+                <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
+                <label>Nota fiscal<input value={inspection.notaFiscal} onChange={(e)=>setInspection({...inspection,notaFiscal:e.target.value})}/></label>
+                <label>Chegada no CD<input type="date" value={inspection.chegadaCd} onChange={(e)=>setInspection({...inspection,chegadaCd:e.target.value})}/></label>
+                <label>Origem<input value={inspection.origem} onChange={(e)=>setInspection({...inspection,origem:e.target.value})}/></label>
+                <label>Transporte<input value={inspection.transporte} onChange={(e)=>setInspection({...inspection,transporte:e.target.value})}/></label>
+                <label>Data da inspeção<input type="date" value={inspection.dataInspecao} onChange={(e)=>setInspection({...inspection,dataInspecao:e.target.value})}/></label>
+                <label>IT aplicável
+                  <select value={inspection.itVersionId} onChange={(e)=>setInspection({...inspection,itVersionId:e.target.value})}>
+                    <option value="">Selecione</option>
+                    {itVersions.filter((it)=>it.status==='publicada').map((it)=>(
+                      <option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo} · {it.versao}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>Nível de inspeção
+                  <select value={inspection.inspectionLevel} onChange={(e)=>setInspection({...inspection,inspectionLevel:e.target.value})}>
+                    <option value="I">Nível I</option>
+                    <option value="II">Nível II</option>
+                    <option value="S2">Especial S2</option>
+                  </select>
+                </label>
               </div>
             </section>
 
             <section className="panel section-card">
-              <div className="sku-head"><h2>Produto / SKU</h2><button type="button" className="secondary" onClick={()=>setSkuRows([...skuRows,emptySku()])} disabled={!canWrite}><Plus size={16}/> Adicionar SKU</button></div>
+              <div className="section-title">
+                <h2>Produtos / componentes</h2>
+                <button type="button" className="secondary" onClick={()=>setSkuRows([...skuRows,emptySku()])}><Plus size={16}/> Adicionar código</button>
+              </div>
               <div className="sku-editor">
                 {skuRows.map((row,i)=>{
-                  const boxes = boxesReceived(row.quantidade,row.quantidadePorCaixa)
-                  const inspect = boxesToInspect(boxes)
-                  return <article className="sku-card" key={i}>
-                    <div className="sku-card-head"><strong>SKU {i+1}</strong>{skuRows.length>1 && <button type="button" className="icon-button" onClick={()=>setSkuRows(skuRows.filter((_,j)=>j!==i))}><X size={16}/></button>}</div>
-                    <div className="form-grid">
-                      <label>SKU<input value={row.sku} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,sku:e.target.value}:r))}/></label>
-                      <label>Produto / descrição<input value={row.nome} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,nome:e.target.value}:r))}/></label>
-                      <label>Código do cliente<input value={row.codigoCliente} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,codigoCliente:e.target.value}:r))}/></label>
-                      <label>Lote<input value={row.lote} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,lote:e.target.value}:r))}/></label>
-                      <label>Material<input value={row.material} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,material:e.target.value}:r))}/></label>
-                      <label>Capacidade<input value={row.capacidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,capacidade:e.target.value}:r))}/></label>
-                      <label>Quantidade recebida<input type="number" min="1" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/></label>
-                      <label>Quantidade por caixa<input type="number" min="1" value={row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidadePorCaixa:e.target.value}:r))}/></label>
-                      {isComponentSet && <label>Unidades por conjunto<input type="number" min="0.01" step="0.01" value={row.unidadesPorConjunto} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPorConjunto:e.target.value}:r))}/></label>}
-                    </div>
-                    <div className="computed"><span>Caixas recebidas <b>{boxes || '—'}</b></span><span>Caixas a inspecionar <b>{inspect || '—'}</b></span></div>
-                  </article>
+                  const boxes=boxesReceived(row.quantidade,row.quantidadePorCaixa)
+                  const inspect=boxesToInspect(boxes)
+                  return (
+                    <article className="sku-card" key={i}>
+                      <div className="sku-card-head">
+                        <strong>{skuRows.length>1?'Componente '+(i+1):'Produto'}</strong>
+                        {skuRows.length>1 && <button type="button" className="icon-button" onClick={()=>setSkuRows(skuRows.filter((_,j)=>j!==i))}><X size={16}/></button>}
+                      </div>
+                      <div className="form-grid">
+                        <label>Código
+                          <div className="input-action">
+                            <input value={row.sku} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,sku:e.target.value}:r))}/>
+                            <button type="button" className="secondary icon-only" title="Consultar descrição" onClick={()=>lookupProduct(i)}><Search size={16}/></button>
+                          </div>
+                        </label>
+                        <label>Descrição<input value={row.nome} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,nome:e.target.value}:r))}/></label>
+                        <label>Código do cliente<input value={row.codigoCliente} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,codigoCliente:e.target.value}:r))}/></label>
+                        <label>Lote<input value={row.lote} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,lote:e.target.value}:r))}/></label>
+                        <label>Material<input value={row.material} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,material:e.target.value}:r))}/></label>
+                        <label>Capacidade<input value={row.capacidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,capacidade:e.target.value}:r))}/></label>
+                        <label>Quantidade recebida<input type="number" min="1" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/></label>
+                        <label>Quantidade por caixa<input type="number" min="1" value={row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidadePorCaixa:e.target.value}:r))}/></label>
+                        {isComponentSet && <label>Unidades por conjunto<input type="number" min="0.01" step="0.01" value={row.unidadesPorConjunto} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPorConjunto:e.target.value}:r))}/></label>}
+                      </div>
+                      <div className="computed">
+                        <span>Caixas recebidas <b>{boxes || '—'}</b></span>
+                        <span>Caixas a inspecionar <b>{inspect || '—'}</b></span>
+                      </div>
+                    </article>
+                  )
                 })}
               </div>
             </section>
 
             <section className="calc-strip">
-              <div><small>Tipo</small><strong>{isComponentSet ? 'Componentes / conjunto' : 'SKU individual'}</strong></div>
-              <div><small>Lote estatístico</small><strong>{statisticalLot ? statisticalLot.toLocaleString('pt-BR') : '—'}</strong></div>
-              <div><small>Caixas recebidas</small><strong>{totalBoxesReceived || '—'}</strong></div>
-              <div><small>Caixas a inspecionar</small><strong>{totalBoxesToInspect || '—'}</strong></div>
+              <div><small>Tipo</small><strong>{isComponentSet?'Conjunto / componentes':'Produto independente'}</strong></div>
+              <div><small>Lote estatístico</small><strong>{statisticalLot?statisticalLot.toLocaleString('pt-BR'):'—'}</strong></div>
+              <div><small>Plano</small><strong>{previewPlan.code?(previewPlan.code+' · '+previewPlan.sample+' un.'):'—'}</strong></div>
+              <div><small>Caixas</small><strong>{totalBoxesToInspect?(totalBoxesToInspect+' a inspecionar'):'—'}</strong></div>
             </section>
 
-            <div className="actions"><button className="primary" type="submit" disabled={!canWrite}>Iniciar inspeção</button></div>
+            <div className="actions"><button className="primary" type="submit">Iniciar e abrir inspeção</button></div>
           </form>
         </section>
       )}
 
-      {tab === 'its' && (
+      {tab==='execucao' && detail && (
+        <section className="workspace execution">
+          <div className="page-title">
+            <div>
+              <span className="eyebrow">{detail.grupos_inspecao?.processos?.codigo} · {detail.numero}</span>
+              <h1>{detail.grupos_inspecao?.nome}</h1>
+            </div>
+            <div className="row-actions">
+              <span className="pill">{statusLabel(detail.status)}</span>
+              {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
+            </div>
+          </div>
+
+          <section className="progress-strip">
+            <ProgressItem done={samplingDone} label="Amostragem"/>
+            <ProgressItem done={checklistDone} label="Verificações"/>
+            <ProgressItem done={dimsDone} label="Dimensionais"/>
+            <ProgressItem done={testsDone} label="Testes"/>
+            <ProgressItem done={detail.status==='concluida'} label="Resultado"/>
+            <ProgressItem done={detail.retencao_decisao!==null} label="Retenção"/>
+          </section>
+
+          <section className="panel section-card">
+            <div className="section-title">
+              <h2>Plano de amostragem</h2>
+              <span className="pill">Nível {detail.nivel_inspecao} · código {detail.codigo_amostragem || '—'}</span>
+            </div>
+            <div className="plan-grid">
+              <div><small>Lote estatístico</small><strong>{detail.tamanho_lote?.toLocaleString('pt-BR') || '—'}</strong></div>
+              <div><small>Amostra prevista</small><strong>{detail.tamanho_amostra || '—'}</strong></div>
+              <div><small>Inspecionado</small><strong>{detail.total_inspecionado || 0}</strong></div>
+              <div><small>NC</small><strong>{detail.total_nao_conforme || 0}</strong></div>
+              <div><small>Ac</small><strong>{detail.limite_aceitacao ?? '—'}</strong></div>
+              <div><small>Re</small><strong>{detail.limite_rejeicao ?? '—'}</strong></div>
+              <div><small>Caixas recebidas</small><strong>{detail.caixas_recebidas ?? '—'}</strong></div>
+              <div><small>Caixas a avaliar</small><strong>{detail.caixas_avaliar ?? '—'}</strong></div>
+            </div>
+            {detail.status!=='concluida' && (
+              <div className="sampling-actions">
+                <button className="success-button" disabled={(detail.total_inspecionado ?? 0)>=(detail.tamanho_amostra ?? 0)} onClick={()=>recordUnit(true)}><CheckCircle2 size={18}/> Unidade conforme</button>
+                <button className="danger" disabled={(detail.total_inspecionado ?? 0)>=(detail.tamanho_amostra ?? 0)} onClick={()=>recordUnit(false)}>Unidade NC</button>
+              </div>
+            )}
+            {!!detail.limite_rejeicao && detail.total_nao_conforme>=detail.limite_rejeicao && <div className="alert error">Limite de rejeição atingido. Você pode encerrar ou continuar a inspeção; a decisão ficará registrada.</div>}
+          </section>
+
+          <section className="panel section-card">
+            <h2>Verificações C / NC / NA</h2>
+            <div className="checklist">
+              {(detail.checklist ?? []).map((item:any)=>{
+                const r=detail.checklistResults?.find((x:any)=>x.checklist_id===item.id)
+                return (
+                  <div className="check-row" key={item.id}>
+                    <div className="check-copy"><b>{item.ordem}. {item.requisito}</b><span>{item.instrucao}</span></div>
+                    <div className="tri-buttons">
+                      <button className={r?.resultado==='conforme'?'selected ok':''} onClick={()=>saveChecklist(item.id,'conforme')}>C</button>
+                      <button className={r?.resultado==='nao_conforme'?'selected bad':''} onClick={()=>saveChecklist(item.id,'nao_conforme')}>NC</button>
+                      <button className={r?.resultado==='nao_aplicavel'?'selected':''} onClick={()=>saveChecklist(item.id,'nao_aplicavel')}>NA</button>
+                    </div>
+                    {r?.resultado==='nao_conforme' && (
+                      <select className="severity" value={r.severidade_confirmada || 'grave'} onChange={(e)=>saveChecklistSeverity(item.id,e.target.value)}>
+                        <option value="critico">Crítico</option>
+                        <option value="grave">Grave</option>
+                        <option value="toleravel">Tolerável</option>
+                      </select>
+                    )}
+                  </div>
+                )
+              })}
+              {!detail.checklist?.length && <div className="empty">Esta versão da IT ainda não teve o checklist estruturado.</div>}
+            </div>
+          </section>
+
+          <section className="panel section-card">
+            <div className="section-title"><h2>Análises dimensionais</h2>{detail.dimensionais_finalizados && <span className="pill">Concluído</span>}</div>
+            {(detail.items ?? []).map((link:any)=>{
+              const item=link.processo_itens
+              return (
+                <div className="dimension-item" key={item.id}>
+                  <h3>{item.produtos?.sku} · {item.produtos?.nome}</h3>
+                  {(detail.params ?? []).map((p:any)=>(
+                    <div className="dimension-param" key={p.id}>
+                      <div className="param-title"><strong>{p.nome}</strong><span>{p.unidade || ''}</span></div>
+                      <div className="measurement-grid">
+                        {Array.from({length:10},(_,k)=>{
+                          const seq=k+1
+                          const existing=detail.dimResults?.find((x:any)=>x.processo_item_id===item.id && x.parametro_id===p.id && x.sequencia_amostra===seq)
+                          return (
+                            <label key={seq}>
+                              <span>{seq}</span>
+                              <input type="number" step="any" defaultValue={existing?.valor ?? ''} onBlur={(e)=>saveDimension(item.id,p,seq,e.target.value)} disabled={detail.status==='concluida'}/>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  {!detail.params?.length && <div className="muted">Esta IT não possui parâmetros dimensionais estruturados.</div>}
+                </div>
+              )
+            })}
+            {detail.status!=='concluida' && !detail.dimensionais_finalizados && <div className="actions"><button className="secondary" onClick={markDimensionalsDone}>Concluir dimensionais</button></div>}
+          </section>
+
+          <section className="panel section-card">
+            <div className="section-title"><h2>Testes especiais</h2>{detail.testes_finalizados && <span className="pill">Concluído</span>}</div>
+            {(detail.tests ?? []).map((test:any)=>{
+              const r=detail.testResults?.find((x:any)=>x.teste_id===test.id)
+              return (
+                <article className="test-card" key={test.id}>
+                  <div><strong>{test.nome}</strong><p>{test.procedimento}</p><small>Critério: {test.criterio_aprovacao}</small></div>
+                  <div className="tri-buttons">
+                    <button className={r?.resultado==='conforme'?'selected ok':''} onClick={()=>saveTest(test.id,'conforme')}>C</button>
+                    <button className={r?.resultado==='nao_conforme'?'selected bad':''} onClick={()=>saveTest(test.id,'nao_conforme')}>NC</button>
+                    <button className={r?.resultado==='nao_aplicavel'?'selected':''} onClick={()=>saveTest(test.id,'nao_aplicavel')}>NA</button>
+                  </div>
+                </article>
+              )
+            })}
+            {!detail.tests?.length && <div className="muted">Sem teste especial estruturado para esta IT.</div>}
+            {detail.status!=='concluida' && !detail.testes_finalizados && <div className="actions"><button className="secondary" onClick={markTestsDone}>Concluir testes</button></div>}
+          </section>
+
+          <section className="panel section-card">
+            <div className="section-title"><h2>Fotos da inspeção</h2><span className="pill">{detail.photos?.length ?? 0} arquivo(s)</span></div>
+            {detail.status!=='concluida' && (
+              <label className="upload-box"><Camera size={22}/><span>Adicionar fotos</span><input type="file" accept="image/*" multiple onChange={(e)=>uploadInspectionPhotos(e.target.files)}/></label>
+            )}
+            <div className="photo-list">{(detail.photos ?? []).map((p:any)=><span key={p.id}>{p.legenda || p.storage_path}</span>)}</div>
+          </section>
+
+          {detail.status!=='concluida' && (
+            <section className="panel section-card result-panel">
+              <h2>Resultado final</h2>
+              <div className="readiness">
+                <span className={samplingDone?'done':''}>Amostragem</span>
+                <span className={checklistDone?'done':''}>Verificações</span>
+                <span className={dimsDone?'done':''}>Dimensionais</span>
+                <span className={testsDone?'done':''}>Testes</span>
+              </div>
+              <label>Observação / conclusão<textarea value={finalObservation} onChange={(e)=>setFinalObservation(e.target.value)} rows={4}/></label>
+              <div className="result-actions">
+                <button className="success-button" onClick={()=>finishInspection('aprovado')}>Aprovar inspeção</button>
+                <button className="danger" onClick={()=>finishInspection('reprovado')}>Reprovar inspeção</button>
+              </div>
+            </section>
+          )}
+
+          {detail.status==='concluida' && (
+            <section className="panel section-card retention-panel">
+              <div className="section-title">
+                <h2>Retenção após finalização</h2>
+                <span className={'result-badge '+detail.resultado}>{statusLabel(detail.resultado)}</span>
+              </div>
+              {(detail.retained ?? []).length>0 && <div className="alert success">Já existem {(detail.retained ?? []).length} amostra(s) deste registro no estoque.</div>}
+              {(detail.items ?? []).map((link:any)=>{
+                const item=link.processo_itens
+                const existing=detail.retained?.find((x:any)=>x.produto_id===item.produto_id)
+                const draft=retentionRows[item.id] || {retain:true,qty:'',address:''}
+                return (
+                  <div className="retention-row" key={item.id}>
+                    <label className="switch-line">
+                      <input type="checkbox" checked={existing?true:draft.retain} disabled={!!existing} onChange={(e)=>setRetentionRows({...retentionRows,[item.id]:{...draft,retain:e.target.checked}})}/>
+                      <span>{item.produtos?.sku} · {item.produtos?.nome}</span>
+                    </label>
+                    {!existing && draft.retain && <>
+                      <label>Quantidade<input type="number" min="0.01" step="0.01" value={draft.qty} onChange={(e)=>setRetentionRows({...retentionRows,[item.id]:{...draft,qty:e.target.value}})}/></label>
+                      <label>Endereço<input value={draft.address} onChange={(e)=>setRetentionRows({...retentionRows,[item.id]:{...draft,address:e.target.value}})}/></label>
+                    </>}
+                    {existing && <span className="pill">No estoque</span>}
+                  </div>
+                )
+              })}
+              {!Object.values(retentionRows).some((x)=>x.retain) && <label>Motivo para não reter<textarea rows={3} value={retentionReason} onChange={(e)=>setRetentionReason(e.target.value)}/></label>}
+              <div className="actions">
+                <button className="primary" onClick={saveRetention}><Warehouse size={16}/> Enviar retenção ao estoque</button>
+                <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Gerar Word</button>
+              </div>
+            </section>
+          )}
+        </section>
+      )}
+
+      {tab==='its' && (
         <section className="workspace">
           <div className="page-title"><div><span className="eyebrow">DOCUMENTOS</span><h1>Biblioteca de ITs</h1></div></div>
-          {canManageIts && <form className="panel section-card" onSubmit={uploadIt}>
-            <h2>Nova IT</h2>
-            <div className="form-grid">
-              <label>Código<input value={itForm.codigo} onChange={(e)=>setItForm({...itForm,codigo:e.target.value})} placeholder="IT 015"/></label>
-              <label>Título<input value={itForm.titulo} onChange={(e)=>setItForm({...itForm,titulo:e.target.value})}/></label>
-              <label>Versão<input value={itForm.versao} onChange={(e)=>setItForm({...itForm,versao:e.target.value})} placeholder="01/2026"/></label>
-              <label>Vigência<input type="date" value={itForm.vigencia} onChange={(e)=>setItForm({...itForm,vigencia:e.target.value})}/></label>
-              <label className="span-2">Arquivo Word ou PDF<input type="file" accept=".doc,.docx,.pdf" onChange={(e)=>setItFile(e.target.files?.[0] ?? null)} /></label>
-            </div>
-            <div className="actions"><button className="primary" type="submit" disabled={!itFile}><Upload size={17}/> Enviar para leitura</button></div>
-          </form>}
+          {canManageIts && (
+            <form className="panel section-card" onSubmit={uploadIt}>
+              <h2>Nova IT</h2>
+              <div className="form-grid">
+                <label>Código<input value={itForm.codigo} onChange={(e)=>setItForm({...itForm,codigo:e.target.value})} placeholder="IT 015"/></label>
+                <label>Título<input value={itForm.titulo} onChange={(e)=>setItForm({...itForm,titulo:e.target.value})}/></label>
+                <label>Versão<input value={itForm.versao} onChange={(e)=>setItForm({...itForm,versao:e.target.value})} placeholder="01/2026"/></label>
+                <label>Vigência<input type="date" value={itForm.vigencia} onChange={(e)=>setItForm({...itForm,vigencia:e.target.value})}/></label>
+                <label className="span-2">Word ou PDF<input type="file" accept=".doc,.docx,.pdf" onChange={(e)=>setItFile(e.target.files?.[0] ?? null)}/></label>
+              </div>
+              <div className="actions"><button className="primary" type="submit" disabled={!itFile}><Upload size={17}/> Enviar para leitura</button></div>
+            </form>
+          )}
           <div className="list">
-            {itVersions.map((it)=><article className="row-card" key={it.id}>
-              <div><strong>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo}</strong><span>Versão {it.versao}{it.arquivo_nome ? ` · ${it.arquivo_nome}` : ''}</span></div>
-              <span className="pill">{it.leitura_ia_status.replaceAll('_',' ')}</span>
-            </article>)}
+            {itVersions.map((it)=>(
+              <article className="row-card" key={it.id}>
+                <div><strong>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo}</strong><span>Versão {it.versao}{it.arquivo_nome?' · '+it.arquivo_nome:''}</span></div>
+                <span className="pill">{it.leitura_ia_status.replaceAll('_',' ')}</span>
+              </article>
+            ))}
           </div>
         </section>
       )}
 
-      {tab === 'amostras' && (
+      {tab==='estoque' && (
         <section className="workspace">
-          <div className="page-title"><div><span className="eyebrow">RETENÇÃO</span><h1>Amostras</h1></div></div>
-          <form className="panel form-grid" onSubmit={createSample}>
-            <label className="span-2">Inspeção<select value={sampleForm.groupId} onChange={(e)=>setSampleForm({...sampleForm,groupId:e.target.value})} disabled={!canWrite}><option value="">Selecione</option>{groups.map(g=><option key={g.id} value={g.id}>{g.processos?.codigo} · {g.nome}</option>)}</select></label>
-            <label>Descrição<input value={sampleForm.descricao} onChange={(e)=>setSampleForm({...sampleForm,descricao:e.target.value})} disabled={!canWrite}/></label>
-            <label>Lote<input value={sampleForm.lote} onChange={(e)=>setSampleForm({...sampleForm,lote:e.target.value})} disabled={!canWrite}/></label>
-            <label>Quantidade<input type="number" min="0.01" step="0.01" value={sampleForm.quantidade} onChange={(e)=>setSampleForm({...sampleForm,quantidade:e.target.value})} disabled={!canWrite}/></label>
-            <label>Unidade<select value={sampleForm.unidade} onChange={(e)=>setSampleForm({...sampleForm,unidade:e.target.value})} disabled={!canWrite}><option value="conjunto">conjunto</option><option value="unidade">unidade</option><option value="kit">kit</option></select></label>
-            <label className="span-2">Endereço<input value={sampleForm.endereco} onChange={(e)=>setSampleForm({...sampleForm,endereco:e.target.value})} disabled={!canWrite}/></label>
-            <button className="primary span-2" type="submit" disabled={!canWrite}>Reter amostra</button>
-          </form>
-
+          <div className="page-title"><div><span className="eyebrow">AMOSTRAS DE RETENÇÃO</span><h1>Estoque</h1></div></div>
           <div className="sample-grid">
-            {samples.map(s=><article className="sample-card" key={s.id} onClick={()=>setSelectedSample(s)}>
-              <div><span className="eyebrow">{s.codigo}</span><h3>{s.descricao || 'Amostra'}</h3></div>
-              <div className="sample-meta"><span>Saldo <b>{s.saldo} {s.unidade_controle}</b></span><span>Endereço <b>{s.endereco || '-'}</b></span></div>
-              <button className="secondary" onClick={(e)=>{e.stopPropagation();downloadZpl(s)}}><QrCode size={16}/> Etiqueta</button>
-            </article>)}
+            {samples.map((s)=>(
+              <article className="sample-card" key={s.id} onClick={()=>setSelectedSample(s)}>
+                <div><span className="eyebrow">{s.codigo}</span><h3>{s.descricao || 'Amostra'}</h3></div>
+                <div className="sample-meta"><span>Saldo <b>{s.saldo} {s.unidade_controle}</b></span><span>Endereço <b>{s.endereco || '—'}</b></span></div>
+                <button className="secondary" onClick={(e)=>{e.stopPropagation();downloadZpl(s)}}><QrCode size={16}/> Etiqueta</button>
+              </article>
+            ))}
           </div>
+          {!samples.length && <div className="empty">Nenhuma amostra no estoque.</div>}
 
-          {selectedSample && <div className="modal-backdrop" onClick={()=>setSelectedSample(null)}><article className="sample-detail" onClick={(e)=>e.stopPropagation()}>
-            <button className="close" onClick={()=>setSelectedSample(null)}>×</button>
-            <span className="eyebrow">AMOSTRA</span><h2>{selectedSample.codigo}</h2>
-            <div className="detail-grid"><div><small>Endereço</small><strong>{selectedSample.endereco || '-'}</strong></div><div><small>Saldo</small><strong>{selectedSample.saldo} {selectedSample.unidade_controle}</strong></div><div><small>Lote</small><strong>{selectedSample.lote || '-'}</strong></div></div>
-            {qrDataUrl && <img className="qr" src={qrDataUrl} alt="QR da amostra"/>}
-            <button className="primary" onClick={()=>downloadZpl(selectedSample)}>Gerar etiqueta Zebra 100×50</button>
-          </article></div>}
+          {selectedSample && (
+            <div className="modal-backdrop" onClick={()=>setSelectedSample(null)}>
+              <article className="sample-detail" onClick={(e)=>e.stopPropagation()}>
+                <button className="close" onClick={()=>setSelectedSample(null)}>×</button>
+                <span className="eyebrow">ESTOQUE</span>
+                <h2>{selectedSample.codigo}</h2>
+                <p>{selectedSample.descricao}</p>
+                <div className="detail-grid">
+                  <div><small>Endereço</small><strong>{selectedSample.endereco || '—'}</strong></div>
+                  <div><small>Saldo</small><strong>{selectedSample.saldo} {selectedSample.unidade_controle}</strong></div>
+                  <div><small>Lote</small><strong>{selectedSample.lote || '—'}</strong></div>
+                </div>
+                {qrDataUrl && <img className="qr" src={qrDataUrl} alt="QR"/>}
+                <button className="secondary wide" onClick={()=>downloadZpl(selectedSample)}>Gerar etiqueta Zebra 100×50</button>
+                <div className="stock-move">
+                  <h3>Movimentar estoque</h3>
+                  <label>Movimento
+                    <select value={stockMove.tipo} onChange={(e)=>setStockMove({...stockMove,tipo:e.target.value})}>
+                      <option value="retirada">Retirada</option>
+                      <option value="devolucao">Devolução</option>
+                      <option value="transferencia">Transferência</option>
+                      <option value="descarte">Descarte</option>
+                    </select>
+                  </label>
+                  <label>Quantidade<input type="number" min="0.01" step="0.01" value={stockMove.quantidade} onChange={(e)=>setStockMove({...stockMove,quantidade:e.target.value})}/></label>
+                  {['transferencia','devolucao'].includes(stockMove.tipo) && <label>Endereço destino<input value={stockMove.endereco} onChange={(e)=>setStockMove({...stockMove,endereco:e.target.value})}/></label>}
+                  <label>Motivo<input value={stockMove.motivo} onChange={(e)=>setStockMove({...stockMove,motivo:e.target.value})}/></label>
+                  <button className="primary" onClick={moveStock}>Registrar movimentação</button>
+                </div>
+              </article>
+            </div>
+          )}
         </section>
+      )}
+
+      {editingProcess && (
+        <div className="modal-backdrop" onClick={()=>setEditingProcess(null)}>
+          <form className="sample-detail" onSubmit={saveProcessEdit} onClick={(e)=>e.stopPropagation()}>
+            <button className="close" type="button" onClick={()=>setEditingProcess(null)}>×</button>
+            <span className="eyebrow">EDITAR PROCESSO</span>
+            <h2>{editingProcess.codigo}</h2>
+            <div className="form-grid one">
+              <label>Cliente<input value={editingProcess.cliente ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,cliente:e.target.value})}/></label>
+              <label>Nota fiscal<input value={editingProcess.nota_fiscal ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,nota_fiscal:e.target.value})}/></label>
+              <label>Origem<input value={editingProcess.origem ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,origem:e.target.value})}/></label>
+              <label>Transporte<input value={editingProcess.transporte ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,transporte:e.target.value})}/></label>
+              <label>Chegada no CD<input type="date" value={editingProcess.chegada_cd ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,chegada_cd:e.target.value})}/></label>
+            </div>
+            <button className="primary wide" type="submit">Salvar alterações</button>
+          </form>
+        </div>
+      )}
+
+      {ncDraft.open && (
+        <div className="modal-backdrop">
+          <form className="sample-detail" onSubmit={(e)=>{e.preventDefault();persistUnit(false,ncDraft)}}>
+            <button className="close" type="button" onClick={()=>setNcDraft({...ncDraft,open:false})}>×</button>
+            <span className="eyebrow">NÃO CONFORMIDADE</span>
+            <h2>Registrar unidade NC</h2>
+            <label>Componente / produto
+              <select value={ncDraft.itemId} onChange={(e)=>setNcDraft({...ncDraft,itemId:e.target.value})}>
+                <option value="">Conjunto / geral</option>
+                {(detail?.items ?? []).map((x:any)=><option key={x.processo_itens.id} value={x.processo_itens.id}>{x.processo_itens.produtos?.sku} · {x.processo_itens.produtos?.nome}</option>)}
+              </select>
+            </label>
+            <label>Classificação
+              <select value={ncDraft.severity} onChange={(e)=>setNcDraft({...ncDraft,severity:e.target.value})}>
+                <option value="critico">Crítico</option>
+                <option value="grave">Grave</option>
+                <option value="toleravel">Tolerável</option>
+              </select>
+            </label>
+            <label>Descrição<textarea rows={4} value={ncDraft.description} onChange={(e)=>setNcDraft({...ncDraft,description:e.target.value})}/></label>
+            <button className="danger wide" type="submit">Registrar NC</button>
+          </form>
+        </div>
       )}
     </main>
   )
@@ -1166,4 +1514,7 @@ export default function App() {
 
 function Metric({ icon: Icon, label, value }: { icon: any; label: string; value: number }) {
   return <article className="metric"><Icon size={22}/><div><strong>{value}</strong><span>{label}</span></div></article>
+}
+function ProgressItem({ done, label }: { done: boolean; label: string }) {
+  return <div className={'progress-item '+(done?'done':'')}><span>{done?'✓':'•'}</span><b>{label}</b></div>
 }
