@@ -70,6 +70,8 @@ type Sample = {
   unidade_controle: string
   qr_token: string
   grupo_inspecao_id: string | null
+  inspecao_id?: string | null
+  produto_id?: string | null
 }
 
 const emptySku = () => ({
@@ -912,6 +914,75 @@ export default function App() {
     a.download = `${sample.codigo}.zpl`
     a.click()
     URL.revokeObjectURL(href)
+  }
+
+  async function moveStock() {
+    if (!selectedSample || !userId || !stockMove.quantidade) return
+    const qty = Number(stockMove.quantidade)
+    if (qty <= 0) return setError('Informe uma quantidade válida.')
+    if (['retirada','descarte'].includes(stockMove.tipo) && qty > selectedSample.saldo) {
+      return setError('Quantidade maior que o saldo disponível.')
+    }
+    const origin = selectedSample.endereco
+    const dest = stockMove.endereco.trim() || selectedSample.endereco
+    const q = await supabase.from('amostra_movimentacoes').insert({
+      amostra_id: selectedSample.id,
+      tipo: stockMove.tipo,
+      quantidade: qty,
+      endereco_origem: origin,
+      endereco_destino: ['transferencia','devolucao'].includes(stockMove.tipo) ? dest : null,
+      motivo: stockMove.motivo.trim() || null,
+      usuario_id: userId,
+    })
+    if (q.error) return setError(q.error.message)
+    if (stockMove.tipo === 'transferencia' && dest) {
+      await supabase.from('amostras').update({ endereco: dest }).eq('id', selectedSample.id)
+    }
+    setStockMove({ tipo:'retirada', quantidade:'', endereco:'', motivo:'' })
+    setSelectedSample(null)
+    setMessage('Movimentação registrada.')
+    await loadApp()
+  }
+
+  function downloadInspectionWord() {
+    if (!detail) return
+    const process = detail.grupos_inspecao?.processos
+    const products = (detail.items ?? []).map((x:any) =>
+      `<tr><td>${x.processo_itens?.produtos?.sku ?? ''}</td><td>${x.processo_itens?.produtos?.nome ?? ''}</td><td>${x.processo_itens?.lote ?? ''}</td><td>${x.processo_itens?.quantidade ?? ''}</td></tr>`
+    ).join('')
+    const checks = (detail.checklist ?? []).map((x:any) => {
+      const r = detail.checklistResults?.find((z:any) => z.checklist_id === x.id)
+      return `<tr><td>${x.ordem}</td><td>${x.requisito}</td><td>${statusLabel(r?.resultado)}</td><td>${r?.severidade_confirmada ?? ''}</td></tr>`
+    }).join('')
+    const html = `<html><head><meta charset="utf-8"><style>
+      body{font-family:Arial,sans-serif;font-size:10.5pt}h1{font-size:17pt}h2{font-size:12pt;margin-top:18px}
+      table{border-collapse:collapse;width:100%;margin:8px 0}td,th{border:1px solid #777;padding:5px}th{background:#eee;text-align:left}
+    </style></head><body>
+      <h1>REGISTRO DE INSPEÇÃO</h1>
+      <p><b>${detail.it_versoes?.instrucoes_trabalho?.codigo ?? ''}</b> · ${detail.it_versoes?.instrucoes_trabalho?.titulo ?? ''} · versão ${detail.it_versoes?.versao ?? ''}</p>
+      <h2>Identificação</h2>
+      <table><tr><th>Processo FST</th><td>${process?.codigo ?? ''}</td><th>Cliente</th><td>${process?.cliente ?? ''}</td></tr>
+      <tr><th>Nota fiscal</th><td>${process?.nota_fiscal ?? ''}</td><th>Data</th><td>${detail.data_inspecao ?? ''}</td></tr>
+      <tr><th>Origem</th><td>${process?.origem ?? ''}</td><th>Transporte</th><td>${process?.transporte ?? ''}</td></tr></table>
+      <h2>Produtos / componentes</h2><table><tr><th>Código</th><th>Descrição</th><th>Lote</th><th>Quantidade</th></tr>${products}</table>
+      <h2>Plano de amostragem</h2><table>
+      <tr><th>Lote estatístico</th><td>${detail.tamanho_lote ?? ''}</td><th>Nível</th><td>${detail.nivel_inspecao ?? ''}</td></tr>
+      <tr><th>Código</th><td>${detail.codigo_amostragem ?? ''}</td><th>Amostra prevista</th><td>${detail.tamanho_amostra ?? ''}</td></tr>
+      <tr><th>Amostra efetiva</th><td>${detail.total_inspecionado ?? 0}</td><th>Não conformes</th><td>${detail.total_nao_conforme ?? 0}</td></tr></table>
+      <h2>Verificações</h2><table><tr><th>Nº</th><th>Análise</th><th>Resultado</th><th>Classe</th></tr>${checks}</table>
+      <h2>Resultado final</h2><p><b>${statusLabel(detail.resultado).toUpperCase()}</b></p>
+      <p>${detail.observacoes ?? ''}</p>
+    </body></html>`
+    const blob = new Blob([html], { type:'application/msword;charset=utf-8' })
+    const href = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = href
+    a.download = `${detail.numero}.doc`
+    a.click()
+    URL.revokeObjectURL(href)
+    if (selectedInspectionId) {
+      void supabase.from('inspecoes').update({ documento_gerado_em:new Date().toISOString() }).eq('id',selectedInspectionId)
+    }
   }
 
   if (!sessionReady) return <div className="center-screen">Carregando SGQ…</div>
