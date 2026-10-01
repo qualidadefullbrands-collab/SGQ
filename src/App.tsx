@@ -145,7 +145,7 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque'>('painel')
+  const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'config'>('painel')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [login, setLogin] = useState({ email: '', password: '' })
@@ -167,6 +167,11 @@ export default function App() {
   const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string}>>([])
   const [pendingModal, setPendingModal] = useState<string[]>([])
   const [aiLoading, setAiLoading] = useState(false)
+  const [integrationStatus, setIntegrationStatus] = useState<Record<string,boolean>>({})
+  const [integrationForm, setIntegrationForm] = useState({
+    omieKey:'', omieSecret:'', geminiKey:'', geminiModel:'gemini-2.5-flash',
+  })
+  const [integrationSaving, setIntegrationSaving] = useState(false)
   const [itVersions, setItVersions] = useState<ItVersion[]>([])
   const [groups, setGroups] = useState<Group[]>([])
   const [samples, setSamples] = useState<Sample[]>([])
@@ -271,6 +276,12 @@ export default function App() {
     QRCode.toDataURL(sampleUrl(selectedSample), { margin: 1, width: 220 }).then(setQrDataUrl)
   }, [selectedSample])
 
+  useEffect(() => {
+    if (tab==='config' && profile && ['administrador','gestor'].includes(profile.perfil)) {
+      void loadIntegrationStatus()
+    }
+  }, [tab, profile])
+
   async function loadApp() {
     setError('')
     const [p, proc, ins, its, gs, ss, laudos] = await Promise.all([
@@ -298,6 +309,39 @@ export default function App() {
       amostras: (ss.data ?? []).length,
       laudos: laudos.count ?? 0,
     })
+  }
+
+  async function loadIntegrationStatus() {
+    const { data, error } = await supabase.rpc('integration_secret_status')
+    if (error) return
+    const next:Record<string,boolean>={}
+    for (const row of data ?? []) next[String(row.name)] = !!row.configured
+    setIntegrationStatus(next)
+  }
+
+  async function saveIntegrations(e:React.FormEvent) {
+    e.preventDefault()
+    if (profile?.perfil!=='administrador') return
+    setIntegrationSaving(true)
+    setError('')
+    const entries:Array<[string,string]> = [
+      ['OMIE_APP_KEY',integrationForm.omieKey],
+      ['OMIE_APP_SECRET',integrationForm.omieSecret],
+      ['GEMINI_API_KEY',integrationForm.geminiKey],
+      ['GEMINI_MODEL',integrationForm.geminiModel],
+    ]
+    for (const [name,value] of entries) {
+      if (!value.trim()) continue
+      const { error } = await supabase.rpc('admin_set_integration_secret',{p_name:name,p_value:value.trim()})
+      if (error) {
+        setIntegrationSaving(false)
+        return setError('Falha ao salvar a configuração de '+name+'.')
+      }
+    }
+    setIntegrationSaving(false)
+    setIntegrationForm({omieKey:'',omieSecret:'',geminiKey:'',geminiModel:'gemini-2.5-flash'})
+    await loadIntegrationStatus()
+    setMessage('Integrações atualizadas com segurança.')
   }
 
   async function signIn(e: React.FormEvent) {
@@ -1344,6 +1388,7 @@ export default function App() {
           <button className={tab==='nova'?'active':''} onClick={()=>setTab('nova')}>Nova inspeção</button>
           <button className={tab==='its'?'active':''} onClick={()=>setTab('its')}>ITs</button>
           <button className={tab==='estoque'?'active':''} onClick={()=>setTab('estoque')}>Estoque</button>
+          {profile.perfil==='administrador' && <button className={tab==='config'?'active':''} onClick={()=>setTab('config')}>Configurações</button>}
         </nav>
         <div className="userbox">
           <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
@@ -1894,6 +1939,51 @@ export default function App() {
               </article>
             </div>
           )}
+        </section>
+      )}
+
+      {tab==='config' && profile.perfil==='administrador' && (
+        <section className="workspace">
+          <div className="page-title">
+            <div><span className="eyebrow">ADMINISTRAÇÃO</span><h1>Configurações</h1></div>
+          </div>
+
+          <form className="panel section-card integrations-card" onSubmit={saveIntegrations}>
+            <div className="section-title">
+              <div>
+                <h2>Integrações</h2>
+                <span className="section-note">As credenciais são armazenadas criptografadas no Vault do projeto SGQ.</span>
+              </div>
+            </div>
+
+            <div className="integration-group">
+              <div className="integration-head">
+                <div><strong>Omie</strong><span>Consulta de código e descrição do produto</span></div>
+                <span className={'integration-dot '+(integrationStatus.OMIE_APP_KEY&&integrationStatus.OMIE_APP_SECRET?'ok':'pending')}>
+                  {integrationStatus.OMIE_APP_KEY&&integrationStatus.OMIE_APP_SECRET?'Configurado':'Não configurado'}
+                </span>
+              </div>
+              <div className="form-grid">
+                <label>App Key<input type="password" autoComplete="off" value={integrationForm.omieKey} onChange={(e)=>setIntegrationForm({...integrationForm,omieKey:e.target.value})} placeholder={integrationStatus.OMIE_APP_KEY?'•••••••• (já configurada)':'OMIE_APP_KEY'}/></label>
+                <label>App Secret<input type="password" autoComplete="off" value={integrationForm.omieSecret} onChange={(e)=>setIntegrationForm({...integrationForm,omieSecret:e.target.value})} placeholder={integrationStatus.OMIE_APP_SECRET?'•••••••• (já configurada)':'OMIE_APP_SECRET'}/></label>
+              </div>
+            </div>
+
+            <div className="integration-group">
+              <div className="integration-head">
+                <div><strong>IA — Gemini</strong><span>Rascunho da observação/conclusão</span></div>
+                <span className={'integration-dot '+(integrationStatus.GEMINI_API_KEY?'ok':'pending')}>
+                  {integrationStatus.GEMINI_API_KEY?'Configurado':'Não configurado'}
+                </span>
+              </div>
+              <div className="form-grid">
+                <label>API Key<input type="password" autoComplete="off" value={integrationForm.geminiKey} onChange={(e)=>setIntegrationForm({...integrationForm,geminiKey:e.target.value})} placeholder={integrationStatus.GEMINI_API_KEY?'•••••••• (já configurada)':'GEMINI_API_KEY'}/></label>
+                <label>Modelo<input value={integrationForm.geminiModel} onChange={(e)=>setIntegrationForm({...integrationForm,geminiModel:e.target.value})}/></label>
+              </div>
+            </div>
+
+            <div className="actions"><button className="primary" type="submit" disabled={integrationSaving}>{integrationSaving?'Salvando…':'Salvar integrações'}</button></div>
+          </form>
         </section>
       )}
 
