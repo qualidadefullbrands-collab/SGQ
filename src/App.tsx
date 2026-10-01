@@ -101,11 +101,6 @@ function toggleTransport(current: string, mode: 'Aéreo' | 'Marítimo') {
   return [...set].join(', ')
 }
 
-function boxesReceived(quantity: string, perBox: string) {
-  const q = Number(quantity)
-  const p = Number(perBox)
-  return q > 0 && p > 0 ? Math.ceil(q / p) : 0
-}
 
 function boxesToInspect(totalBoxes: number) {
   if (totalBoxes <= 0) return 0
@@ -604,8 +599,6 @@ export default function App() {
         if (created.error || !created.data) return setError(created.error?.message ?? 'Falha ao cadastrar código.')
         productId = created.data.id
       }
-
-      const receivedBoxes = Number(row.caixasRecebidas)
       const item = await supabase.from('processo_itens').insert({
         processo_id: processId,
         produto_id: productId,
@@ -1788,7 +1781,7 @@ export default function App() {
               <div className="section-title conclusion-title">
                 <label>Observação / conclusão</label>
                 <button className="secondary small" type="button" onClick={generateConclusionWithAI} disabled={aiLoading}>
-                  ${aiLoading ? 'Gerando…' : 'Gerar com IA'}
+                  {aiLoading ? 'Gerando…' : 'Gerar com IA'}
                 </button>
               </div>
               <textarea value={finalObservation} onChange={(e)=>setFinalObservation(e.target.value)} rows={5} placeholder="A conclusão gerada pela IA permanece totalmente editável."/>
