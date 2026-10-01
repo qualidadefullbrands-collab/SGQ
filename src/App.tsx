@@ -1403,6 +1403,7 @@ export default function App() {
                         <div className="row-actions">
                           {i.resultado && i.resultado!=='pendente' && <span className={'result-badge '+i.resultado}>{statusLabel(i.resultado)}</span>}
                           <button className="primary small" onClick={()=>openInspection(i.id)}>{i.status==='concluida'?'Abrir':'Continuar'}</button>
+                          {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection(i)}><Trash2 size={15}/></button>}
                         </div>
                       </div>
                     ))}
@@ -1538,6 +1539,7 @@ export default function App() {
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
               {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
+              {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
           </div>
 
@@ -1584,7 +1586,7 @@ export default function App() {
                     <div className="check-copy"><b>{item.ordem}. {item.requisito}</b><span>{item.instrucao}</span></div>
                     <div className="tri-buttons">
                       <button className={r?.resultado==='conforme'?'selected ok':''} onClick={()=>saveChecklist(item.id,'conforme')}>C</button>
-                      <button className={r?.resultado==='nao_conforme'?'selected bad':''} onClick={()=>saveChecklist(item.id,'nao_conforme')}>NC</button>
+                      <button className={r?.resultado==='nao_conforme'?'selected bad':''} onClick={()=>openNcModal(item.id)}>NC</button>
                       <button className={r?.resultado==='nao_aplicavel'?'selected':''} onClick={()=>saveChecklist(item.id,'nao_aplicavel')}>NA</button>
                     </div>
                     {r?.resultado==='nao_conforme' && (
@@ -1905,15 +1907,24 @@ export default function App() {
       {ncDraft.open && (
         <div className="modal-backdrop">
           <form className="sample-detail" onSubmit={(e)=>{e.preventDefault();persistUnit(false,ncDraft)}}>
-            <button className="close" type="button" onClick={()=>setNcDraft({...ncDraft,open:false})}>×</button>
+            <button className="close" type="button" onClick={resetNcDraft}>×</button>
             <span className="eyebrow">NÃO CONFORMIDADE</span>
-            <h2>Registrar unidade NC</h2>
+            <h2>Registrar NC</h2>
+
+            <label>Item da IT relacionado
+              <select required value={ncDraft.checklistId} onChange={(e)=>setNcDraft({...ncDraft,checklistId:e.target.value})}>
+                <option value="">Selecione o item verificado</option>
+                {(detail?.checklist ?? []).map((x:any)=><option key={x.id} value={x.id}>{x.ordem}. {x.requisito}</option>)}
+              </select>
+            </label>
+
             <label>Componente / produto
               <select value={ncDraft.itemId} onChange={(e)=>setNcDraft({...ncDraft,itemId:e.target.value})}>
                 <option value="">Conjunto / geral</option>
                 {(detail?.items ?? []).map((x:any)=><option key={x.processo_itens.id} value={x.processo_itens.id}>{x.processo_itens.produtos?.sku} · {x.processo_itens.produtos?.nome}</option>)}
               </select>
             </label>
+
             <label>Classificação
               <select value={ncDraft.severity} onChange={(e)=>setNcDraft({...ncDraft,severity:e.target.value})}>
                 <option value="critico">Crítico</option>
@@ -1921,11 +1932,37 @@ export default function App() {
                 <option value="toleravel">Tolerável</option>
               </select>
             </label>
-            <label>Descrição<textarea rows={4} value={ncDraft.description} onChange={(e)=>setNcDraft({...ncDraft,description:e.target.value})}/></label>
-            <button className="danger wide" type="submit">Registrar NC</button>
+
+            <label>Descrição<textarea required rows={4} value={ncDraft.description} onChange={(e)=>setNcDraft({...ncDraft,description:e.target.value})}/></label>
+
+            <label>Foto específica da NC
+              <input required type="file" accept="image/*" onChange={(e)=>{
+                const file=e.target.files?.[0] ?? null
+                if (ncDraft.photoPreview) URL.revokeObjectURL(ncDraft.photoPreview)
+                setNcDraft({...ncDraft,photoFile:file,photoPreview:file?URL.createObjectURL(file):''})
+              }}/>
+            </label>
+            {ncDraft.photoPreview && <img className="nc-preview" src={ncDraft.photoPreview} alt="Prévia da NC"/>}
+            <label>Legenda da foto<input required value={ncDraft.photoLegenda} onChange={(e)=>setNcDraft({...ncDraft,photoLegenda:e.target.value})} placeholder="Ex.: Trinca próxima ao gargalo"/></label>
+
+            <button className="danger wide" type="submit">Registrar NC e foto</button>
           </form>
         </div>
       )}
+
+      {!!pendingModal.length && (
+        <div className="modal-backdrop" onClick={()=>setPendingModal([])}>
+          <article className="sample-detail pending-detail" onClick={(e)=>e.stopPropagation()}>
+            <button className="close" type="button" onClick={()=>setPendingModal([])}>×</button>
+            <span className="eyebrow">PENDÊNCIAS</span>
+            <h2>Não é possível finalizar ainda</h2>
+            <p>Corrija os itens abaixo:</p>
+            <ul className="pending-list">{pendingModal.map((p,i)=><li key={i}>{p}</li>)}</ul>
+            <button className="primary wide" type="button" onClick={()=>setPendingModal([])}>Voltar para a inspeção</button>
+          </article>
+        </div>
+      )}
+
     </main>
   )
 }
