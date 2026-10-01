@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Boxes, Camera, CheckCircle2, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Trash2, Upload, Warehouse, X } from 'lucide-react'
+import { Boxes, Camera, CheckCircle2, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, MessageCircle, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { supabase } from './lib/supabase'
 
@@ -1808,6 +1808,22 @@ export default function App() {
             <ProgressItem done={detail.retencao_decisao!==null} label="Retenção"/>
           </section>
 
+          <section className="inspection-assistant-strip">
+            <div className="assistant-strip-copy">
+              <Sparkles size={17}/>
+              <div>
+                <strong>IA assistida</strong>
+                <span>Acompanha o que já foi registrado e orienta o próximo passo sem alterar decisões ou cálculos.</span>
+              </div>
+            </div>
+            <button className="secondary small" type="button" onClick={()=>{
+              setAssistantOpen(true)
+              if (!assistantText) void runInspectionAssistant('analisar')
+            }}>
+              <MessageCircle size={15}/> Abrir assistente
+            </button>
+          </section>
+
           <section className="panel section-card">
             <div className="section-title">
               <h2>Plano de amostragem</h2>
@@ -2058,6 +2074,46 @@ export default function App() {
             </section>
           )}
         </section>
+      )}
+
+      {assistantOpen && tab==='execucao' && detail && (
+        <div className="modal-backdrop assistant-backdrop" onClick={()=>setAssistantOpen(false)}>
+          <aside className="inspection-assistant-panel" onClick={(e)=>e.stopPropagation()}>
+            <div className="assistant-panel-head">
+              <div>
+                <span className="eyebrow">IA ASSISTIDA</span>
+                <h2>Assistente da inspeção</h2>
+                <p>{detail.numero} · {detail.it_versoes?.instrucoes_trabalho?.codigo || 'IT'}</p>
+              </div>
+              <button className="close" type="button" onClick={()=>setAssistantOpen(false)}>×</button>
+            </div>
+
+            <div className="assistant-actions">
+              <button className="primary" type="button" disabled={assistantLoading} onClick={()=>runInspectionAssistant('analisar')}>
+                <Sparkles size={16}/>{assistantLoading?'Analisando…':'Analisar andamento'}
+              </button>
+            </div>
+
+            <div className="assistant-answer">
+              {assistantLoading && <div className="assistant-loading">Lendo o estado atual da inspeção…</div>}
+              {!assistantLoading && assistantText && <div className="assistant-text">{assistantText}</div>}
+              {!assistantLoading && !assistantText && <div className="assistant-empty">Abra a análise para receber orientação sobre pendências e próximo passo.</div>}
+            </div>
+
+            <div className="assistant-question">
+              <label>Pergunte sobre esta inspeção
+                <textarea rows={3} value={assistantQuestion} onChange={(e)=>setAssistantQuestion(e.target.value)} placeholder="Ex.: o que ainda falta antes de finalizar?"/>
+              </label>
+              <button className="secondary wide" type="button" disabled={assistantLoading || !assistantQuestion.trim()} onClick={()=>runInspectionAssistant('pergunta')}>
+                <MessageCircle size={15}/> Perguntar
+              </button>
+            </div>
+
+            <div className="assistant-disclaimer">
+              A IA orienta com base nos dados registrados e na IT vinculada. Amostragem, Ac/Re e decisão final continuam controlados pelo SGQ e pelo inspetor.
+            </div>
+          </aside>
+        </div>
       )}
 
       {tab==='its' && (
