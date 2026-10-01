@@ -1764,12 +1764,6 @@ export default function App() {
           </section>
 
           {detail.status!=='concluida' && (
-              <label className="upload-box"><Camera size={22}/><span>Adicionar fotos</span><input type="file" accept="image/*" multiple onChange={(e)=>uploadInspectionPhotos(e.target.files)}/></label>
-            )}
-            <div className="photo-list">{(detail.photos ?? []).map((p:any)=><span key={p.id}>{p.legenda || p.storage_path}</span>)}</div>
-          </section>
-
-          {detail.status!=='concluida' && (
             <section className="panel section-card result-panel">
               <h2>Resultado final</h2>
               <div className="readiness">
