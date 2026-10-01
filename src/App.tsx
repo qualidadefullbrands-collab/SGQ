@@ -1754,11 +1754,11 @@ export default function App() {
                         </label>
                         <label>Descrição
                           <input value={row.nome} readOnly placeholder="Preenchida pelo OMIE"/>
-                          {row.omieStatus==='loading' && <small className="field-status">Consultando OMIE…</small>}
-                          {row.omieStatus==='found' && <small className="field-status ok">Produto confirmado no OMIE</small>}
-                          {row.omieStatus==='not_found' && <small className="field-status bad">Código não encontrado no OMIE</small>}
-                          {row.omieStatus==='not_configured' && <small className="field-status warn">Integração OMIE ainda não configurada neste SGQ</small>}
-                          {row.omieStatus==='error' && <small className="field-status bad">Falha ao consultar o OMIE</small>}
+                          {row.omieStatus==='loading' && <small className="field-status">{row.omieMessage || 'Consultando OMIE…'}</small>}
+                          {row.omieStatus==='found' && <small className="field-status ok">{row.omieMessage || 'Produto confirmado no OMIE'}</small>}
+                          {row.omieStatus==='not_found' && <small className="field-status bad">{row.omieMessage || 'Código não encontrado no OMIE'}</small>}
+                          {row.omieStatus==='not_configured' && <small className="field-status warn">{row.omieMessage || 'Integração OMIE não configurada'}</small>}
+                          {row.omieStatus==='error' && <small className="field-status bad">{row.omieMessage || 'Falha ao consultar o OMIE'}</small>}
                         </label>
                         <label>Lote<input value={row.lote} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,lote:e.target.value}:r))}/></label>
                         <label>Material<input value={row.material} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,material:e.target.value}:r))}/></label>
