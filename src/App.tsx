@@ -1712,8 +1712,39 @@ export default function App() {
           </section>
 
           <section className="panel section-card">
-            <div className="section-title"><h2>Fotos da inspeção</h2><span className="pill">{detail.photos?.length ?? 0} arquivo(s)</span></div>
+            <div className="section-title">
+              <div><h2>Fotos da inspeção</h2><span className="section-note">Cada foto deve ter uma legenda antes do envio.</span></div>
+              <span className="pill">{detail.photos?.length ?? 0} enviada(s)</span>
+            </div>
+
             {detail.status!=='concluida' && (
+              <>
+                <label className="upload-box"><Camera size={22}/><span>Selecionar fotos</span><input type="file" accept="image/*" multiple onChange={(e)=>addPendingPhotos(e.target.files)}/></label>
+                {!!pendingPhotos.length && <div className="pending-photo-grid">
+                  {pendingPhotos.map((p)=>(
+                    <article className="photo-card" key={p.id}>
+                      <img src={p.url} alt="Prévia"/>
+                      <label>Legenda<input value={p.legenda} onChange={(e)=>setPendingPhotos((old)=>old.map((x)=>x.id===p.id?{...x,legenda:e.target.value}:x))} placeholder="Ex.: Tampa com risco na lateral"/></label>
+                      <button className="secondary small" type="button" onClick={()=>removePendingPhoto(p.id)}>Remover</button>
+                    </article>
+                  ))}
+                </div>}
+                {!!pendingPhotos.length && <div className="actions"><button className="primary" type="button" onClick={uploadInspectionPhotos}>Enviar fotos</button></div>}
+              </>
+            )}
+
+            <div className="photo-gallery">
+              {(detail.photos ?? []).map((p:any)=>(
+                <article className="photo-card saved" key={p.id}>
+                  {p.signed_url ? <img src={p.signed_url} alt={p.legenda || 'Foto da inspeção'}/> : <div className="photo-placeholder"><Camera size={22}/></div>}
+                  <strong>{p.legenda || 'Sem legenda'}</strong>
+                  {p.nc_id && <span className="nc-photo-tag">Foto de NC</span>}
+                </article>
+              ))}
+            </div>
+          </section>
+
+          {detail.status!=='concluida' && (
               <label className="upload-box"><Camera size={22}/><span>Adicionar fotos</span><input type="file" accept="image/*" multiple onChange={(e)=>uploadInspectionPhotos(e.target.files)}/></label>
             )}
             <div className="photo-list">{(detail.photos ?? []).map((p:any)=><span key={p.id}>{p.legenda || p.storage_path}</span>)}</div>
