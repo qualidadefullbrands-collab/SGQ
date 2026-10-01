@@ -1602,29 +1602,89 @@ export default function App() {
           </section>
 
           <section className="panel section-card">
-            <div className="section-title"><h2>Análises dimensionais</h2>{detail.dimensionais_finalizados && <span className="pill">Concluído</span>}</div>
+            <div className="section-title">
+              <div><h2>Análises dimensionais</h2><span className="section-note">Especificação, instrumento, desvio aceitável e 10 medições por parâmetro.</span></div>
+              {detail.dimensionais_finalizados && <span className="pill">Concluído</span>}
+            </div>
+
             {(detail.items ?? []).map((link:any)=>{
               const item=link.processo_itens
               return (
                 <div className="dimension-item" key={item.id}>
                   <h3>{item.produtos?.sku} · {item.produtos?.nome}</h3>
-                  {(detail.params ?? []).map((p:any)=>(
-                    <div className="dimension-param" key={p.id}>
-                      <div className="param-title"><strong>{p.nome}</strong><span>{p.unidade || ''}</span></div>
-                      <div className="measurement-grid">
-                        {Array.from({length:10},(_,k)=>{
-                          const seq=k+1
-                          const existing=detail.dimResults?.find((x:any)=>x.processo_item_id===item.id && x.parametro_id===p.id && x.sequencia_amostra===seq)
-                          return (
-                            <label key={seq}>
-                              <span>{seq}</span>
-                              <input type="number" step="any" defaultValue={existing?.valor ?? ''} onBlur={(e)=>saveDimension(item.id,p,seq,e.target.value)} disabled={detail.status==='concluida'}/>
+                  {(detail.params ?? []).map((p:any)=>{
+                    const cfg=getDimConfig(item.id,p.id) ?? {}
+                    const summary=dimensionSummary(item.id,p.id)
+                    const min=cfg.minimo_aceitavel
+                    const max=cfg.maximo_aceitavel
+                    return (
+                      <div className={'dimension-param '+(cfg.nao_aplicavel?'is-na':'')} key={p.id}>
+                        <div className="param-title">
+                          <div><strong>{p.nome}</strong>{cfg.nao_aplicavel && <span className="pill">NA</span>}</div>
+                          <label className="check-option compact">
+                            <input type="checkbox" checked={!!cfg.nao_aplicavel} disabled={detail.status==='concluida'} onChange={(e)=>saveDimConfig(item.id,p,{nao_aplicavel:e.target.checked})}/>
+                            <span>Não aplicável</span>
+                          </label>
+                        </div>
+
+                        {!cfg.nao_aplicavel && <>
+                          <div className="dim-config-grid">
+                            <label>Valor especificado
+                              <input type="number" step="any" defaultValue={cfg.valor_nominal ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{valor_nominal:e.target.value})} disabled={detail.status==='concluida'}/>
                             </label>
-                          )
-                        })}
+                            <label>Unidade
+                              <select value={cfg.unidade ?? p.unidade ?? ''} onChange={(e)=>saveDimConfig(item.id,p,{unidade:e.target.value})} disabled={detail.status==='concluida'}>
+                                <option value="">Selecionar</option>
+                                <option value="mg">mg</option><option value="g">g</option><option value="kg">kg</option>
+                                <option value="mL">mL</option><option value="L">L</option>
+                                <option value="µm">µm</option><option value="mm">mm</option><option value="cm">cm</option>
+                                <option value="N">N</option><option value="°C">°C</option><option value="%">%</option>
+                                <option value="un">un</option>
+                              </select>
+                            </label>
+                            <label>Equipamento / instrumento
+                              <input defaultValue={cfg.equipamento ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{equipamento:e.target.value})} disabled={detail.status==='concluida'}/>
+                            </label>
+                            <label>Cód. equipamento
+                              <input defaultValue={cfg.codigo_equipamento ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{codigo_equipamento:e.target.value})} disabled={detail.status==='concluida'}/>
+                            </label>
+                            <label>Desvio - 
+                              <input type="number" min="0" step="any" defaultValue={cfg.desvio_menos ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{desvio_menos:e.target.value})} disabled={detail.status==='concluida'}/>
+                            </label>
+                            <label>Desvio +
+                              <input type="number" min="0" step="any" defaultValue={cfg.desvio_mais ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{desvio_mais:e.target.value})} disabled={detail.status==='concluida'}/>
+                            </label>
+                            <label className="span-2">Especificação / desvio
+                              <input defaultValue={cfg.especificacao_desvio ?? ''} placeholder="Ex.: 60 g ± 2 g" onBlur={(e)=>saveDimConfig(item.id,p,{especificacao_desvio:e.target.value})} disabled={detail.status==='concluida'}/>
+                            </label>
+                          </div>
+
+                          <div className="tolerance-strip">
+                            <span>Faixa aceitável <b>{min ?? '—'} a {max ?? '—'} {cfg.unidade ?? p.unidade ?? ''}</b></span>
+                            <span>Medições <b>{summary.total}/10</b></span>
+                            <span>Conformes <b>{summary.c}</b></span>
+                            <span>NC <b>{summary.nc}</b></span>
+                            <span>Decisão <b className={'dim-decision '+summary.decision.toLowerCase()}>{summary.decision}</b></span>
+                          </div>
+
+                          <div className="measurement-grid">
+                            {Array.from({length:10},(_,k)=>{
+                              const seq=k+1
+                              const existing=detail.dimResults?.find((x:any)=>x.processo_item_id===item.id && x.parametro_id===p.id && x.sequencia_amostra===seq)
+                              return (
+                                <label className={existing?.conforme===true?'measure-ok':existing?.conforme===false?'measure-bad':''} key={seq}>
+                                  <span>{seq}</span>
+                                  <input type="number" step="any" defaultValue={existing?.valor ?? ''} onBlur={(e)=>saveDimension(item.id,p,seq,e.target.value)} disabled={detail.status==='concluida'}/>
+                                  {existing?.conforme===true && <small>C</small>}
+                                  {existing?.conforme===false && <small>NC</small>}
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </>}
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                   {!detail.params?.length && <div className="muted">Esta IT não possui parâmetros dimensionais estruturados.</div>}
                 </div>
               )
