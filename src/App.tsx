@@ -2051,7 +2051,7 @@ export default function App() {
               {(detail.items ?? []).map((link:any)=>{
                 const item=link.processo_itens
                 const existing=detail.retained?.find((x:any)=>x.produto_id===item.produto_id)
-                const draft=retentionRows[item.id] || {retain:true,qty:'',address:''}
+                const draft=retentionRows[item.id] || {retain:true,qty:'',address:'',photoFile:null,photoPreview:''}
                 return (
                   <div className="retention-row" key={item.id}>
                     <label className="switch-line">
@@ -2060,7 +2060,22 @@ export default function App() {
                     </label>
                     {!existing && draft.retain && <>
                       <label>Quantidade<input type="number" min="0.01" step="0.01" value={draft.qty} onChange={(e)=>setRetentionRows({...retentionRows,[item.id]:{...draft,qty:e.target.value}})}/></label>
-                      <label>Endereço<input value={draft.address} onChange={(e)=>setRetentionRows({...retentionRows,[item.id]:{...draft,address:e.target.value}})}/></label>
+                      <label>Endereço<input value={draft.address} onChange={(e)=>setRetentionRows({...retentionRows,[item.id]:{...draft,address:e.target.value}})} placeholder="Ex.: ARM 03 ou INSPEÇÃO"/></label>
+                      <label className="retention-photo-field">Foto de cadastro
+                        <input type="file" accept="image/*" onChange={(e)=>{
+                          const file=e.target.files?.[0] ?? null
+                          if (draft.photoPreview) URL.revokeObjectURL(draft.photoPreview)
+                          setRetentionRows({
+                            ...retentionRows,
+                            [item.id]:{
+                              ...draft,
+                              photoFile:file,
+                              photoPreview:file?URL.createObjectURL(file):'',
+                            },
+                          })
+                        }}/>
+                      </label>
+                      {draft.photoPreview && <img className="retention-photo-preview" src={draft.photoPreview} alt="Foto de cadastro da amostra"/>}
                     </>}
                     {existing && <span className="pill">No estoque</span>}
                   </div>
@@ -2157,7 +2172,7 @@ export default function App() {
             <article><span>Saldo total</span><strong>{stockStats.unidades.toLocaleString('pt-BR')}</strong><small>unidades</small></article>
             <article><span>Registros</span><strong>{stockStats.registros}</strong><small>posições de estoque</small></article>
             <article><span>SKUs</span><strong>{stockStats.skus}</strong><small>códigos distintos</small></article>
-            <article className={stockStats.emInspecao>0?'attention':''}><span>Em inspeção</span><strong>{stockStats.emInspecao.toLocaleString('pt-BR')}</strong><small>unidades fora do armário</small></article>
+            <article><span>Endereços</span><strong>{stockStats.enderecos}</strong><small>locais físicos cadastrados</small></article>
           </section>
 
           <section className="stock-controls">
@@ -2194,7 +2209,7 @@ export default function App() {
                   <span><b className="stock-mobile-label">Processo</b>{s.processo_referencia || '—'}</span>
                   <span><b className="stock-mobile-label">Cliente</b>{s.cliente_referencia || '—'}</span>
                   <span><b className="stock-mobile-label">NF</b>{s.nota_fiscal_referencia || '—'}</span>
-                  <span><b className="stock-mobile-label">Endereço</b><i className={'location-badge '+(s.endereco==='INSPEÇÃO'?'inspection':'')}>{s.endereco || '—'}</i></span>
+                  <span><b className="stock-mobile-label">Endereço</b><i className="location-badge">{s.endereco || '—'}</i></span>
                   <span className="stock-balance"><b className="stock-mobile-label">Saldo</b><strong>{Number(s.saldo).toLocaleString('pt-BR')}</strong><small>{s.unidade_controle}</small></span>
                   <span className="stock-open">›</span>
                 </button>
@@ -2228,7 +2243,7 @@ export default function App() {
                     <strong>{Number(selectedSample.saldo).toLocaleString('pt-BR')}</strong>
                     <span>{selectedSample.unidade_controle}</span>
                   </div>
-                  <div className={selectedSample.endereco==='INSPEÇÃO'?'inspection':''}>
+                  <div>
                     <small>Endereço</small>
                     <strong>{selectedSample.endereco || '—'}</strong>
                   </div>
@@ -2246,6 +2261,18 @@ export default function App() {
                   </div>
                   {selectedSample.observacao && <div className="stock-detail-note"><b>Observação</b><span>{selectedSample.observacao}</span></div>}
                 </div>
+
+                {(selectedSamplePhotoUrl || selectedSampleReport || selectedSample.inspecao_id) && (
+                  <div className="stock-detail-section stock-origin-section">
+                    <h3>Origem da retenção</h3>
+                    {selectedSamplePhotoUrl && <img className="stock-registration-photo" src={selectedSamplePhotoUrl} alt="Foto de cadastro da amostra"/>}
+                    <div className="stock-origin-actions">
+                      {selectedSampleReport?.url && <a className="secondary stock-link-button" href={selectedSampleReport.url} target="_blank" rel="noreferrer"><FileText size={15}/> Abrir laudo</a>}
+                      {selectedSampleReport && !selectedSampleReport.url && <button className="secondary" type="button" onClick={()=>selectedSample.inspecao_id && openInspection(selectedSample.inspecao_id)}><FileText size={15}/> {selectedSampleReport.numero}</button>}
+                      {!selectedSampleReport && selectedSample.inspecao_id && <button className="secondary" type="button" onClick={()=>openInspection(selectedSample.inspecao_id!)}><ClipboardCheck size={15}/> Abrir inspeção</button>}
+                    </div>
+                  </div>
+                )}
 
                 <div className="stock-detail-section stock-label-section">
                   <div>
