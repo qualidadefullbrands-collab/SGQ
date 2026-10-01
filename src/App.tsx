@@ -412,8 +412,16 @@ export default function App() {
       return
     }
 
-    if (!data?.found || !data?.descricao) {
+    if (data?.error === 'omie_not_configured') {
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_configured'}:r))
+      return
+    }
+    if (data?.error === 'not_found') {
       setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_found'}:r))
+      return
+    }
+    if (data?.error || !data?.found || !data?.descricao) {
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'error'}:r))
       return
     }
 
@@ -1043,6 +1051,10 @@ export default function App() {
       if (msg.includes('ai_not_configured')) return setError('A geração por IA está pronta, mas a chave GEMINI_API_KEY ainda não foi configurada neste SGQ.')
       return setError('Não foi possível gerar a conclusão com IA.')
     }
+    if (data?.error === 'ai_not_configured') {
+      return setError('A geração por IA está pronta, mas a integração Gemini ainda não foi configurada em Configurações.')
+    }
+    if (data?.error) return setError('Não foi possível gerar a conclusão com IA.')
     if (data?.text) setFinalObservation(String(data.text))
   }
 
