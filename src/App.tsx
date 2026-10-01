@@ -440,6 +440,32 @@ export default function App() {
     await loadApp()
   }
 
+  async function deleteInspection(i: InspectionRow | { id:string; numero?:string }) {
+    if (!canDelete || !userId) return
+    const label = (i as any).numero ? ` ${(i as any).numero}` : ''
+    if (!window.confirm(`Excluir a inspeção${label}? Ela sairá da operação, mas o registro de auditoria será preservado.`)) return
+    const { error } = await supabase.from('inspecoes').update({
+      excluido_em: new Date().toISOString(),
+      excluido_por: userId,
+      status: 'cancelada',
+    }).eq('id', i.id)
+    if (error) return setError(error.message)
+    await supabase.from('audit_log').insert({
+      usuario_id: userId,
+      entidade: 'inspecoes',
+      entidade_id: i.id,
+      acao: 'exclusao_logica',
+      dados: { numero: (i as any).numero ?? null },
+    })
+    if (selectedInspectionId === i.id) {
+      setSelectedInspectionId(null)
+      setDetail(null)
+      setTab('inspecoes')
+    }
+    setMessage('Inspeção excluída da operação.')
+    await loadApp()
+  }
+
   async function openInspection(id: string) {
     setError('')
     setSelectedInspectionId(id)
@@ -722,17 +748,81 @@ export default function App() {
     await openInspection(selectedInspectionId)
   }
 
+  function getDimConfig(itemId:string, paramId:string) {
+    return detail?.dimConfigs?.find((x:any)=>x.processo_item_id===itemId && x.parametro_id===paramId) ?? null
+  }
+
+  async function saveDimConfig(itemId:string, param:any, patch:any) {
+    if (!selectedInspectionId) return
+    const current = getDimConfig(itemId,param.id) ?? {}
+    const next:any = { ...current, ...patch }
+    const nominal = next.valor_nominal === '' || next.valor_nominal == null ? null : Number(next.valor_nominal)
+    const minus = next.desvio_menos === '' || next.desvio_menos == null ? null : Number(next.desvio_menos)
+    const plus = next.desvio_mais === '' || next.desvio_mais == null ? null : Number(next.desvio_mais)
+    if (nominal != null && minus != null) next.minimo_aceitavel = nominal - minus
+    if (nominal != null && plus != null) next.maximo_aceitavel = nominal + plus
+
+    const payload = {
+      inspecao_id:selectedInspectionId,
+      processo_item_id:itemId,
+      parametro_id:param.id,
+      nao_aplicavel:!!next.nao_aplicavel,
+      equipamento:next.equipamento || null,
+      codigo_equipamento:next.codigo_equipamento || null,
+      unidade:next.unidade || param.unidade || null,
+      valor_nominal:nominal,
+      desvio_menos:minus,
+      desvio_mais:plus,
+      minimo_aceitavel:next.minimo_aceitavel ?? null,
+      maximo_aceitavel:next.maximo_aceitavel ?? null,
+      especificacao_desvio:next.especificacao_desvio || null,
+      atualizado_em:new Date().toISOString(),
+    }
+    const q=await supabase.from('inspecao_dimensional_configuracoes').upsert(payload,{onConflict:'inspecao_id,processo_item_id,parametro_id'}).select('*').single()
+    if (q.error || !q.data) return setError(q.error?.message ?? 'Falha ao salvar configuração dimensional.')
+    setDetail((d:any)=>{
+      const others=(d.dimConfigs ?? []).filter((x:any)=>!(x.processo_item_id===itemId && x.parametro_id===param.id))
+      return { ...d, dimConfigs:[...others,q.data] }
+    })
+  }
+
   async function saveDimension(itemId: string, param: any, seq: number, value: string) {
     if (!selectedInspectionId || !value.trim()) return
+    const cfg=getDimConfig(itemId,param.id)
+    if (cfg?.nao_aplicavel) return
+    const numeric=Number(value.replace(',','.'))
+    const min=cfg?.minimo_aceitavel == null ? null : Number(cfg.minimo_aceitavel)
+    const max=cfg?.maximo_aceitavel == null ? null : Number(cfg.maximo_aceitavel)
+    const conforme = min == null && max == null ? null :
+      (min == null || numeric >= min) && (max == null || numeric <= max)
+
     const q = await supabase.from('inspecao_dimensionais').upsert({
       inspecao_id: selectedInspectionId,
       processo_item_id: itemId,
       parametro_id: param.id,
       sequencia_amostra: seq,
-      valor: Number(value.replace(',', '.')),
-      unidade: param.unidade || null,
-    }, { onConflict: 'inspecao_id,processo_item_id,parametro_id,sequencia_amostra' })
-    if (q.error) setError(q.error.message)
+      valor: numeric,
+      unidade: cfg?.unidade || param.unidade || null,
+      conforme,
+    }, { onConflict: 'inspecao_id,processo_item_id,parametro_id,sequencia_amostra' }).select('*').single()
+    if (q.error || !q.data) return setError(q.error?.message ?? 'Falha ao salvar medição.')
+    setDetail((d:any)=>{
+      const others=(d.dimResults ?? []).filter((x:any)=>!(x.processo_item_id===itemId && x.parametro_id===param.id && x.sequencia_amostra===seq))
+      return { ...d, dimResults:[...others,q.data] }
+    })
+  }
+
+  function dimensionSummary(itemId:string,paramId:string) {
+    const rows=(detail?.dimResults ?? []).filter((x:any)=>x.processo_item_id===itemId && x.parametro_id===paramId)
+    const nc=rows.filter((x:any)=>x.conforme===false).length
+    const c=rows.filter((x:any)=>x.conforme===true).length
+    let decision='Pendente'
+    if (rows.length===10) {
+      if (detail?.limite_rejeicao != null && nc >= Number(detail.limite_rejeicao)) decision='Reprovado'
+      else if (detail?.limite_aceitacao != null && nc <= Number(detail.limite_aceitacao)) decision='Aprovado'
+      else decision='Revisar'
+    }
+    return { total:rows.length, nc, c, decision }
   }
 
   async function markDimensionalsDone() {
