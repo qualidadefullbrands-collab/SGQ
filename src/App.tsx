@@ -1514,7 +1514,7 @@ export default function App() {
     await loadApp()
   }
 
-  function downloadInspectionWord() {
+  async function downloadInspectionWord() {
     if (!detail) return
     const process = detail.grupos_inspecao?.processos
     const products = (detail.items ?? []).map((x:any) =>
@@ -1544,15 +1544,42 @@ export default function App() {
       <p>${detail.observacoes ?? ''}</p>
     </body></html>`
     const blob = new Blob([html], { type:'application/msword;charset=utf-8' })
+
+    if (selectedInspectionId) {
+      const report=await ensureInspectionReportRecord()
+      if (!report) return
+      const storagePath=`${selectedInspectionId}/${detail.numero}.doc`
+      const upload=await supabase.storage.from('laudos').upload(storagePath,blob,{
+        contentType:'application/msword',
+        upsert:true,
+      })
+      if (upload.error) {
+        setError('Não foi possível armazenar o laudo no SGQ: '+upload.error.message)
+        return
+      }
+      const generatedAt=new Date().toISOString()
+      const updated=await supabase.from('laudos').update({
+        storage_path:storagePath,
+        gerado_em:generatedAt,
+      }).eq('id',report.id)
+      if (updated.error) {
+        setError('O Word foi gerado, mas não foi possível vincular o arquivo ao laudo.')
+        return
+      }
+      await supabase.from('amostras')
+        .update({laudo_id:report.id})
+        .eq('inspecao_id',selectedInspectionId)
+        .is('laudo_id',null)
+      await supabase.from('inspecoes').update({documento_gerado_em:generatedAt}).eq('id',selectedInspectionId)
+    }
+
     const href = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = href
-    a.download = `${detail.numero}.doc`
+    a.download = `${formatFst(process?.codigo)}-${detail.numero}.doc`
     a.click()
     URL.revokeObjectURL(href)
-    if (selectedInspectionId) {
-      void supabase.from('inspecoes').update({ documento_gerado_em:new Date().toISOString() }).eq('id',selectedInspectionId)
-    }
+    await loadApp()
   }
 
   if (!sessionReady) return <div className="center-screen">Carregando SGQ…</div>
