@@ -1759,7 +1759,13 @@ export default function App() {
                 <span className={dimsDone?'done':''}>Dimensionais</span>
                 <span className={testsDone?'done':''}>Testes</span>
               </div>
-              <label>Observação / conclusão<textarea value={finalObservation} onChange={(e)=>setFinalObservation(e.target.value)} rows={4}/></label>
+              <div className="section-title conclusion-title">
+                <label>Observação / conclusão</label>
+                <button className="secondary small" type="button" onClick={generateConclusionWithAI} disabled={aiLoading}>
+                  ${aiLoading ? 'Gerando…' : 'Gerar com IA'}
+                </button>
+              </div>
+              <textarea value={finalObservation} onChange={(e)=>setFinalObservation(e.target.value)} rows={5} placeholder="A conclusão gerada pela IA permanece totalmente editável."/>
               <div className="result-actions">
                 <button className="success-button" onClick={()=>finishInspection('aprovado')}>Aprovar inspeção</button>
                 <button className="danger" onClick={()=>finishInspection('reprovado')}>Reprovar inspeção</button>
