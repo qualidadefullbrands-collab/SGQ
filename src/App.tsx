@@ -72,6 +72,14 @@ type Sample = {
   grupo_inspecao_id: string | null
   inspecao_id?: string | null
   produto_id?: string | null
+  sku?: string | null
+  processo_referencia?: string | null
+  data_chegada_referencia?: string | null
+  nota_fiscal_referencia?: string | null
+  cliente_referencia?: string | null
+  observacao?: string | null
+  origem_importacao?: string | null
+  linha_origem?: number | null
 }
 
 const emptySku = () => ({
@@ -175,6 +183,8 @@ export default function App() {
   const [itVersions, setItVersions] = useState<ItVersion[]>([])
   const [groups, setGroups] = useState<Group[]>([])
   const [samples, setSamples] = useState<Sample[]>([])
+  const [stockSearch, setStockSearch] = useState('')
+  const [stockAddress, setStockAddress] = useState('Todos')
   const [selectedSample, setSelectedSample] = useState<Sample | null>(null)
   const [qrDataUrl, setQrDataUrl] = useState('')
 
@@ -239,6 +249,22 @@ export default function App() {
     [statisticalLot, inspection.inspectionLevel],
   )
 
+  const stockAddresses = useMemo(
+    () => ['Todos', ...Array.from(new Set(samples.map((s)=>s.endereco).filter(Boolean) as string[])).sort()],
+    [samples],
+  )
+  const filteredSamples = useMemo(() => {
+    const q=stockSearch.trim().toLowerCase()
+    return samples.filter((s)=>{
+      if (stockAddress!=='Todos' && s.endereco!==stockAddress) return false
+      if (!q) return true
+      return [
+        s.codigo,s.sku,s.descricao,s.processo_referencia,s.cliente_referencia,
+        s.nota_fiscal_referencia,s.endereco,s.observacao,
+      ].some((v)=>String(v ?? '').toLowerCase().includes(q))
+    })
+  },[samples,stockSearch,stockAddress])
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setUserId(data.session?.user.id ?? null)
@@ -290,7 +316,7 @@ export default function App() {
       supabase.from('inspecoes').select('id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))').is('excluido_em', null).order('criado_em', { ascending: false }),
       supabase.from('it_versoes').select('id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)').order('criado_em', { ascending: false }),
       supabase.from('grupos_inspecao').select('id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)').order('criado_em', { ascending: false }),
-      supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id').order('codigo', { ascending: false }),
+      supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id,sku,processo_referencia,data_chegada_referencia,nota_fiscal_referencia,cliente_referencia,observacao,origem_importacao,linha_origem').order('codigo', { ascending: false }),
       supabase.from('laudos').select('*', { count: 'exact', head: true }),
     ])
     if (!p.data) {
@@ -1907,17 +1933,43 @@ export default function App() {
 
       {tab==='estoque' && (
         <section className="workspace">
-          <div className="page-title"><div><span className="eyebrow">AMOSTRAS DE RETENÇÃO</span><h1>Estoque</h1></div></div>
+          <div className="page-title">
+            <div><span className="eyebrow">AMOSTRAS DE RETENÇÃO</span><h1>Estoque</h1></div>
+            <span className="pill">{filteredSamples.length} registro(s)</span>
+          </div>
+
+          <section className="stock-toolbar">
+            <label className="stock-search">Buscar
+              <div className="input-action"><Search size={16}/><input value={stockSearch} onChange={(e)=>setStockSearch(e.target.value)} placeholder="SKU, produto, FST, cliente, NF..."/></div>
+            </label>
+            <label>Endereço
+              <select value={stockAddress} onChange={(e)=>setStockAddress(e.target.value)}>
+                {stockAddresses.map((x)=><option value={x} key={x}>{x}</option>)}
+              </select>
+            </label>
+          </section>
+
           <div className="sample-grid">
-            {samples.map((s)=>(
+            {filteredSamples.map((s)=>(
               <article className="sample-card" key={s.id} onClick={()=>setSelectedSample(s)}>
-                <div><span className="eyebrow">{s.codigo}</span><h3>{s.descricao || 'Amostra'}</h3></div>
-                <div className="sample-meta"><span>Saldo <b>{s.saldo} {s.unidade_controle}</b></span><span>Endereço <b>{s.endereco || '—'}</b></span></div>
+                <div>
+                  <div className="stock-card-kicker">
+                    <span className="eyebrow">{s.sku || s.codigo}</span>
+                    {s.processo_referencia && <span className="pill">{s.processo_referencia}</span>}
+                  </div>
+                  <h3>{s.descricao || 'Amostra'}</h3>
+                  <p className="stock-client">{s.cliente_referencia || 'Cliente não informado'}{s.nota_fiscal_referencia?' · NF '+s.nota_fiscal_referencia:''}</p>
+                </div>
+                <div className="sample-meta">
+                  <span>Saldo <b>{s.saldo} {s.unidade_controle}</b></span>
+                  <span>Endereço <b>{s.endereco || '—'}</b></span>
+                </div>
+                {s.observacao && <div className="stock-note">{s.observacao}</div>}
                 <button className="secondary" onClick={(e)=>{e.stopPropagation();downloadZpl(s)}}><QrCode size={16}/> Etiqueta</button>
               </article>
             ))}
           </div>
-          {!samples.length && <div className="empty">Nenhuma amostra no estoque.</div>}
+          {!filteredSamples.length && <div className="empty">Nenhum registro encontrado no estoque.</div>}
 
           {selectedSample && (
             <div className="modal-backdrop" onClick={()=>setSelectedSample(null)}>
@@ -1930,7 +1982,13 @@ export default function App() {
                   <div><small>Endereço</small><strong>{selectedSample.endereco || '—'}</strong></div>
                   <div><small>Saldo</small><strong>{selectedSample.saldo} {selectedSample.unidade_controle}</strong></div>
                   <div><small>Lote</small><strong>{selectedSample.lote || '—'}</strong></div>
+                  <div><small>SKU</small><strong>{selectedSample.sku || '—'}</strong></div>
+                  <div><small>Processo</small><strong>{selectedSample.processo_referencia || '—'}</strong></div>
+                  <div><small>Cliente</small><strong>{selectedSample.cliente_referencia || '—'}</strong></div>
+                  <div><small>Nota fiscal</small><strong>{selectedSample.nota_fiscal_referencia || '—'}</strong></div>
+                  <div><small>Chegada</small><strong>{selectedSample.data_chegada_referencia || '—'}</strong></div>
                 </div>
+                {selectedSample.observacao && <div className="stock-detail-note"><b>Observação</b><span>{selectedSample.observacao}</span></div>}
                 {qrDataUrl && <img className="qr" src={qrDataUrl} alt="QR"/>}
                 <button className="secondary wide" onClick={()=>downloadZpl(selectedSample)}>Gerar etiqueta Zebra 100×50</button>
                 <div className="stock-move">
