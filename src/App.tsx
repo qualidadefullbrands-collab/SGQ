@@ -1358,7 +1358,7 @@ export default function App() {
             {inspections.filter((i)=>i.status==='em_andamento').slice(0,8).map((i)=>(
               <div className="queue-row" key={i.id}>
                 <div>
-                  <strong>{i.numero} · {i.grupos_inspecao?.processos?.codigo}</strong>
+                  <strong>{i.numero} · {formatFst(i.grupos_inspecao?.processos?.codigo)}</strong>
                   <span>{i.grupos_inspecao?.nome} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0} unidades</span>
                 </div>
                 <button className="primary small" onClick={()=>openInspection(i.id)}><Play size={15}/> Continuar</button>
@@ -1383,7 +1383,7 @@ export default function App() {
                 <article className="process-card" key={p.id}>
                   <div className="process-head">
                     <div>
-                      <span className="eyebrow">{p.codigo}</span>
+                      <span className="eyebrow">{formatFst(p.codigo)}</span>
                       <h2>{p.cliente || 'Sem cliente'}</h2>
                       <p>NF {p.nota_fiscal || '—'} · chegada {p.chegada_cd || '—'} · {p.origem || 'origem não informada'}</p>
                     </div>
@@ -1433,12 +1433,17 @@ export default function App() {
                 {inspection.processoId && <span className="pill">Processo existente</span>}
               </div>
               <div className="form-grid">
-                <label>Processo FST<input value={inspection.codigo} onChange={(e)=>setInspection({...inspection,codigo:e.target.value})} placeholder="FST..."/></label>
+                <label>Processo FST
+  <div className="fst-input"><span>FST</span><input inputMode="numeric" pattern="[0-9]*" maxLength={5} value={inspection.codigo} onChange={(e)=>setInspection({...inspection,codigo:fstDigits(e.target.value)})} placeholder="12345"/></div>
+</label>
                 <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
                 <label>Nota fiscal<input value={inspection.notaFiscal} onChange={(e)=>setInspection({...inspection,notaFiscal:e.target.value})}/></label>
                 <label>Chegada no CD<input type="date" value={inspection.chegadaCd} onChange={(e)=>setInspection({...inspection,chegadaCd:e.target.value})}/></label>
-                <label>Origem<input value={inspection.origem} onChange={(e)=>setInspection({...inspection,origem:e.target.value})}/></label>
-                <label>Transporte<input value={inspection.transporte} onChange={(e)=>setInspection({...inspection,transporte:e.target.value})}/></label>
+                <label>Origem<input value={inspection.origem} onChange={(e)=>setInspection({...inspection,origem:e.target.value})} placeholder="China"/></label>
+                <div className="field-label"><span>Transporte</span><div className="transport-checks">
+                  <label className="check-option"><input type="checkbox" checked={inspection.transporte.includes('Aéreo')} onChange={()=>setInspection({...inspection,transporte:toggleTransport(inspection.transporte,'Aéreo')})}/><span>Aéreo</span></label>
+                  <label className="check-option"><input type="checkbox" checked={inspection.transporte.includes('Marítimo')} onChange={()=>setInspection({...inspection,transporte:toggleTransport(inspection.transporte,'Marítimo')})}/><span>Marítimo</span></label>
+                </div></div>
                 <label>Data da inspeção<input type="date" value={inspection.dataInspecao} onChange={(e)=>setInspection({...inspection,dataInspecao:e.target.value})}/></label>
                 <label>IT aplicável
                   <select value={inspection.itVersionId} onChange={(e)=>setInspection({...inspection,itVersionId:e.target.value})}>
@@ -1465,8 +1470,8 @@ export default function App() {
               </div>
               <div className="sku-editor">
                 {skuRows.map((row,i)=>{
-                  const boxes=boxesReceived(row.quantidade,row.quantidadePorCaixa)
-                  const inspect=boxesToInspect(boxes)
+                  const boxes=Number(row.caixasRecebidas) || 0
+                  const inspect=Number(row.caixasInspecionadas) || 0
                   return (
                     <article className="sku-card" key={i}>
                       <div className="sku-card-head">
@@ -1476,22 +1481,34 @@ export default function App() {
                       <div className="form-grid">
                         <label>Código
                           <div className="input-action">
-                            <input value={row.sku} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,sku:e.target.value}:r))}/>
-                            <button type="button" className="secondary icon-only" title="Consultar descrição" onClick={()=>lookupProduct(i)}><Search size={16}/></button>
+                            <input value={row.sku} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,sku:e.target.value,omieStatus:''}:r))} onBlur={()=>lookupProduct(i)} placeholder="Código Omie"/>
+                            <button type="button" className="secondary icon-only" title="Consultar no OMIE" onClick={()=>lookupProduct(i)}><Search size={16}/></button>
                           </div>
                         </label>
-                        <label>Descrição<input value={row.nome} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,nome:e.target.value}:r))}/></label>
-                        <label>Código do cliente<input value={row.codigoCliente} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,codigoCliente:e.target.value}:r))}/></label>
+                        <label>Descrição
+                          <input value={row.nome} readOnly placeholder="Preenchida pelo OMIE"/>
+                          {row.omieStatus==='loading' && <small className="field-status">Consultando OMIE…</small>}
+                          {row.omieStatus==='found' && <small className="field-status ok">Produto confirmado no OMIE</small>}
+                          {row.omieStatus==='not_found' && <small className="field-status bad">Código não encontrado no OMIE</small>}
+                          {row.omieStatus==='not_configured' && <small className="field-status warn">Integração OMIE ainda não configurada neste SGQ</small>}
+                          {row.omieStatus==='error' && <small className="field-status bad">Falha ao consultar o OMIE</small>}
+                        </label>
                         <label>Lote<input value={row.lote} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,lote:e.target.value}:r))}/></label>
                         <label>Material<input value={row.material} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,material:e.target.value}:r))}/></label>
                         <label>Capacidade<input value={row.capacidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,capacidade:e.target.value}:r))}/></label>
-                        <label>Quantidade recebida<input type="number" min="1" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/></label>
-                        <label>Quantidade por caixa<input type="number" min="1" value={row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidadePorCaixa:e.target.value}:r))}/></label>
+                        <label>Quantidade recebida<input type="number" min="0.01" step="0.01" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/></label>
+                        <label>Quantidade por caixa<input type="number" min="0.01" step="0.01" value={row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidadePorCaixa:e.target.value}:r))}/></label>
+                        <label>Caixas recebidas<input type="number" min="0.01" step="0.01" value={row.caixasRecebidas} onChange={(e)=>{
+                          const received=e.target.value
+                          const calc=received ? String(boxesToInspect(Number(received))) : ''
+                          setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasRecebidas:received,caixasInspecionadas:calc}:r))
+                        }}/></label>
+                        <label>Caixas inspecionadas<input type="number" min="0.01" step="0.01" value={row.caixasInspecionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasInspecionadas:e.target.value}:r))}/><small className="field-hint">Calculado automaticamente; pode ser alterado.</small></label>
                         {isComponentSet && <label>Unidades por conjunto<input type="number" min="0.01" step="0.01" value={row.unidadesPorConjunto} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPorConjunto:e.target.value}:r))}/></label>}
                       </div>
                       <div className="computed">
                         <span>Caixas recebidas <b>{boxes || '—'}</b></span>
-                        <span>Caixas a inspecionar <b>{inspect || '—'}</b></span>
+                        <span>Caixas inspecionadas <b>{inspect || '—'}</b></span>
                       </div>
                     </article>
                   )
@@ -1515,7 +1532,7 @@ export default function App() {
         <section className="workspace execution">
           <div className="page-title">
             <div>
-              <span className="eyebrow">{detail.grupos_inspecao?.processos?.codigo} · {detail.numero}</span>
+              <span className="eyebrow">{formatFst(detail.grupos_inspecao?.processos?.codigo)} · {detail.numero}</span>
               <h1>{detail.grupos_inspecao?.nome}</h1>
             </div>
             <div className="row-actions">
@@ -1775,7 +1792,7 @@ export default function App() {
           <form className="sample-detail" onSubmit={saveProcessEdit} onClick={(e)=>e.stopPropagation()}>
             <button className="close" type="button" onClick={()=>setEditingProcess(null)}>×</button>
             <span className="eyebrow">EDITAR PROCESSO</span>
-            <h2>{editingProcess.codigo}</h2>
+            <h2>{formatFst(editingProcess.codigo)}</h2>
             <div className="form-grid one">
               <label>Cliente<input value={editingProcess.cliente ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,cliente:e.target.value})}/></label>
               <label>Nota fiscal<input value={editingProcess.nota_fiscal ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,nota_fiscal:e.target.value})}/></label>
