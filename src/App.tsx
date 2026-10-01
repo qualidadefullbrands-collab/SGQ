@@ -179,6 +179,10 @@ export default function App() {
   const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string}>>([])
   const [pendingModal, setPendingModal] = useState<string[]>([])
   const [aiLoading, setAiLoading] = useState(false)
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  const [assistantLoading, setAssistantLoading] = useState(false)
+  const [assistantText, setAssistantText] = useState('')
+  const [assistantQuestion, setAssistantQuestion] = useState('')
   const [itVersions, setItVersions] = useState<ItVersion[]>([])
   const [groups, setGroups] = useState<Group[]>([])
   const [samples, setSamples] = useState<Sample[]>([])
@@ -452,6 +456,7 @@ export default function App() {
     }
     if (data?.error || !data?.found || !data?.descricao) {
       setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'error'}:r))
+      if (data?.message) setError('OMIE: '+String(data.message))
       return
     }
 
@@ -594,11 +599,11 @@ export default function App() {
     }
     setDetail(next)
     setFinalObservation(ins.data.observacoes ?? '')
-    const retention: Record<string,{retain:boolean;qty:string;address:string}> = {}
+    const retention: Record<string,{retain:boolean;qty:string;address:string;photoFile:File|null;photoPreview:string}> = {}
     for (const link of next.items as any[]) {
       const item = link.processo_itens
       const existing = (next.retained as any[]).find((x) => x.produto_id === item?.produto_id)
-      retention[item.id] = { retain: !existing, qty: '', address: '' }
+      retention[item.id] = { retain: !existing, qty: '', address: '', photoFile: null, photoPreview: '' }
     }
     setRetentionRows(retention)
     setTab('execucao')
