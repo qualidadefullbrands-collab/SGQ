@@ -80,6 +80,8 @@ type Sample = {
   observacao?: string | null
   origem_importacao?: string | null
   linha_origem?: number | null
+  laudo_id?: string | null
+  foto_cadastro_path?: string | null
 }
 
 const emptySku = () => ({
@@ -169,7 +171,9 @@ export default function App() {
     photoFile:File|null; photoPreview:string; photoLegenda:string;
   }>({ open:false, severity:'grave', description:'', itemId:'', checklistId:'', photoFile:null, photoPreview:'', photoLegenda:'' })
   const [finalObservation, setFinalObservation] = useState('')
-  const [retentionRows, setRetentionRows] = useState<Record<string,{retain:boolean;qty:string;address:string}>>({})
+  const [retentionRows, setRetentionRows] = useState<Record<string,{
+    retain:boolean; qty:string; address:string; photoFile:File|null; photoPreview:string
+  }>>({})
   const [retentionReason, setRetentionReason] = useState('')
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
   const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string}>>([])
@@ -182,6 +186,8 @@ export default function App() {
   const [stockAddress, setStockAddress] = useState('Todos')
   const [selectedSample, setSelectedSample] = useState<Sample | null>(null)
   const [qrDataUrl, setQrDataUrl] = useState('')
+  const [selectedSamplePhotoUrl, setSelectedSamplePhotoUrl] = useState('')
+  const [selectedSampleReport, setSelectedSampleReport] = useState<{numero:string;url:string|null}|null>(null)
 
   const [inspection, setInspection] = useState({
     processoId: '',
@@ -260,8 +266,8 @@ export default function App() {
         ].some((v)=>String(v ?? '').toLowerCase().includes(q))
       })
       .sort((a,b)=>{
-        const addrA=a.endereco==='INSPEÇÃO' ? '000' : (a.endereco ?? 'ZZZ')
-        const addrB=b.endereco==='INSPEÇÃO' ? '000' : (b.endereco ?? 'ZZZ')
+        const addrA=a.endereco ?? 'ZZZ'
+        const addrB=b.endereco ?? 'ZZZ'
         return addrA.localeCompare(addrB,'pt-BR') || String(a.sku ?? '').localeCompare(String(b.sku ?? ''),'pt-BR')
       })
   },[samples,stockSearch,stockAddress])
@@ -270,7 +276,7 @@ export default function App() {
     registros: samples.length,
     unidades: samples.reduce((sum,s)=>sum+Number(s.saldo || 0),0),
     skus: new Set(samples.map((s)=>s.sku).filter(Boolean)).size,
-    emInspecao: samples.filter((s)=>s.endereco==='INSPEÇÃO').reduce((sum,s)=>sum+Number(s.saldo || 0),0),
+    enderecos: new Set(samples.map((s)=>s.endereco).filter(Boolean)).size,
   }),[samples])
 
   useEffect(() => {
@@ -303,11 +309,39 @@ export default function App() {
   }, [samples])
 
   useEffect(() => {
+    let active=true
     if (!selectedSample) {
       setQrDataUrl('')
+      setSelectedSamplePhotoUrl('')
+      setSelectedSampleReport(null)
       return
     }
-    QRCode.toDataURL(sampleUrl(selectedSample), { margin: 1, width: 220 }).then(setQrDataUrl)
+
+    QRCode.toDataURL(sampleUrl(selectedSample), { margin: 1, width: 220 }).then((url)=>{
+      if (active) setQrDataUrl(url)
+    })
+
+    void (async()=>{
+      if (selectedSample.foto_cadastro_path) {
+        const signed=await supabase.storage.from('amostra-cadastro').createSignedUrl(selectedSample.foto_cadastro_path,3600)
+        if (active) setSelectedSamplePhotoUrl(signed.data?.signedUrl ?? '')
+      } else if (active) setSelectedSamplePhotoUrl('')
+
+      if (selectedSample.laudo_id) {
+        const report=await supabase.from('laudos').select('numero,storage_path').eq('id',selectedSample.laudo_id).maybeSingle()
+        if (!active) return
+        if (report.data) {
+          let url:string|null=null
+          if (report.data.storage_path) {
+            const signed=await supabase.storage.from('laudos').createSignedUrl(report.data.storage_path,3600)
+            url=signed.data?.signedUrl ?? null
+          }
+          if (active) setSelectedSampleReport({numero:report.data.numero,url})
+        } else setSelectedSampleReport(null)
+      } else if (active) setSelectedSampleReport(null)
+    })()
+
+    return ()=>{active=false}
   }, [selectedSample])
 
 
@@ -319,7 +353,7 @@ export default function App() {
       supabase.from('inspecoes').select('id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))').is('excluido_em', null).order('criado_em', { ascending: false }),
       supabase.from('it_versoes').select('id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)').order('criado_em', { ascending: false }),
       supabase.from('grupos_inspecao').select('id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)').order('criado_em', { ascending: false }),
-      supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id,sku,processo_referencia,data_chegada_referencia,nota_fiscal_referencia,cliente_referencia,observacao,origem_importacao,linha_origem').order('codigo', { ascending: false }),
+      supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id,sku,processo_referencia,data_chegada_referencia,nota_fiscal_referencia,cliente_referencia,observacao,origem_importacao,linha_origem,laudo_id,foto_cadastro_path').order('codigo', { ascending: false }),
       supabase.from('laudos').select('*', { count: 'exact', head: true }),
     ])
     if (!p.data) {
