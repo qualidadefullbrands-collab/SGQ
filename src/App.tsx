@@ -337,7 +337,7 @@ export default function App() {
 
   function resetNewInspection() {
     setInspection({
-      processoId: '', codigo: '', cliente: '', notaFiscal: '', origem: '', transporte: '', chegadaCd: '',
+      processoId: '', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
       dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I',
     })
     setSkuRows([emptySku()])
@@ -347,7 +347,7 @@ export default function App() {
     setInspection((x) => ({
       ...x,
       processoId: p.id,
-      codigo: p.codigo,
+      codigo: fstDigits(p.codigo),
       cliente: p.cliente ?? '',
       notaFiscal: p.nota_fiscal ?? '',
       origem: p.origem ?? '',
@@ -363,25 +363,50 @@ export default function App() {
   async function lookupProduct(index: number) {
     const code = skuRows[index].sku.trim()
     if (!code) return
-    const found = await supabase.from('produtos').select('id,sku,nome').eq('sku', code).maybeSingle()
-    if (!found.data) {
-      setMessage('Código ainda não existe no cadastro local. A descrição pode ser informada manualmente.')
+    setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,omieStatus:'loading'}:r))
+
+    const { data, error } = await supabase.functions.invoke('omie-produto', { body: { codigo: code } })
+    if (error) {
+      const msg = String((error as any)?.context?.body ?? error.message ?? '')
+      const status = msg.includes('omie_not_configured') ? 'not_configured' : 'error'
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,omieStatus:status}:r))
       return
     }
-    setSkuRows((rows) => rows.map((r,i) => i===index ? { ...r, nome: found.data!.nome } : r))
-    const items = await supabase.from('processo_itens').select('id').eq('produto_id', found.data.id)
-    const ids = (items.data ?? []).map((x:any) => x.id)
+
+    if (!data?.found || !data?.descricao) {
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_found'}:r))
+      return
+    }
+
+    setSkuRows((rows)=>rows.map((r,i)=>i===index?{
+      ...r,
+      nome:String(data.descricao),
+      omieStatus:'found',
+    }:r))
+
+    const local = await supabase.from('produtos').select('id').eq('sku', code).maybeSingle()
+    let productId = local.data?.id
+    if (!productId) {
+      const created = await supabase.from('produtos').insert({ sku: code, nome: String(data.descricao) }).select('id').single()
+      productId = created.data?.id
+    } else {
+      await supabase.from('produtos').update({ nome: String(data.descricao) }).eq('id', productId)
+    }
+
+    if (!productId) return
+    const items = await supabase.from('processo_itens').select('id').eq('produto_id', productId)
+    const ids = (items.data ?? []).map((x:any)=>x.id)
     if (!ids.length) return
     const links = await supabase.from('grupo_inspecao_itens').select('grupo_inspecao_id').in('processo_item_id', ids)
-    const gids = [...new Set((links.data ?? []).map((x:any) => x.grupo_inspecao_id))] as string[]
+    const gids = [...new Set((links.data ?? []).map((x:any)=>x.grupo_inspecao_id))] as string[]
     if (!gids.length) return
-    const oldIns = await supabase.from('inspecoes').select('id').in('grupo_inspecao_id', gids)
-    const inspIds = (oldIns.data ?? []).map((x:any) => x.id)
+    const oldIns = await supabase.from('inspecoes').select('id').in('grupo_inspecao_id', gids).is('excluido_em', null)
+    const inspIds = (oldIns.data ?? []).map((x:any)=>x.id)
     if (!inspIds.length) return
     const nc = await supabase.from('inspecao_nao_conformidades').select('id').in('inspecao_id', inspIds).limit(1)
     if ((nc.data ?? []).length) {
-      setInspection((x) => ({ ...x, inspectionLevel: 'II' }))
-      setMessage('Histórico de não conformidade encontrado para este código: Nível II sugerido.')
+      setInspection((x)=>({...x,inspectionLevel:'II'}))
+      setMessage('Produto localizado no OMIE. Há histórico de NC; Nível II foi sugerido.')
     }
   }
 
@@ -469,17 +494,21 @@ export default function App() {
     setError('')
     setMessage('')
 
-    if (!inspection.codigo.trim() || !inspection.cliente.trim() || !inspection.dataInspecao) {
-      return setError('Preencha Processo FST, Cliente e Data da inspeção.')
+    if (!/^\d{5}$/.test(inspection.codigo.trim())) {
+      return setError('O Processo FST deve ter exatamente 5 números.')
+    }
+    if (!inspection.cliente.trim() || !inspection.dataInspecao) {
+      return setError('Preencha Cliente e Data da inspeção.')
     }
     if (!inspection.itVersionId) return setError('Selecione a IT aplicável.')
-    if (skuRows.some((r) => !r.sku.trim() || !r.nome.trim() || Number(r.quantidade) <= 0 || Number(r.quantidadePorCaixa) <= 0)) {
-      return setError('Em cada produto informe Código, Descrição, Quantidade recebida e Quantidade por caixa.')
+    if (skuRows.some((r) => !r.sku.trim() || r.omieStatus !== 'found' || !r.nome.trim() || Number(r.quantidade) <= 0 || Number(r.caixasRecebidas) <= 0 || Number(r.caixasInspecionadas) <= 0)) {
+      return setError('Em cada produto, confirme o Código no OMIE e informe Quantidade recebida, Caixas recebidas e Caixas inspecionadas.')
     }
     if (statisticalLot <= 0) return setError('Não foi possível calcular o lote estatístico.')
 
     let processId = inspection.processoId
-    const existingByCode = processes.find((p) => p.codigo.toLowerCase() === inspection.codigo.trim().toLowerCase())
+    const processCode = fstDigits(inspection.codigo)
+    const existingByCode = processes.find((p) => fstDigits(p.codigo) === processCode)
     if (!processId && existingByCode) processId = existingByCode.id
 
     if (processId) {
@@ -495,7 +524,7 @@ export default function App() {
       if (error) return setError(error.message)
     } else {
       const created = await supabase.from('processos').insert({
-        codigo: inspection.codigo.trim(),
+        codigo: processCode,
         cliente: inspection.cliente.trim(),
         nota_fiscal: inspection.notaFiscal.trim() || null,
         origem: inspection.origem.trim() || null,
@@ -537,17 +566,18 @@ export default function App() {
         productId = created.data.id
       }
 
-      const receivedBoxes = boxesReceived(row.quantidade, row.quantidadePorCaixa)
+      const receivedBoxes = Number(row.caixasRecebidas)
       const item = await supabase.from('processo_itens').insert({
         processo_id: processId,
         produto_id: productId,
-        codigo_cliente: row.codigoCliente.trim() || null,
+        codigo_cliente: null,
         lote: row.lote.trim() || null,
         material: row.material.trim() || null,
         capacidade: row.capacidade.trim() || null,
         quantidade: Number(row.quantidade),
-        quantidade_por_caixa: Number(row.quantidadePorCaixa),
-        caixas_recebidas: receivedBoxes,
+        quantidade_por_caixa: Number(row.quantidadePorCaixa) || null,
+        caixas_recebidas: Number(row.caixasRecebidas),
+        caixas_inspecionadas: Number(row.caixasInspecionadas),
       }).select('id').single()
       if (item.error || !item.data) return setError(item.error?.message ?? 'Falha ao cadastrar produto.')
       if (!firstItemId) firstItemId = item.data.id
