@@ -900,21 +900,89 @@ export default function App() {
     await openInspection(selectedInspectionId)
   }
 
-  async function uploadInspectionPhotos(files: FileList | null) {
-    if (!files || !selectedInspectionId) return
-    for (const file of Array.from(files)) {
-      const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-      const path = `${selectedInspectionId}/${Date.now()}-${safe}`
-      const up = await supabase.storage.from('inspecao-fotos').upload(path, file, { contentType: file.type || undefined })
+  function addPendingPhotos(files: FileList | null) {
+    if (!files) return
+    const next = Array.from(files).map((file)=>({
+      id: crypto.randomUUID(),
+      file,
+      url: URL.createObjectURL(file),
+      legenda: '',
+    }))
+    setPendingPhotos((old)=>[...old,...next])
+  }
+
+  function removePendingPhoto(id:string) {
+    setPendingPhotos((old)=>{
+      const hit=old.find((x)=>x.id===id)
+      if (hit) URL.revokeObjectURL(hit.url)
+      return old.filter((x)=>x.id!==id)
+    })
+  }
+
+  async function uploadInspectionPhotos() {
+    if (!selectedInspectionId || !pendingPhotos.length) return
+    if (pendingPhotos.some((p)=>!p.legenda.trim())) {
+      return setError('Todas as fotos precisam de legenda antes de enviar.')
+    }
+    for (const p of pendingPhotos) {
+      const safe = p.file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const path = `${selectedInspectionId}/gerais/${Date.now()}-${safe}`
+      const up = await supabase.storage.from('inspecao-fotos').upload(path,p.file,{contentType:p.file.type||undefined})
       if (up.error) return setError(up.error.message)
       const row = await supabase.from('inspecao_fotos').insert({
-        inspecao_id: selectedInspectionId,
-        storage_path: path,
-        legenda: file.name,
+        inspecao_id:selectedInspectionId,
+        storage_path:path,
+        legenda:p.legenda.trim(),
       })
       if (row.error) return setError(row.error.message)
     }
+    pendingPhotos.forEach((p)=>URL.revokeObjectURL(p.url))
+    setPendingPhotos([])
     await openInspection(selectedInspectionId)
+  }
+
+  async function generateConclusionWithAI() {
+    if (!detail) return
+    setAiLoading(true)
+    setError('')
+    const payload={
+      resultado_atual:detail.resultado,
+      processo:formatFst(detail.grupos_inspecao?.processos?.codigo),
+      cliente:detail.grupos_inspecao?.processos?.cliente,
+      inspecao:detail.numero,
+      amostragem:{
+        lote:detail.tamanho_lote,
+        prevista:detail.tamanho_amostra,
+        inspecionada:detail.total_inspecionado,
+        nao_conformes:detail.total_nao_conforme,
+        ac:detail.limite_aceitacao,
+        re:detail.limite_rejeicao,
+      },
+      verificacoes:(detail.checklist ?? []).map((item:any)=>{
+        const r=detail.checklistResults?.find((x:any)=>x.checklist_id===item.id)
+        return {item:item.requisito,resultado:r?.resultado??'pendente',classe:r?.severidade_confirmada??null}
+      }),
+      nao_conformidades:(detail.ncs ?? []).map((n:any)=>({descricao:n.descricao,severidade:n.severidade})),
+      dimensionais:(detail.items ?? []).flatMap((link:any)=>
+        (detail.params ?? []).map((p:any)=>({
+          produto:link.processo_itens?.produtos?.nome,
+          parametro:p.nome,
+          resumo:dimensionSummary(link.processo_itens.id,p.id),
+        }))
+      ),
+      testes:(detail.tests ?? []).map((t:any)=>{
+        const r=detail.testResults?.find((x:any)=>x.teste_id===t.id)
+        return {teste:t.nome,resultado:r?.resultado??'pendente'}
+      }),
+    }
+    const {data,error}=await supabase.functions.invoke('sgq-conclusao',{body:payload})
+    setAiLoading(false)
+    if (error) {
+      const msg=String((error as any)?.context?.body ?? error.message ?? '')
+      if (msg.includes('ai_not_configured')) return setError('A geração por IA está pronta, mas a chave GEMINI_API_KEY ainda não foi configurada neste SGQ.')
+      return setError('Não foi possível gerar a conclusão com IA.')
+    }
+    if (data?.text) setFinalObservation(String(data.text))
   }
 
   async function finishInspection(result: 'aprovado' | 'reprovado') {
