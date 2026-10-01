@@ -449,12 +449,13 @@ export default function App() {
     if (ins.error || !ins.data) return setError(ins.error?.message ?? 'Inspeção não encontrada.')
     const groupId = ins.data.grupo_inspecao_id
     const itId = ins.data.it_versao_id
-    const [items, checklist, checkResults, params, dimResults, tests, testResults, photos, registers, ncs, retained] = await Promise.all([
-      supabase.from('grupo_inspecao_itens').select('id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,codigo_cliente,material,capacidade,quantidade_por_caixa,caixas_recebidas,produtos(id,sku,nome))').eq('grupo_inspecao_id', groupId),
+    const [items, checklist, checkResults, params, dimResults, dimConfigs, tests, testResults, photos, registers, ncs, retained] = await Promise.all([
+      supabase.from('grupo_inspecao_itens').select('id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,material,capacidade,quantidade_por_caixa,caixas_recebidas,caixas_inspecionadas,produtos(id,sku,nome))').eq('grupo_inspecao_id', groupId),
       supabase.from('it_checklist').select('*').eq('it_versao_id', itId).eq('ativo', true).order('ordem'),
       supabase.from('inspecao_checklist_resultados').select('*').eq('inspecao_id', id),
       supabase.from('it_parametros_dimensionais').select('*').eq('it_versao_id', itId).eq('ativo', true).order('ordem'),
       supabase.from('inspecao_dimensionais').select('*').eq('inspecao_id', id),
+      supabase.from('inspecao_dimensional_configuracoes').select('*').eq('inspecao_id', id),
       supabase.from('it_testes_especiais').select('*').eq('it_versao_id', itId).eq('ativo', true).order('ordem'),
       supabase.from('inspecao_testes_resultados').select('*').eq('inspecao_id', id),
       supabase.from('inspecao_fotos').select('*').eq('inspecao_id', id).order('criado_em'),
@@ -462,6 +463,17 @@ export default function App() {
       supabase.from('inspecao_nao_conformidades').select('*').eq('inspecao_id', id).order('criado_em'),
       supabase.from('amostras').select('*').eq('inspecao_id', id),
     ])
+    let photosWithUrls:any[] = photos.data ?? []
+    if (photosWithUrls.length) {
+      const signed = await supabase.storage.from('inspecao-fotos').createSignedUrls(
+        photosWithUrls.map((p:any)=>p.storage_path), 3600
+      )
+      photosWithUrls = photosWithUrls.map((p:any,i:number)=>({
+        ...p,
+        signed_url: signed.data?.[i]?.signedUrl ?? null,
+      }))
+    }
+
     const next = {
       ...ins.data,
       items: items.data ?? [],
@@ -469,9 +481,10 @@ export default function App() {
       checklistResults: checkResults.data ?? [],
       params: params.data ?? [],
       dimResults: dimResults.data ?? [],
+      dimConfigs: dimConfigs.data ?? [],
       tests: tests.data ?? [],
       testResults: testResults.data ?? [],
-      photos: photos.data ?? [],
+      photos: photosWithUrls,
       registers: registers.data ?? [],
       ncs: ncs.data ?? [],
       retained: retained.data ?? [],
