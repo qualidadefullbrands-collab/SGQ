@@ -988,21 +988,55 @@ export default function App() {
   async function finishInspection(result: 'aprovado' | 'reprovado') {
     if (!detail || !selectedInspectionId) return
 
-    const checklistDone = (detail.checklist?.length ?? 0) === 0 ||
-      (detail.checklistResults?.length ?? 0) >= detail.checklist.length
-    const samplingDone = (detail.total_inspecionado ?? 0) >= (detail.tamanho_amostra ?? 0) ||
-      (!!detail.limite_rejeicao && detail.total_nao_conforme >= detail.limite_rejeicao)
-    const dimsDone = (detail.params?.length ?? 0) === 0 || detail.dimensionais_finalizados
-    const testsDone = (detail.tests?.length ?? 0) === 0 || detail.testes_finalizados
+    const pendencias:string[] = []
+    const faltamAmostras = Math.max(0, Number(detail.tamanho_amostra ?? 0) - Number(detail.total_inspecionado ?? 0))
+    const reAtingido = !!detail.limite_rejeicao && Number(detail.total_nao_conforme) >= Number(detail.limite_rejeicao)
 
-    if (!checklistDone) return setError('Finalize todas as verificações C / NC / NA.')
-    if (!samplingDone) return setError('A amostragem ainda não foi concluída.')
-    if (!dimsDone) return setError('Finalize as análises dimensionais.')
-    if (!testsDone) return setError('Finalize os testes especiais.')
+    if (faltamAmostras > 0 && !reAtingido) {
+      pendencias.push(`Amostragem: ${detail.total_inspecionado ?? 0} de ${detail.tamanho_amostra ?? 0} unidades registradas. Faltam ${faltamAmostras}.`)
+    }
 
-    const thresholdExceeded = !!detail.limite_rejeicao && detail.total_nao_conforme >= detail.limite_rejeicao
+    const pendingChecks=(detail.checklist ?? []).filter((item:any)=>
+      !detail.checklistResults?.some((r:any)=>r.checklist_id===item.id)
+    )
+    if (pendingChecks.length) {
+      pendencias.push('Verificações pendentes: ' + pendingChecks.map((x:any)=>`${x.ordem}. ${x.requisito}`).join('; '))
+    }
+
+    const dimPending:string[]=[]
+    for (const link of detail.items ?? []) {
+      const item=link.processo_itens
+      for (const p of detail.params ?? []) {
+        const cfg=getDimConfig(item.id,p.id)
+        if (cfg?.nao_aplicavel) continue
+        const count=(detail.dimResults ?? []).filter((x:any)=>x.processo_item_id===item.id && x.parametro_id===p.id).length
+        if (count<10) dimPending.push(`${item.produtos?.sku} · ${p.nome}: ${count}/10 medições`)
+      }
+    }
+    if (dimPending.length && !detail.dimensionais_finalizados) {
+      pendencias.push('Dimensionais pendentes: ' + dimPending.join('; '))
+    } else if ((detail.params?.length ?? 0)>0 && !detail.dimensionais_finalizados) {
+      pendencias.push('Dimensionais: as medições estão preenchidas, mas a seção ainda não foi marcada como concluída.')
+    }
+
+    const pendingTests=(detail.tests ?? []).filter((t:any)=>
+      !detail.testResults?.some((r:any)=>r.teste_id===t.id)
+    )
+    if (pendingTests.length) {
+      pendencias.push('Testes pendentes: ' + pendingTests.map((x:any)=>x.nome).join('; '))
+    } else if ((detail.tests?.length ?? 0)>0 && !detail.testes_finalizados) {
+      pendencias.push('Testes especiais: todos possuem resultado, mas a seção ainda não foi marcada como concluída.')
+    }
+
+    if (pendencias.length) {
+      setPendingModal(pendencias)
+      return
+    }
+
+    const thresholdExceeded = !!detail.limite_rejeicao && Number(detail.total_nao_conforme) >= Number(detail.limite_rejeicao)
     if (thresholdExceeded && result === 'aprovado' && !finalObservation.trim()) {
-      return setError('O limite de rejeição foi atingido. Para aprovar, registre a justificativa.')
+      setPendingModal(['O limite de rejeição foi atingido. Para aprovar a inspeção, registre a justificativa em Observação / conclusão.'])
+      return
     }
 
     const q = await supabase.from('inspecoes').update({
@@ -1231,7 +1265,7 @@ export default function App() {
       <h1>REGISTRO DE INSPEÇÃO</h1>
       <p><b>${detail.it_versoes?.instrucoes_trabalho?.codigo ?? ''}</b> · ${detail.it_versoes?.instrucoes_trabalho?.titulo ?? ''} · versão ${detail.it_versoes?.versao ?? ''}</p>
       <h2>Identificação</h2>
-      <table><tr><th>Processo FST</th><td>${process?.codigo ?? ''}</td><th>Cliente</th><td>${process?.cliente ?? ''}</td></tr>
+      <table><tr><th>Processo FST</th><td>${formatFst(process?.codigo)}</td><th>Cliente</th><td>${process?.cliente ?? ''}</td></tr>
       <tr><th>Nota fiscal</th><td>${process?.nota_fiscal ?? ''}</td><th>Data</th><td>${detail.data_inspecao ?? ''}</td></tr>
       <tr><th>Origem</th><td>${process?.origem ?? ''}</td><th>Transporte</th><td>${process?.transporte ?? ''}</td></tr></table>
       <h2>Produtos / componentes</h2><table><tr><th>Código</th><th>Descrição</th><th>Lote</th><th>Quantidade</th></tr>${products}</table>
