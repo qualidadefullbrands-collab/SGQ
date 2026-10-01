@@ -1045,6 +1045,111 @@ export default function App() {
     await openInspection(selectedInspectionId)
   }
 
+  function buildInspectionAssistantContext() {
+    if (!detail) return null
+    return {
+      identificacao:{
+        inspecao:detail.numero,
+        processo:formatFst(detail.grupos_inspecao?.processos?.codigo),
+        cliente:detail.grupos_inspecao?.processos?.cliente,
+        grupo:detail.grupos_inspecao?.nome,
+        it:{
+          codigo:detail.it_versoes?.instrucoes_trabalho?.codigo,
+          titulo:detail.it_versoes?.instrucoes_trabalho?.titulo,
+          versao:detail.it_versoes?.versao,
+        },
+      },
+      plano:{
+        lote_estatistico:detail.tamanho_lote,
+        nivel:detail.nivel_inspecao,
+        codigo_amostragem:detail.codigo_amostragem,
+        amostra_prevista:detail.tamanho_amostra,
+        inspecionado:detail.total_inspecionado,
+        nao_conformes:detail.total_nao_conforme,
+        ac:detail.limite_aceitacao,
+        re:detail.limite_rejeicao,
+        caixas_recebidas:detail.caixas_recebidas,
+        caixas_avaliar:detail.caixas_avaliar,
+      },
+      produtos:(detail.items ?? []).map((link:any)=>({
+        codigo:link.processo_itens?.produtos?.sku,
+        descricao:link.processo_itens?.produtos?.nome,
+        lote:link.processo_itens?.lote,
+        quantidade:link.processo_itens?.quantidade,
+        caixas_recebidas:link.processo_itens?.caixas_recebidas,
+        caixas_inspecionadas:link.processo_itens?.caixas_inspecionadas,
+      })),
+      verificacoes:(detail.checklist ?? []).map((item:any)=>{
+        const r=detail.checklistResults?.find((x:any)=>x.checklist_id===item.id)
+        return {
+          ordem:item.ordem,
+          requisito:item.requisito,
+          instrucao:item.instrucao,
+          resultado:r?.resultado ?? 'pendente',
+          severidade:r?.severidade_confirmada ?? null,
+        }
+      }),
+      nao_conformidades:(detail.ncs ?? []).map((n:any)=>({
+        descricao:n.descricao,
+        severidade:n.severidade,
+        checklist_id:n.checklist_id,
+        produto_id:n.processo_item_id,
+        foto_registrada:!!n.foto_storage_path,
+      })),
+      dimensionais:(detail.items ?? []).flatMap((link:any)=>
+        (detail.params ?? []).map((p:any)=>{
+          const cfg=getDimConfig(link.processo_itens.id,p.id)
+          return {
+            produto:link.processo_itens?.produtos?.sku,
+            parametro:p.nome,
+            nao_aplicavel:!!cfg?.nao_aplicavel,
+            unidade:cfg?.unidade ?? p.unidade ?? null,
+            valor_nominal:cfg?.valor_nominal ?? null,
+            minimo:cfg?.minimo_aceitavel ?? null,
+            maximo:cfg?.maximo_aceitavel ?? null,
+            equipamento:cfg?.equipamento ?? null,
+            codigo_equipamento:cfg?.codigo_equipamento ?? null,
+            resumo:dimensionSummary(link.processo_itens.id,p.id),
+          }
+        })
+      ),
+      testes:(detail.tests ?? []).map((t:any)=>{
+        const r=detail.testResults?.find((x:any)=>x.teste_id===t.id)
+        return {
+          teste:t.nome,
+          procedimento:t.procedimento,
+          criterio:t.criterio_aprovacao,
+          resultado:r?.resultado ?? 'pendente',
+        }
+      }),
+      fotos:{
+        gerais:(detail.photos ?? []).filter((p:any)=>!p.nc_id).length,
+        nc:(detail.photos ?? []).filter((p:any)=>!!p.nc_id).length,
+      },
+      conclusao_atual:finalObservation,
+    }
+  }
+
+  async function runInspectionAssistant(mode:'analisar'|'pergunta') {
+    if (!detail) return
+    if (mode==='pergunta' && !assistantQuestion.trim()) return
+    setAssistantLoading(true)
+    setError('')
+    const {data,error}=await supabase.functions.invoke('sgq-assistente',{
+      body:{
+        mode,
+        question:mode==='pergunta'?assistantQuestion.trim():'',
+        context:buildInspectionAssistantContext(),
+      }
+    })
+    setAssistantLoading(false)
+    if (error) return setError('Não foi possível consultar a IA assistida.')
+    if (data?.error==='ai_not_configured') return setError('A IA ainda não está configurada.')
+    if (data?.error) return setError('A IA assistida encontrou um erro ao analisar a inspeção.')
+    setAssistantText(String(data?.text ?? ''))
+    if (mode==='pergunta') setAssistantQuestion('')
+  }
+
   async function generateConclusionWithAI() {
     if (!detail) return
     setAiLoading(true)
