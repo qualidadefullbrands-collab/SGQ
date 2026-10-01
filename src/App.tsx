@@ -81,6 +81,8 @@ type Sample = {
   origem_importacao?: string | null
   linha_origem?: number | null
   laudo_id?: string | null
+  laudo_numero?: string | null
+  laudo_storage_path?: string | null
   foto_cadastro_path?: string | null
 }
 
@@ -96,6 +98,7 @@ const emptySku = () => ({
   caixasInspecionadas: '',
   unidadesPorConjunto: '1',
   omieStatus: '' as '' | 'loading' | 'found' | 'not_found' | 'not_configured' | 'error',
+  omieMessage: '',
 })
 
 function fstDigits(value: string) {
@@ -357,7 +360,7 @@ export default function App() {
       supabase.from('inspecoes').select('id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))').is('excluido_em', null).order('criado_em', { ascending: false }),
       supabase.from('it_versoes').select('id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)').order('criado_em', { ascending: false }),
       supabase.from('grupos_inspecao').select('id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)').order('criado_em', { ascending: false }),
-      supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id,sku,processo_referencia,data_chegada_referencia,nota_fiscal_referencia,cliente_referencia,observacao,origem_importacao,linha_origem,laudo_id,foto_cadastro_path').order('codigo', { ascending: false }),
+      supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id,sku,processo_referencia,data_chegada_referencia,nota_fiscal_referencia,cliente_referencia,observacao,origem_importacao,linha_origem,laudo_id,laudo_numero,laudo_storage_path,foto_cadastro_path').order('codigo', { ascending: false }),
       supabase.from('laudos').select('*', { count: 'exact', head: true }),
     ])
     if (!p.data) {
@@ -1146,7 +1149,7 @@ export default function App() {
     if (error) return setError('Não foi possível consultar a IA assistida.')
     if (data?.error==='ai_not_configured') return setError('A IA ainda não está configurada.')
     if (data?.error) return setError('A IA assistida encontrou um erro ao analisar a inspeção.')
-    setAssistantText(String(data?.text ?? ''))
+    setAssistantText(String(data?.answer ?? data?.text ?? ''))
     if (mode==='pergunta') setAssistantQuestion('')
   }
 
@@ -1738,7 +1741,7 @@ export default function App() {
                       <div className="form-grid">
                         <label>Código
                           <div className="input-action">
-                            <input value={row.sku} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,sku:e.target.value,omieStatus:''}:r))} onBlur={()=>lookupProduct(i)} placeholder="Código Omie"/>
+                            <input value={row.sku} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,sku:e.target.value,omieStatus:'',omieMessage:''}:r))} onBlur={()=>lookupProduct(i)} placeholder="Código Omie"/>
                             <button type="button" className="secondary icon-only" title="Consultar no OMIE" onClick={()=>lookupProduct(i)}><Search size={16}/></button>
                           </div>
                         </label>
