@@ -1901,79 +1901,134 @@ export default function App() {
       )}
 
       {tab==='estoque' && (
-        <section className="workspace">
-          <div className="page-title">
-            <div><span className="eyebrow">AMOSTRAS DE RETENÇÃO</span><h1>Estoque</h1></div>
-            <span className="pill">{filteredSamples.length} registro(s)</span>
+        <section className="workspace stock-page">
+          <div className="page-title stock-page-title">
+            <div>
+              <span className="eyebrow">CONTROLE DE ESTOQUE</span>
+              <h1>Estoque de amostras</h1>
+              <p className="page-subtitle">Consulta rápida por produto, processo, cliente, nota fiscal e endereço físico.</p>
+            </div>
           </div>
 
-          <section className="stock-toolbar">
-            <label className="stock-search">Buscar
-              <div className="input-action"><Search size={16}/><input value={stockSearch} onChange={(e)=>setStockSearch(e.target.value)} placeholder="SKU, produto, FST, cliente, NF..."/></div>
-            </label>
-            <label>Endereço
-              <select value={stockAddress} onChange={(e)=>setStockAddress(e.target.value)}>
-                {stockAddresses.map((x)=><option value={x} key={x}>{x}</option>)}
-              </select>
-            </label>
+          <section className="stock-summary">
+            <article><span>Saldo total</span><strong>{stockStats.unidades.toLocaleString('pt-BR')}</strong><small>unidades</small></article>
+            <article><span>Registros</span><strong>{stockStats.registros}</strong><small>posições de estoque</small></article>
+            <article><span>SKUs</span><strong>{stockStats.skus}</strong><small>códigos distintos</small></article>
+            <article className={stockStats.emInspecao>0?'attention':''}><span>Em inspeção</span><strong>{stockStats.emInspecao.toLocaleString('pt-BR')}</strong><small>unidades fora do armário</small></article>
           </section>
 
-          <div className="sample-grid">
-            {filteredSamples.map((s)=>(
-              <article className="sample-card" key={s.id} onClick={()=>setSelectedSample(s)}>
-                <div>
-                  <div className="stock-card-kicker">
-                    <span className="eyebrow">{s.sku || s.codigo}</span>
-                    {s.processo_referencia && <span className="pill">{s.processo_referencia}</span>}
-                  </div>
-                  <h3>{s.descricao || 'Amostra'}</h3>
-                  <p className="stock-client">{s.cliente_referencia || 'Cliente não informado'}{s.nota_fiscal_referencia?' · NF '+s.nota_fiscal_referencia:''}</p>
-                </div>
-                <div className="sample-meta">
-                  <span>Saldo <b>{s.saldo} {s.unidade_controle}</b></span>
-                  <span>Endereço <b>{s.endereco || '—'}</b></span>
-                </div>
-                {s.observacao && <div className="stock-note">{s.observacao}</div>}
-                <button className="secondary" onClick={(e)=>{e.stopPropagation();downloadZpl(s)}}><QrCode size={16}/> Etiqueta</button>
-              </article>
-            ))}
-          </div>
-          {!filteredSamples.length && <div className="empty">Nenhum registro encontrado no estoque.</div>}
+          <section className="stock-controls">
+            <div className="stock-search-box">
+              <Search size={18}/>
+              <input value={stockSearch} onChange={(e)=>setStockSearch(e.target.value)} placeholder="Buscar SKU, produto, FST, cliente ou NF"/>
+              {stockSearch && <button type="button" onClick={()=>setStockSearch('')} aria-label="Limpar busca">×</button>}
+            </div>
+            <select aria-label="Filtrar endereço" value={stockAddress} onChange={(e)=>setStockAddress(e.target.value)}>
+              {stockAddresses.map((x)=><option value={x} key={x}>{x==='Todos'?'Todos os endereços':x}</option>)}
+            </select>
+            <div className="stock-result-count">{filteredSamples.length} resultado(s)</div>
+          </section>
+
+          <section className="stock-table-shell">
+            <div className="stock-table-head stock-table-row">
+              <span>Produto</span>
+              <span>Processo</span>
+              <span>Cliente</span>
+              <span>NF</span>
+              <span>Endereço</span>
+              <span className="align-right">Saldo</span>
+              <span></span>
+            </div>
+
+            <div className="stock-table-body">
+              {filteredSamples.map((s)=>(
+                <button className="stock-table-row stock-data-row" key={s.id} onClick={()=>setSelectedSample(s)}>
+                  <span className="stock-product-cell">
+                    <b>{s.sku || 'Sem código'}</b>
+                    <em>{s.descricao || 'Descrição não informada'}</em>
+                    {s.observacao && <small>{s.observacao}</small>}
+                  </span>
+                  <span><b className="stock-mobile-label">Processo</b>{s.processo_referencia || '—'}</span>
+                  <span><b className="stock-mobile-label">Cliente</b>{s.cliente_referencia || '—'}</span>
+                  <span><b className="stock-mobile-label">NF</b>{s.nota_fiscal_referencia || '—'}</span>
+                  <span><b className="stock-mobile-label">Endereço</b><i className={'location-badge '+(s.endereco==='INSPEÇÃO'?'inspection':'')}>{s.endereco || '—'}</i></span>
+                  <span className="stock-balance"><b className="stock-mobile-label">Saldo</b><strong>{Number(s.saldo).toLocaleString('pt-BR')}</strong><small>{s.unidade_controle}</small></span>
+                  <span className="stock-open">›</span>
+                </button>
+              ))}
+            </div>
+
+            {!filteredSamples.length && (
+              <div className="stock-empty">
+                <PackageSearch size={28}/>
+                <strong>Nenhum item encontrado</strong>
+                <span>Ajuste a busca ou o filtro de endereço.</span>
+              </div>
+            )}
+          </section>
 
           {selectedSample && (
-            <div className="modal-backdrop" onClick={()=>setSelectedSample(null)}>
-              <article className="sample-detail" onClick={(e)=>e.stopPropagation()}>
-                <button className="close" onClick={()=>setSelectedSample(null)}>×</button>
-                <span className="eyebrow">ESTOQUE</span>
-                <h2>{selectedSample.codigo}</h2>
-                <p>{selectedSample.descricao}</p>
-                <div className="detail-grid">
-                  <div><small>Endereço</small><strong>{selectedSample.endereco || '—'}</strong></div>
-                  <div><small>Saldo</small><strong>{selectedSample.saldo} {selectedSample.unidade_controle}</strong></div>
-                  <div><small>Lote</small><strong>{selectedSample.lote || '—'}</strong></div>
-                  <div><small>SKU</small><strong>{selectedSample.sku || '—'}</strong></div>
-                  <div><small>Processo</small><strong>{selectedSample.processo_referencia || '—'}</strong></div>
-                  <div><small>Cliente</small><strong>{selectedSample.cliente_referencia || '—'}</strong></div>
-                  <div><small>Nota fiscal</small><strong>{selectedSample.nota_fiscal_referencia || '—'}</strong></div>
-                  <div><small>Chegada</small><strong>{selectedSample.data_chegada_referencia || '—'}</strong></div>
+            <div className="modal-backdrop stock-drawer-backdrop" onClick={()=>setSelectedSample(null)}>
+              <article className="sample-detail stock-drawer" onClick={(e)=>e.stopPropagation()}>
+                <div className="stock-drawer-head">
+                  <div>
+                    <span className="eyebrow">{selectedSample.sku || 'ESTOQUE'}</span>
+                    <h2>{selectedSample.descricao || 'Amostra'}</h2>
+                    <p>{selectedSample.processo_referencia || 'Sem processo vinculado'}</p>
+                  </div>
+                  <button className="close" onClick={()=>setSelectedSample(null)}>×</button>
                 </div>
-                {selectedSample.observacao && <div className="stock-detail-note"><b>Observação</b><span>{selectedSample.observacao}</span></div>}
-                {qrDataUrl && <img className="qr" src={qrDataUrl} alt="QR"/>}
-                <button className="secondary wide" onClick={()=>downloadZpl(selectedSample)}>Gerar etiqueta Zebra 100×50</button>
-                <div className="stock-move">
+
+                <div className="stock-primary-info">
+                  <div>
+                    <small>Saldo atual</small>
+                    <strong>{Number(selectedSample.saldo).toLocaleString('pt-BR')}</strong>
+                    <span>{selectedSample.unidade_controle}</span>
+                  </div>
+                  <div className={selectedSample.endereco==='INSPEÇÃO'?'inspection':''}>
+                    <small>Endereço</small>
+                    <strong>{selectedSample.endereco || '—'}</strong>
+                  </div>
+                </div>
+
+                <div className="stock-detail-section">
+                  <h3>Rastreabilidade</h3>
+                  <div className="detail-grid stock-detail-grid">
+                    <div><small>Processo</small><strong>{selectedSample.processo_referencia || '—'}</strong></div>
+                    <div><small>Cliente</small><strong>{selectedSample.cliente_referencia || '—'}</strong></div>
+                    <div><small>Nota fiscal</small><strong>{selectedSample.nota_fiscal_referencia || '—'}</strong></div>
+                    <div><small>Chegada</small><strong>{selectedSample.data_chegada_referencia || '—'}</strong></div>
+                    <div><small>Lote</small><strong>{selectedSample.lote || '—'}</strong></div>
+                    <div><small>Registro</small><strong>{selectedSample.codigo}</strong></div>
+                  </div>
+                  {selectedSample.observacao && <div className="stock-detail-note"><b>Observação</b><span>{selectedSample.observacao}</span></div>}
+                </div>
+
+                <div className="stock-detail-section stock-label-section">
+                  <div>
+                    <h3>Etiqueta</h3>
+                    <p>QR para abrir este registro no SGQ.</p>
+                  </div>
+                  {qrDataUrl && <img className="qr" src={qrDataUrl} alt="QR"/>}
+                  <button className="secondary wide" onClick={()=>downloadZpl(selectedSample)}><QrCode size={16}/> Gerar etiqueta Zebra 100×50</button>
+                </div>
+
+                <div className="stock-detail-section stock-move">
                   <h3>Movimentar estoque</h3>
-                  <label>Movimento
-                    <select value={stockMove.tipo} onChange={(e)=>setStockMove({...stockMove,tipo:e.target.value})}>
-                      <option value="retirada">Retirada</option>
-                      <option value="devolucao">Devolução</option>
-                      <option value="transferencia">Transferência</option>
-                      <option value="descarte">Descarte</option>
-                    </select>
-                  </label>
-                  <label>Quantidade<input type="number" min="0.01" step="0.01" value={stockMove.quantidade} onChange={(e)=>setStockMove({...stockMove,quantidade:e.target.value})}/></label>
-                  {['transferencia','devolucao'].includes(stockMove.tipo) && <label>Endereço destino<input value={stockMove.endereco} onChange={(e)=>setStockMove({...stockMove,endereco:e.target.value})}/></label>}
-                  <label>Motivo<input value={stockMove.motivo} onChange={(e)=>setStockMove({...stockMove,motivo:e.target.value})}/></label>
-                  <button className="primary" onClick={moveStock}>Registrar movimentação</button>
+                  <div className="form-grid one">
+                    <label>Movimento
+                      <select value={stockMove.tipo} onChange={(e)=>setStockMove({...stockMove,tipo:e.target.value})}>
+                        <option value="retirada">Retirada</option>
+                        <option value="devolucao">Devolução</option>
+                        <option value="transferencia">Transferência</option>
+                        <option value="descarte">Descarte</option>
+                      </select>
+                    </label>
+                    <label>Quantidade<input type="number" min="0.01" step="0.01" value={stockMove.quantidade} onChange={(e)=>setStockMove({...stockMove,quantidade:e.target.value})}/></label>
+                    {['transferencia','devolucao'].includes(stockMove.tipo) && <label>Endereço destino<input value={stockMove.endereco} onChange={(e)=>setStockMove({...stockMove,endereco:e.target.value})}/></label>}
+                    <label>Motivo<input value={stockMove.motivo} onChange={(e)=>setStockMove({...stockMove,motivo:e.target.value})}/></label>
+                  </div>
+                  <button className="primary wide" onClick={moveStock}>Registrar movimentação</button>
                 </div>
               </article>
             </div>
