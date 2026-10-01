@@ -1162,6 +1162,21 @@ export default function App() {
     await openInspection(selectedInspectionId)
   }
 
+  async function ensureInspectionReportRecord() {
+    if (!selectedInspectionId || !detail) return null
+    const existing=await supabase.from('laudos').select('id,numero,storage_path').eq('inspecao_id',selectedInspectionId).maybeSingle()
+    if (existing.data) return existing.data
+    const created=await supabase.from('laudos').insert({
+      inspecao_id:selectedInspectionId,
+      numero:detail.numero,
+    }).select('id,numero,storage_path').single()
+    if (created.error || !created.data) {
+      setError(created.error?.message ?? 'Falha ao vincular o laudo à inspeção.')
+      return null
+    }
+    return created.data
+  }
+
   async function saveRetention() {
     if (!detail || !selectedInspectionId || !userId) return
     const selected = (detail.items ?? []).filter((link:any) => retentionRows[link.processo_itens.id]?.retain)
@@ -1169,52 +1184,80 @@ export default function App() {
     if (!selected.length) {
       if (!retentionReason.trim()) return setError('Informe o motivo para não reter amostra.')
       await supabase.from('inspecoes').update({
-        retencao_decisao: false,
-        retencao_motivo: retentionReason.trim(),
-      }).eq('id', selectedInspectionId)
+        retencao_decisao:false,
+        retencao_motivo:retentionReason.trim(),
+      }).eq('id',selectedInspectionId)
       setMessage('Inspeção encerrada sem retenção, com justificativa registrada.')
       await openInspection(selectedInspectionId)
       return
     }
 
     for (const link of selected as any[]) {
-      const item = link.processo_itens
-      const draft = retentionRows[item.id]
+      const item=link.processo_itens
+      const draft=retentionRows[item.id]
+      const exists=(detail.retained ?? []).find((x:any)=>x.produto_id===item.produto_id)
+      if (exists) continue
       if (!draft?.qty || !draft.address.trim()) {
         return setError(`Informe quantidade e endereço para ${item.produtos?.nome ?? 'o produto'}.`)
       }
-      const exists = (detail.retained ?? []).find((x:any) => x.produto_id === item.produto_id)
+      if (!draft.photoFile) {
+        return setError(`Escolha uma foto de cadastro para ${item.produtos?.nome ?? 'o produto'}.`)
+      }
+    }
+
+    const report=await ensureInspectionReportRecord()
+    if (!report) return
+
+    for (const link of selected as any[]) {
+      const item=link.processo_itens
+      const draft=retentionRows[item.id]
+      const exists=(detail.retained ?? []).find((x:any)=>x.produto_id===item.produto_id)
       if (exists) continue
 
-      const code = `AMO-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`
-      const created = await supabase.from('amostras').insert({
-        codigo: code,
-        inspecao_id: selectedInspectionId,
-        produto_id: item.produto_id,
-        processo_id: detail.grupos_inspecao.processo_id,
-        grupo_inspecao_id: detail.grupo_inspecao_id,
-        lote: item.lote,
-        quantidade_inicial: Number(draft.qty),
-        status: 'ativa',
-        endereco: draft.address.trim(),
-        unidade_controle: 'unidade',
-        descricao: item.produtos?.nome ?? null,
+      const safe=draft.photoFile!.name.replace(/[^a-zA-Z0-9._-]/g,'_')
+      const photoPath=`${selectedInspectionId}/${item.produto_id}/${Date.now()}-${safe}`
+      const upload=await supabase.storage.from('amostra-cadastro').upload(photoPath,draft.photoFile!,{
+        contentType:draft.photoFile!.type||undefined,
+      })
+      if (upload.error) return setError(upload.error.message)
+
+      const code=`AMO-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`
+      const created=await supabase.from('amostras').insert({
+        codigo:code,
+        inspecao_id:selectedInspectionId,
+        produto_id:item.produto_id,
+        processo_id:detail.grupos_inspecao.processo_id,
+        grupo_inspecao_id:detail.grupo_inspecao_id,
+        lote:item.lote,
+        quantidade_inicial:Number(draft.qty),
+        status:'ativa',
+        endereco:draft.address.trim(),
+        unidade_controle:'unidade',
+        descricao:item.produtos?.nome ?? null,
+        laudo_id:report.id,
+        foto_cadastro_path:photoPath,
       }).select('id').single()
       if (created.error || !created.data) return setError(created.error?.message ?? 'Falha ao reter amostra.')
 
-      const mov = await supabase.from('amostra_movimentacoes').insert({
-        amostra_id: created.data.id,
-        tipo: 'entrada',
-        quantidade: Number(draft.qty),
-        endereco_destino: draft.address.trim(),
-        motivo: 'Retenção após finalização da inspeção',
-        usuario_id: userId,
+      const mov=await supabase.from('amostra_movimentacoes').insert({
+        amostra_id:created.data.id,
+        tipo:'entrada',
+        quantidade:Number(draft.qty),
+        endereco_destino:draft.address.trim(),
+        motivo:'Retenção após finalização da inspeção',
+        usuario_id:userId,
       })
       if (mov.error) return setError(mov.error.message)
+
+      if (draft.photoPreview) URL.revokeObjectURL(draft.photoPreview)
     }
 
-    await supabase.from('inspecoes').update({ retencao_decisao: true, retencao_motivo: null }).eq('id', selectedInspectionId)
-    setMessage('Amostras enviadas ao estoque.')
+    await supabase.from('inspecoes').update({
+      retencao_decisao:true,
+      retencao_motivo:null,
+    }).eq('id',selectedInspectionId)
+
+    setMessage('Amostras enviadas ao estoque com foto de cadastro e laudo vinculado.')
     await loadApp()
     await openInspection(selectedInspectionId)
   }
