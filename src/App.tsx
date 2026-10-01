@@ -439,27 +439,33 @@ export default function App() {
   async function lookupProduct(index: number) {
     const code = skuRows[index].sku.trim()
     if (!code) return
-    setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,omieStatus:'loading'}:r))
+    setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,omieStatus:'loading',omieMessage:'Consultando cadastro do OMIE…'}:r))
 
     const { data, error } = await supabase.functions.invoke('omie-produto', { body: { codigo: code } })
     if (error) {
-      const msg = String((error as any)?.context?.body ?? error.message ?? '')
-      const status = msg.includes('omie_not_configured') ? 'not_configured' : 'error'
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,omieStatus:status}:r))
+      const msg = String((error as any)?.context?.body ?? error.message ?? 'Falha de comunicação com a integração.')
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'error',omieMessage:msg}:r))
       return
     }
 
     if (data?.error === 'omie_not_configured') {
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_configured'}:r))
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_configured',omieMessage:String(data?.message ?? 'Integração OMIE não configurada.')}:r))
       return
     }
     if (data?.error === 'not_found') {
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_found'}:r))
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_found',omieMessage:String(data?.message ?? 'Código não encontrado no OMIE.')}:r))
       return
     }
-    if (data?.error || !data?.found || !data?.descricao) {
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'error'}:r))
-      if (data?.message) setError('OMIE: '+String(data.message))
+    if (data?.error) {
+      let prefix='Falha ao consultar o OMIE'
+      if (data.error==='auth_error') prefix='Credenciais do OMIE recusadas'
+      if (data.error==='rate_limit') prefix='Limite de consultas do OMIE atingido'
+      const msg=String(data?.message ?? prefix)
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'error',omieMessage:prefix+': '+msg}:r))
+      return
+    }
+    if (!data?.found || !data?.descricao) {
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_found',omieMessage:'Código não localizado no cadastro de produtos do OMIE.'}:r))
       return
     }
 
@@ -467,6 +473,7 @@ export default function App() {
       ...r,
       nome:String(data.descricao),
       omieStatus:'found',
+      omieMessage:'Produto confirmado no OMIE.',
     }:r))
 
     const local = await supabase.from('produtos').select('id').eq('sku', code).maybeSingle()
