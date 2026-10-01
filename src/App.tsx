@@ -77,14 +77,29 @@ type Sample = {
 const emptySku = () => ({
   sku: '',
   nome: '',
-  codigoCliente: '',
   lote: '',
   material: '',
   capacidade: '',
   quantidade: '',
   quantidadePorCaixa: '',
+  caixasRecebidas: '',
+  caixasInspecionadas: '',
   unidadesPorConjunto: '1',
+  omieStatus: '' as '' | 'loading' | 'found' | 'not_found' | 'not_configured' | 'error',
 })
+
+function fstDigits(value: string) {
+  return value.replace(/\D/g, '').slice(0,5)
+}
+function formatFst(value: string | null | undefined) {
+  const d = String(value ?? '').replace(/\D/g, '')
+  return d ? 'FST' + d : '—'
+}
+function toggleTransport(current: string, mode: 'Aéreo' | 'Marítimo') {
+  const set = new Set(current.split(',').map((x)=>x.trim()).filter(Boolean))
+  set.has(mode) ? set.delete(mode) : set.add(mode)
+  return [...set].join(', ')
+}
 
 function boxesReceived(quantity: string, perBox: string) {
   const q = Number(quantity)
@@ -146,11 +161,17 @@ export default function App() {
   const [editingProcess, setEditingProcess] = useState<ProcessRow | null>(null)
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null)
   const [detail, setDetail] = useState<any>(null)
-  const [ncDraft, setNcDraft] = useState({ open: false, severity: 'grave', description: '', itemId: '' })
+  const [ncDraft, setNcDraft] = useState<{
+    open:boolean; severity:string; description:string; itemId:string; checklistId:string;
+    photoFile:File|null; photoPreview:string; photoLegenda:string;
+  }>({ open:false, severity:'grave', description:'', itemId:'', checklistId:'', photoFile:null, photoPreview:'', photoLegenda:'' })
   const [finalObservation, setFinalObservation] = useState('')
   const [retentionRows, setRetentionRows] = useState<Record<string,{retain:boolean;qty:string;address:string}>>({})
   const [retentionReason, setRetentionReason] = useState('')
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
+  const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string}>>([])
+  const [pendingModal, setPendingModal] = useState<string[]>([])
+  const [aiLoading, setAiLoading] = useState(false)
   const [itVersions, setItVersions] = useState<ItVersion[]>([])
   const [groups, setGroups] = useState<Group[]>([])
   const [samples, setSamples] = useState<Sample[]>([])
@@ -162,7 +183,7 @@ export default function App() {
     codigo: '',
     cliente: '',
     notaFiscal: '',
-    origem: '',
+    origem: 'China',
     transporte: '',
     chegadaCd: '',
     dataInspecao: new Date().toISOString().slice(0, 10),
@@ -205,11 +226,11 @@ export default function App() {
 
   const isComponentSet = skuRows.length > 1
   const totalBoxesReceived = useMemo(
-    () => skuRows.reduce((sum, r) => sum + boxesReceived(r.quantidade, r.quantidadePorCaixa), 0),
+    () => skuRows.reduce((sum, r) => sum + (Number(r.caixasRecebidas) || 0), 0),
     [skuRows],
   )
   const totalBoxesToInspect = useMemo(
-    () => skuRows.reduce((sum, r) => sum + boxesToInspect(boxesReceived(r.quantidade, r.quantidadePorCaixa)), 0),
+    () => skuRows.reduce((sum, r) => sum + (Number(r.caixasInspecionadas) || 0), 0),
     [skuRows],
   )
 
@@ -260,7 +281,7 @@ export default function App() {
     const [p, proc, ins, its, gs, ss, laudos] = await Promise.all([
       supabase.from('profiles').select('nome,perfil').eq('id', userId).single(),
       supabase.from('processos').select('id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em').is('excluido_em', null).order('criado_em', { ascending: false }),
-      supabase.from('inspecoes').select('id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))').order('criado_em', { ascending: false }),
+      supabase.from('inspecoes').select('id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))').is('excluido_em', null).order('criado_em', { ascending: false }),
       supabase.from('it_versoes').select('id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)').order('criado_em', { ascending: false }),
       supabase.from('grupos_inspecao').select('id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)').order('criado_em', { ascending: false }),
       supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id').order('codigo', { ascending: false }),
