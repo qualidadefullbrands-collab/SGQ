@@ -874,8 +874,32 @@ export default function App() {
   }
 
   async function markDimensionalsDone() {
-    if (!selectedInspectionId) return
-    const q = await supabase.from('inspecoes').update({ dimensionais_finalizados: true }).eq('id', selectedInspectionId)
+    if (!selectedInspectionId || !detail) return
+    const pendencias:string[]=[]
+    for (const link of detail.items ?? []) {
+      const item=link.processo_itens
+      for (const p of detail.params ?? []) {
+        const cfg=getDimConfig(item.id,p.id)
+        if (cfg?.nao_aplicavel) continue
+        const prefix=`${item.produtos?.sku} · ${p.nome}`
+        if (!cfg) {
+          pendencias.push(`${prefix}: informe especificação, unidade, equipamento e desvio.`)
+          continue
+        }
+        if (!cfg.unidade) pendencias.push(`${prefix}: unidade de medida não informada.`)
+        if (!cfg.equipamento) pendencias.push(`${prefix}: equipamento/instrumento não informado.`)
+        if (!cfg.codigo_equipamento) pendencias.push(`${prefix}: código do equipamento não informado.`)
+        if (cfg.valor_nominal == null) pendencias.push(`${prefix}: valor especificado não informado.`)
+        if (cfg.minimo_aceitavel == null || cfg.maximo_aceitavel == null) pendencias.push(`${prefix}: desvio aceitável não definido.`)
+        const count=(detail.dimResults ?? []).filter((x:any)=>x.processo_item_id===item.id && x.parametro_id===p.id).length
+        if (count<10) pendencias.push(`${prefix}: ${count}/10 medições preenchidas.`)
+      }
+    }
+    if (pendencias.length) {
+      setPendingModal(pendencias)
+      return
+    }
+    const q=await supabase.from('inspecoes').update({dimensionais_finalizados:true}).eq('id',selectedInspectionId)
     if (q.error) return setError(q.error.message)
     await openInspection(selectedInspectionId)
   }
