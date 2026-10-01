@@ -2311,6 +2311,41 @@ export default function App() {
                   </div>
                 )}
 
+                {(selectedSamplePhotoUrl || selectedSample.inspecao_id || selectedSampleReport) && (
+                  <div className="stock-detail-section stock-origin-section">
+                    <div>
+                      <h3>Origem da retenção</h3>
+                      <p className="stock-origin-copy">
+                        {selectedSample.inspecao_id
+                          ? 'Amostra gerada a partir de uma inspeção do SGQ.'
+                          : 'Registro histórico importado, sem inspeção vinculada.'}
+                      </p>
+                    </div>
+                    {selectedSamplePhotoUrl && (
+                      <img className="stock-registration-photo" src={selectedSamplePhotoUrl} alt="Foto de cadastro da amostra"/>
+                    )}
+                    <div className="stock-origin-actions">
+                      {selectedSample.inspecao_id && (
+                        <button className="secondary" type="button" onClick={()=>{
+                          const id=selectedSample.inspecao_id!
+                          setSelectedSample(null)
+                          void openInspection(id)
+                        }}>
+                          <ClipboardCheck size={15}/> Abrir inspeção
+                        </button>
+                      )}
+                      {selectedSampleReport?.url && (
+                        <a className="secondary stock-link-button" href={selectedSampleReport.url} target="_blank" rel="noreferrer">
+                          <FileText size={15}/> Abrir laudo {selectedSampleReport.numero}
+                        </a>
+                      )}
+                      {selectedSampleReport && !selectedSampleReport.url && (
+                        <span className="stock-report-pending">Laudo {selectedSampleReport.numero} vinculado, arquivo ainda não gerado.</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="stock-detail-section stock-label-section">
                   <div>
                     <h3>Etiqueta</h3>
