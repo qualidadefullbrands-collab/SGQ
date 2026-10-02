@@ -1050,6 +1050,7 @@ export default function App() {
       minimo_aceitavel:next.minimo_aceitavel ?? null,
       maximo_aceitavel:next.maximo_aceitavel ?? null,
       especificacao_desvio:next.especificacao_desvio || null,
+      tipo_referencia:next.tipo_referencia || param.tipo_referencia || null,
       atualizado_em:new Date().toISOString(),
     }
     const q=await supabase.from('inspecao_dimensional_configuracoes').upsert(payload,{onConflict:'inspecao_id,processo_item_id,parametro_id'}).select('*').single()
@@ -1112,6 +1113,7 @@ export default function App() {
           pendencias.push(`${prefix}: informe especificação, unidade, equipamento e desvio.`)
           continue
         }
+        if (!cfg.tipo_referencia) pendencias.push(`${prefix}: informe a referência da medida (interna, externa, desenho, logo, amostra padrão ou especificação do cliente).`)
         if (!cfg.unidade) pendencias.push(`${prefix}: unidade de medida não informada.`)
         if (!cfg.equipamento) pendencias.push(`${prefix}: equipamento/instrumento não informado.`)
         if (!cfg.codigo_equipamento) pendencias.push(`${prefix}: código do equipamento não informado.`)
@@ -1255,6 +1257,7 @@ export default function App() {
             maximo:cfg?.maximo_aceitavel ?? null,
             equipamento:cfg?.equipamento ?? null,
             codigo_equipamento:cfg?.codigo_equipamento ?? null,
+            tipo_referencia:cfg?.tipo_referencia ?? p.tipo_referencia ?? null,
             resumo:dimensionSummary(link.processo_itens.id,p.id),
           }
         })
@@ -1276,6 +1279,23 @@ export default function App() {
     }
   }
 
+  function localAssistantText(question='') {
+    const context=buildInspectionAssistantContext()
+    const plan:any=context.plano ?? {}
+    const pendingChecks=(context.verificacoes ?? []).filter((x:any)=>x.resultado==='pendente')
+    const pendingDims=(context.dimensionais ?? []).filter((x:any)=>!x.nao_aplicavel && Number(x.resumo?.total ?? 0)<10)
+    const pendingTests=(context.testes ?? []).filter((x:any)=>x.resultado==='pendente')
+    const remaining=Math.max(Number(plan.amostra_prevista ?? 0)-Number(plan.inspecionado ?? 0),0)
+    const steps:string[]=[]
+    if (remaining>0) steps.push(`Amostragem: faltam ${remaining} unidade(s) para completar ${plan.amostra_prevista ?? 0}.`)
+    if (pendingChecks.length) steps.push(`Verificações: ${pendingChecks.length} item(ns) da IT ainda estão pendentes.`)
+    if (pendingDims.length) steps.push(`Dimensionais: ${pendingDims.length} parâmetro(s) ainda não têm as 10 medições exigidas.`)
+    if (pendingTests.length) steps.push(`Testes: ${pendingTests.length} teste(s) ainda estão pendentes.`)
+    if (Number(plan.re ?? 0)>0 && Number(plan.nao_conformes ?? 0)>=Number(plan.re)) steps.push('Atenção: o limite de rejeição registrado no plano já foi atingido.')
+    if (!steps.length) steps.push('Os registros principais estão preenchidos. Revise evidências, conclusão e retenção antes do encerramento.')
+    return (question ? `Pergunta: ${question}\n\n` : '') + steps.join('\n')
+  }
+
   async function runInspectionAssistant(mode:'analisar'|'pergunta') {
     if (!detail) return
     if (mode==='pergunta' && !assistantQuestion.trim()) return
@@ -1289,9 +1309,11 @@ export default function App() {
       }
     })
     setAssistantLoading(false)
-    if (error) return setError('Não foi possível consultar a IA assistida.')
-    if (data?.error==='ai_not_configured') return setError('A IA ainda não está configurada.')
-    if (data?.error) return setError('A IA assistida encontrou um erro ao analisar a inspeção.')
+    if (error || data?.error || !(data?.answer ?? data?.text)) {
+      setAssistantText(localAssistantText(mode==='pergunta'?assistantQuestion.trim():''))
+      if (mode==='pergunta') setAssistantQuestion('')
+      return
+    }
     setAssistantText(String(data?.answer ?? data?.text ?? ''))
     if (mode==='pergunta') setAssistantQuestion('')
   }
@@ -1993,13 +2015,34 @@ export default function App() {
                         <label>Material<input value={row.material} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,material:e.target.value}:r))}/></label>
                         <label>Capacidade<input value={row.capacidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,capacidade:e.target.value}:r))}/></label>
                         <label>Quantidade recebida<input type="number" min="0.01" step="0.01" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/></label>
-                        <label>Quantidade por caixa<input type="number" min="0.01" step="0.01" value={row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidadePorCaixa:e.target.value}:r))}/></label>
+                        <label>Quantidade padrão por caixa (opcional)<input type="number" min="0.01" step="0.01" value={row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidadePorCaixa:e.target.value}:r))}/></label>
                         <label>Caixas recebidas<input type="number" min="0.01" step="0.01" value={row.caixasRecebidas} onChange={(e)=>{
                           const received=e.target.value
                           const calc=received ? String(boxesToInspect(Number(received))) : ''
                           setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasRecebidas:received,caixasInspecionadas:calc}:r))
                         }}/></label>
-                        <label>Caixas inspecionadas<input type="number" min="0.01" step="0.01" value={row.caixasInspecionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasInspecionadas:e.target.value}:r))}/><small className="field-hint">Calculado automaticamente; pode ser alterado.</small></label>
+                        <label>Caixas inspecionadas<input type="number" min="0.01" step="0.01" value={row.caixasInspecionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasInspecionadas:e.target.value}:r))}/><small className="field-hint">Sugerido pela tabela da IT; pode ser alterado.</small></label>
+                        <label className="span-2">Distribuição real das caixas (quando houver caixas fracionadas)
+                          <input value={row.distribuicaoCaixas} placeholder="Ex.: 44x136 + 1x49 + 1x60" onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,distribuicaoCaixas:e.target.value}:r))}/>
+                          {row.distribuicaoCaixas && (()=>{const d=parseBoxDistribution(row.distribuicaoCaixas); const mismatch=d.valid && (d.boxes!==Number(row.caixasRecebidas) || Math.abs(d.units-Number(row.quantidade))>0.0001); return <small className={'field-status '+(!d.valid||mismatch?'bad':'ok')}>{!d.valid?d.error:`${d.boxes} caixa(s) · ${d.units.toLocaleString('pt-BR')} unidades${mismatch?' — confira com os totais informados.':' — conferência fechada.'}`}</small>})()}
+                        </label>
+                        <div className="span-2 product-photo-editor">
+                          <div>
+                            <strong>Foto principal do produto</strong>
+                            <small>Fica vinculada ao código e reaparece automaticamente nas próximas inspeções.</small>
+                          </div>
+                          {row.fotoPreview && <img src={row.fotoPreview} alt={'Foto principal de '+(row.nome||row.sku)}/>}
+                          <label className="secondary product-photo-button">
+                            <Camera size={16}/> {row.fotoPreview?'Trocar foto':'Cadastrar foto'}
+                            <input type="file" accept="image/*" onChange={(e)=>{
+                              const file=e.target.files?.[0] ?? null
+                              if (!file) return
+                              const preview=URL.createObjectURL(file)
+                              if (row.fotoPreview?.startsWith('blob:')) URL.revokeObjectURL(row.fotoPreview)
+                              setSkuRows(skuRows.map((r,j)=>j===i?{...r,fotoFile:file,fotoPreview:preview}:r))
+                            }}/>
+                          </label>
+                        </div>
                         {isComponentSet && <label>Unidades por conjunto<input type="number" min="0.01" step="0.01" value={row.unidadesPorConjunto} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPorConjunto:e.target.value}:r))}/></label>}
                       </div>
                       <div className="computed">
@@ -2157,6 +2200,18 @@ export default function App() {
 
                         {!cfg.nao_aplicavel && <>
                           <div className="dim-config-grid">
+                            <label>Referência da medida
+                              <select value={cfg.tipo_referencia ?? p.tipo_referencia ?? ''} onChange={(e)=>saveDimConfig(item.id,p,{tipo_referencia:e.target.value})} disabled={detail.status==='concluida'}>
+                                <option value="">Selecionar</option>
+                                <option value="interno">Interno</option>
+                                <option value="externo">Externo</option>
+                                <option value="desenho">Desenho técnico</option>
+                                <option value="logo">Logo / arte</option>
+                                <option value="amostra_padrao">Amostra padrão</option>
+                                <option value="especificacao_cliente">Especificação do cliente</option>
+                                <option value="outro">Outro</option>
+                              </select>
+                            </label>
                             <label>Valor especificado
                               <input type="number" step="any" defaultValue={cfg.valor_nominal ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{valor_nominal:e.target.value})} disabled={detail.status==='concluida'}/>
                             </label>
