@@ -460,7 +460,7 @@ app.MapPost("/api/inspecoes/{id}/unidades", async (string id, RegisterUnitReques
             new { total_inspecionado=total,total_conforme=ok,total_nao_conforme=nc },"return=minimal");
 
         var ins=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=limite_rejeicao&revisao_obrigatoria=id.eq.none&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+            $"select=limite_rejeicao&id=eq.{Uri.EscapeDataString(id)}&limit=1");
         int? re=null;
         var (ir,ifound)=FirstRow(ins);
         if(ifound && ir!.Value.TryGetProperty("limite_rejeicao",out var reEl) && reEl.ValueKind==JsonValueKind.Number && reEl.TryGetInt32(out var rv)) re=rv;
