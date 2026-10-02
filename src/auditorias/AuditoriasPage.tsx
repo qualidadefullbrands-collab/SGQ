@@ -792,7 +792,7 @@ export default function AuditoriasPage({profileName}:Props) {
           <div className="audit-modal">
             <div className="audit-modal-icon"><FileText size={24}/></div>
             <h2>Concluir {definition?.displayCode}?</h2>
-            <p>Serão consolidados {answers.length} registros de checklist e {findings.length} achado(s). Depois da conclusão, a próxima etapa é gerar uma cópia preenchida do Word oficial e enviar o payload para o Power Automate.</p>
+            <p>Serão consolidados {answers.length} registros de checklist e {findings.length} achado(s){definition?.code==='RQ014'?` e ${objects.length} equipamento(s)`:''}. O sistema gerará uma cópia preenchida do Word oficial.</p>
             <div className="audit-finish-stats">
               <span><b>{answers.filter((x)=>x.resultado==='C').length}</b> C</span>
               <span><b>{answers.filter((x)=>x.resultado==='NC').length}</b> NC</span>
@@ -801,7 +801,7 @@ export default function AuditoriasPage({profileName}:Props) {
             </div>
             <div className="audit-modal-actions">
               <button className="secondary" onClick={()=>setShowFinish(false)}>Continuar inspeção</button>
-              <button className="primary" onClick={()=>confirmFinish()} disabled={loading}>{loading?<Loader2 className="spin" size={16}/>:<Check size={16}/>} Concluir</button>
+              <button className="primary" onClick={()=>confirmFinish()} disabled={loading||documentLoading}>{loading?<Loader2 className="spin" size={16}/>:<Check size={16}/>} Concluir e gerar Word</button>
             </div>
           </div>
         </div>
