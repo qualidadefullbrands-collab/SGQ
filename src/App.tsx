@@ -264,6 +264,7 @@ export default function App() {
     photoFile:File|null; photoPreview:string; photoLegenda:string;
   }>({ open:false, severity:'grave', description:'', itemId:'', checklistId:'', photoFile:null, photoPreview:'', photoLegenda:'' })
   const [finalObservation, setFinalObservation] = useState('')
+  const [internalObservation, setInternalObservation] = useState('')
   const [retentionRows, setRetentionRows] = useState<Record<string,{
     retain:boolean; qty:string; address:string; photoFile:File|null; photoPreview:string
   }>>({})
@@ -723,6 +724,7 @@ export default function App() {
     }
     setDetail(next)
     setFinalObservation(ins.data.observacoes ?? '')
+    setInternalObservation(ins.data.observacao_interna ?? '')
     const retention: Record<string,{retain:boolean;qty:string;address:string;photoFile:File|null;photoPreview:string}> = {}
     for (const link of next.items as any[]) {
       const item = link.processo_itens
@@ -1020,6 +1022,16 @@ export default function App() {
       .eq('checklist_id', checkId)
     if (q.error) return setError(q.error.message)
     await openInspection(selectedInspectionId)
+  }
+
+  async function saveInternalObservation() {
+    if (!selectedInspectionId || !canWrite) return
+    const q=await supabase.from('inspecoes')
+      .update({observacao_interna:internalObservation.trim() || null})
+      .eq('id',selectedInspectionId)
+    if (q.error) return setError(q.error.message)
+    setDetail((d:any)=>d?{...d,observacao_interna:internalObservation.trim() || null}:d)
+    setMessage('Observação interna salva. Ela fica somente no SGQ e não é incluída no laudo.')
   }
 
   function getDimConfig(itemId:string, paramId:string) {
@@ -2112,6 +2124,24 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             }}>
               <MessageCircle size={15}/> Abrir assistente
             </button>
+          </section>
+
+          <section className="panel section-card internal-note-panel">
+            <div className="section-title">
+              <div>
+                <h2>Observação interna</h2>
+                <span className="section-note">Uso interno da Qualidade. Esta informação não é incluída no laudo nem no Word da inspeção.</span>
+              </div>
+              <span className="pill">Somente SGQ</span>
+            </div>
+            <textarea
+              value={internalObservation}
+              onChange={(e)=>setInternalObservation(e.target.value)}
+              rows={3}
+              placeholder="Ex.: alinhamento interno, pendência de retorno do fornecedor, orientação para próxima inspeção..."
+              disabled={!canWrite}
+            />
+            {canWrite && <div className="actions"><button className="secondary" type="button" onClick={()=>void saveInternalObservation()}>Salvar observação interna</button></div>}
           </section>
 
           <section className="panel section-card">
