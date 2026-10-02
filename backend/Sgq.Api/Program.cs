@@ -37,37 +37,6 @@ void ApplyAuth(HttpRequestMessage req, string token)
 string EncodedPath(string path) =>
     string.Join("/", path.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.EscapeDataString));
 
-string JsonValue(JsonElement value)
-{
-    return value.ValueKind switch
-    {
-        JsonValueKind.String => value.GetString() ?? "",
-        JsonValueKind.Number => value.GetRawText(),
-        JsonValueKind.True => "true",
-        JsonValueKind.False => "false",
-        JsonValueKind.Null => "null",
-        _ => value.GetRawText()
-    };
-}
-
-string InValue(JsonElement value)
-{
-    if (value.ValueKind != JsonValueKind.Array) return $"({JsonValue(value)})";
-    var parts = new List<string>();
-    foreach (var item in value.EnumerateArray())
-    {
-        if (item.ValueKind == JsonValueKind.String)
-        {
-            var s = item.GetString() ?? "";
-            if (s.IndexOfAny([',','(',')','"']) >= 0)
-                s = "\"" + s.Replace("\"", "\\\"") + "\"";
-            parts.Add(s);
-        }
-        else parts.Add(JsonValue(item));
-    }
-    return $"({string.Join(",", parts)})";
-}
-
 object Error(string message, string? detail = null) => new
 {
     data = (object?)null,
