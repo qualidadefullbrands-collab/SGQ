@@ -1098,34 +1098,10 @@ export default function App() {
   }
 
   async function markDimensionalsDone() {
-    if (!selectedInspectionId || !detail) return
-    const pendencias:string[]=[]
-    for (const link of detail.items ?? []) {
-      const item=link.processo_itens
-      for (const p of detail.params ?? []) {
-        const cfg=getDimConfig(item.id,p.id)
-        if (cfg?.nao_aplicavel) continue
-        const prefix=`${item.produtos?.sku} · ${p.nome}`
-        if (!cfg) {
-          pendencias.push(`${prefix}: informe especificação, unidade, equipamento e desvio.`)
-          continue
-        }
-        if (!cfg.tipo_referencia) pendencias.push(`${prefix}: informe a referência da medida (interna, externa, desenho, logo, amostra padrão ou especificação do cliente).`)
-        if (!cfg.unidade) pendencias.push(`${prefix}: unidade de medida não informada.`)
-        if (!cfg.equipamento) pendencias.push(`${prefix}: equipamento/instrumento não informado.`)
-        if (!cfg.codigo_equipamento) pendencias.push(`${prefix}: código do equipamento não informado.`)
-        if (cfg.valor_nominal == null) pendencias.push(`${prefix}: valor especificado não informado.`)
-        if (cfg.minimo_aceitavel == null || cfg.maximo_aceitavel == null) pendencias.push(`${prefix}: desvio aceitável não definido.`)
-        const count=(detail.dimResults ?? []).filter((x:any)=>x.processo_item_id===item.id && x.parametro_id===p.id).length
-        if (count<10) pendencias.push(`${prefix}: ${count}/10 medições preenchidas.`)
-      }
-    }
-    if (pendencias.length) {
-      setPendingModal(pendencias)
-      return
-    }
+    if (!selectedInspectionId) return
     const q=await supabase.from('inspecoes').update({dimensionais_finalizados:true}).eq('id',selectedInspectionId)
     if (q.error) return setError(q.error.message)
+    setMessage('Dimensionais marcados como concluídos. Nesta fase de testes, campos pendentes não bloqueiam o avanço.')
     await openInspection(selectedInspectionId)
   }
 
@@ -1394,63 +1370,40 @@ export default function App() {
     const reAtingido = !!detail.limite_rejeicao && Number(detail.total_nao_conforme) >= Number(detail.limite_rejeicao)
 
     if (faltamAmostras > 0 && !reAtingido) {
-      pendencias.push(`Amostragem: ${detail.total_inspecionado ?? 0} de ${detail.tamanho_amostra ?? 0} unidades registradas. Faltam ${faltamAmostras}.`)
+      pendencias.push(`Amostragem incompleta: ${detail.total_inspecionado ?? 0}/${detail.tamanho_amostra ?? 0}.`)
     }
 
     const pendingChecks=(detail.checklist ?? []).filter((item:any)=>
       !detail.checklistResults?.some((r:any)=>r.checklist_id===item.id)
     )
-    if (pendingChecks.length) {
-      pendencias.push('Verificações pendentes: ' + pendingChecks.map((x:any)=>`${x.ordem}. ${x.requisito}`).join('; '))
-    }
+    if (pendingChecks.length) pendencias.push(`${pendingChecks.length} verificação(ões) sem preenchimento.`)
 
-    const dimPending:string[]=[]
-    for (const link of detail.items ?? []) {
-      const item=link.processo_itens
-      for (const p of detail.params ?? []) {
-        const cfg=getDimConfig(item.id,p.id)
-        if (cfg?.nao_aplicavel) continue
-        const count=(detail.dimResults ?? []).filter((x:any)=>x.processo_item_id===item.id && x.parametro_id===p.id).length
-        if (count<10) dimPending.push(`${item.produtos?.sku} · ${p.nome}: ${count}/10 medições`)
-      }
-    }
-    if (dimPending.length && !detail.dimensionais_finalizados) {
-      pendencias.push('Dimensionais pendentes: ' + dimPending.join('; '))
-    } else if ((detail.params?.length ?? 0)>0 && !detail.dimensionais_finalizados) {
-      pendencias.push('Dimensionais: as medições estão preenchidas, mas a seção ainda não foi marcada como concluída.')
-    }
+    const dimPending=(detail.params ?? []).length>0 && !detail.dimensionais_finalizados
+    if (dimPending) pendencias.push('Dimensionais não marcados como concluídos.')
 
     const pendingTests=(detail.tests ?? []).filter((t:any)=>
       !detail.testResults?.some((r:any)=>r.teste_id===t.id)
     )
-    if (pendingTests.length) {
-      pendencias.push('Testes pendentes: ' + pendingTests.map((x:any)=>x.nome).join('; '))
-    } else if ((detail.tests?.length ?? 0)>0 && !detail.testes_finalizados) {
-      pendencias.push('Testes especiais: todos possuem resultado, mas a seção ainda não foi marcada como concluída.')
-    }
-
-    if (pendencias.length) {
-      setPendingModal(pendencias)
-      return
+    if (pendingTests.length || ((detail.tests?.length ?? 0)>0 && !detail.testes_finalizados)) {
+      pendencias.push('Testes especiais incompletos.')
     }
 
     const thresholdExceeded = !!detail.limite_rejeicao && Number(detail.total_nao_conforme) >= Number(detail.limite_rejeicao)
-    if (thresholdExceeded && result === 'aprovado' && !finalObservation.trim()) {
-      setPendingModal(['O limite de rejeição foi atingido. Para aprovar a inspeção, registre a justificativa em Observação / conclusão.'])
-      return
-    }
 
     const q = await supabase.from('inspecoes').update({
       status: 'concluida',
       resultado: result,
       observacoes: finalObservation.trim() || null,
       justificativa_decisao: thresholdExceeded ? (finalObservation.trim() || null) : null,
+      revisao_obrigatoria: pendencias.length > 0 || thresholdExceeded,
       concluida_em: new Date().toISOString(),
     }).eq('id', selectedInspectionId)
     if (q.error) return setError(q.error.message)
 
     await supabase.from('grupos_inspecao').update({ status: 'concluido' }).eq('id', detail.grupo_inspecao_id)
-    setMessage('Inspeção finalizada. Agora defina a retenção das amostras.')
+    setMessage(pendencias.length
+      ? 'Inspeção finalizada em modo de teste, mesmo com campos pendentes.'
+      : 'Inspeção finalizada. Agora defina a retenção das amostras.')
     await loadApp()
     await openInspection(selectedInspectionId)
   }
@@ -1920,7 +1873,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   const dimsDone = detail ? (detail.params?.length ?? 0) === 0 || detail.dimensionais_finalizados : false
   const testsDone = detail ? (detail.tests?.length ?? 0) === 0 || detail.testes_finalizados : false
   const samplingDone = detail ? (detail.total_inspecionado ?? 0) >= (detail.tamanho_amostra ?? 0) || (!!detail.limite_rejeicao && detail.total_nao_conforme >= detail.limite_rejeicao) : false
-  const inspectionCoreDone = samplingDone && checklistDone && dimsDone && testsDone
 
   return (
     <main className="app-shell">
@@ -2115,14 +2067,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                           <input value={row.distribuicaoCaixas} placeholder="Ex.: 44x136 + 1x49 + 1x60" onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,distribuicaoCaixas:e.target.value}:r))}/>
                           {row.distribuicaoCaixas && (()=>{const d=parseBoxDistribution(row.distribuicaoCaixas); const mismatch=d.valid && (d.boxes!==Number(row.caixasRecebidas) || Math.abs(d.units-Number(row.quantidade))>0.0001); return <small className={'field-status '+(!d.valid||mismatch?'bad':'ok')}>{!d.valid?d.error:`${d.boxes} caixa(s) · ${d.units.toLocaleString('pt-BR')} unidades${mismatch?' — confira com os totais informados.':' — conferência fechada.'}`}</small>})()}
                         </label>
-                        <div className="span-2 product-photo-editor product-photo-later">
-                          <div>
-                            <strong>Identificação visual do produto</strong>
-                            <small>{row.fotoPreview?'Este produto já possui uma foto principal cadastrada.':'A foto não precisa ser cadastrada agora. No final da inspeção, você poderá usar uma das fotos da inspeção como ID do produto.'}</small>
-                          </div>
-                          {row.fotoPreview && <img src={row.fotoPreview} alt={'Foto principal de '+(row.nome||row.sku)}/>}
-                          {!row.fotoPreview && <span className="pill">Foto no final</span>}
-                        </div>
                         {isComponentSet && <label>Unidades por conjunto<input type="number" min="0.01" step="0.01" value={row.unidadesPorConjunto} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPorConjunto:e.target.value}:r))}/></label>}
                       </div>
                       <div className="computed">
@@ -2397,18 +2341,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
           <section className="panel section-card">
             <div className="section-title">
-              <div><h2>Fotos da inspeção</h2><span className="section-note">Etapa final: adicione as evidências somente depois de concluir amostragem, verificações, dimensionais e testes.</span></div>
+              <div><h2>Fotos da inspeção</h2><span className="section-note">Opcional nesta fase de testes. As fotos continuam concentradas nesta etapa da inspeção.</span></div>
               <span className="pill">{detail.photos?.length ?? 0} enviada(s)</span>
             </div>
 
-            {detail.status!=='concluida' && !inspectionCoreDone && (
-              <div className="photo-final-lock">
-                <Camera size={20}/>
-                <div><strong>Fotos liberadas no final</strong><span>Finalize as etapas técnicas acima. Depois você envia as fotos da inspeção em um único lugar.</span></div>
-              </div>
-            )}
-
-            {detail.status!=='concluida' && inspectionCoreDone && (
+            {detail.status!=='concluida' && (
               <>
                 <label className="upload-box"><Camera size={22}/><span>Selecionar fotos finais</span><input type="file" accept="image/*" multiple onChange={(e)=>addPendingPhotos(e.target.files)}/></label>
                 {!!pendingPhotos.length && <div className="pending-photo-grid">
