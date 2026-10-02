@@ -2330,20 +2330,97 @@ app.MapPost("/api/storage/{bucket}/upload", async (string bucket, HttpRequest re
     catch (UnauthorizedAccessException e) { return Results.Json(Error(e.Message), statusCode: 401); }
 });
 
+app.MapPut("/api/auditorias/templates/{rqCode}", async (string rqCode,AuditTemplateRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        if(string.IsNullOrWhiteSpace(input.StoragePath)||string.IsNullOrWhiteSpace(input.ArquivoNome)||string.IsNullOrWhiteSpace(input.RqVersion))
+            return Results.Json(Error("Arquivo, caminho e versão do modelo são obrigatórios."),statusCode:400);
+        var updated=await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"auditoria_templates",
+            $"rq_code=eq.{Uri.EscapeDataString(rqCode)}&select=*",
+            new {
+                storage_path=input.StoragePath,
+                arquivo_nome=input.ArquivoNome,
+                rq_version=input.RqVersion,
+                ativo=true,
+                atualizado_em=DateTimeOffset.UtcNow
+            },"return=representation");
+        var (row,found)=FirstRow(updated);
+        if(!found) throw new InvalidOperationException("Modelo de auditoria não encontrado.");
+        return Results.Ok(new {data=row,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao atualizar modelo oficial.",e.Message),statusCode:500);}
+});
+
+app.MapGet("/api/auditorias/{id}/documento", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var rows=await RestAsync(client,token,HttpMethod.Get,"auditoria_execucoes",
+            $"select=documento_storage_path,documento_nome&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (execution,found)=FirstRow(rows);
+        if(!found) return Results.Json(Error("Auditoria não encontrada."),statusCode:404);
+        var path=execution!.Value.TryGetProperty("documento_storage_path",out var dp)&&dp.ValueKind==JsonValueKind.String?dp.GetString():null;
+        var name=execution.Value.TryGetProperty("documento_nome",out var dn)&&dn.ValueKind==JsonValueKind.String?dn.GetString():null;
+        if(string.IsNullOrWhiteSpace(path)) return Results.Ok(new {data=(object?)null,error=(object?)null});
+
+        var sign=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/storage/v1/object/sign/auditoria-relatorios/{EncodedPath(path)}");
+        ApplyAuth(sign,token);
+        sign.Content=JsonContent.Create(new {expiresIn=300});
+        var res=await client.SendAsync(sign);
+        var raw=await res.Content.ReadAsStringAsync();
+        if(!res.IsSuccessStatusCode) return Results.Json(Error("Falha ao abrir Word armazenado.",raw),statusCode:(int)res.StatusCode);
+        using var doc=JsonDocument.Parse(raw);
+        var root=doc.RootElement;
+        var url=root.TryGetProperty("signedURL",out var s1)?s1.GetString():
+            root.TryGetProperty("signedUrl",out var s2)?s2.GetString():null;
+        if(!string.IsNullOrWhiteSpace(url)&&url.StartsWith("/")) url=supabaseUrl+"/storage/v1"+url;
+        return Results.Ok(new {data=new {url,filename=name,path},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao obter documento da auditoria.",e.Message),statusCode:500);}
+});
+
 app.MapGet("/api/auditorias/generate/{executionId}", async (string executionId, HttpRequest request, IHttpClientFactory factory) =>
 {
     try
     {
         var token = Token(request);
+        var client=factory.CreateClient("supabase");
         var msg = new HttpRequestMessage(HttpMethod.Get, $"{auditDocsUrl}/generate/{Uri.EscapeDataString(executionId)}");
         msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        var res = await factory.CreateClient("supabase").SendAsync(msg);
+        var res = await client.SendAsync(msg);
         var bytes = await res.Content.ReadAsByteArrayAsync();
         if (!res.IsSuccessStatusCode)
             return Results.Text(Encoding.UTF8.GetString(bytes), "application/json", statusCode: (int)res.StatusCode);
 
+        var integrationStatus="not_configured";
+        try
+        {
+            var integration=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/sgq-auditoria-integracao");
+            ApplyAuth(integration,token);
+            integration.Content=JsonContent.Create(new {executionId});
+            var intRes=await client.SendAsync(integration);
+            var raw=await intRes.Content.ReadAsStringAsync();
+            if(intRes.IsSuccessStatusCode)
+            {
+                using var doc=JsonDocument.Parse(raw);
+                var root=doc.RootElement;
+                var configured=root.TryGetProperty("configured",out var cf)&&cf.ValueKind==JsonValueKind.True;
+                var sent=root.TryGetProperty("sent",out var se)&&se.ValueKind==JsonValueKind.True;
+                integrationStatus=sent?"sent":configured?"configured":"not_configured";
+            }
+            else integrationStatus="error";
+        }
+        catch { integrationStatus="error"; }
+
         var contentType = res.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
         var fileName = res.Headers.TryGetValues("X-SGQ-File-Name", out var values) ? values.FirstOrDefault() : null;
+        request.HttpContext.Response.Headers["X-SGQ-Integration-Status"]=integrationStatus;
         return Results.File(bytes, contentType, fileName ?? $"auditoria-{executionId}.docx");
     }
     catch (UnauthorizedAccessException e) { return Results.Json(Error(e.Message), statusCode: 401); }
@@ -2383,6 +2460,13 @@ public sealed class AuditMessageRequest
     public string? PhotoMime { get; set; }
     public bool FixedChecklist { get; set; }
     public int CriteriaCount { get; set; }
+}
+
+public sealed class AuditTemplateRequest
+{
+    public string RqVersion { get; set; } = "";
+    public string ArquivoNome { get; set; } = "";
+    public string StoragePath { get; set; } = "";
 }
 
 public sealed class FinishAuditRequest
