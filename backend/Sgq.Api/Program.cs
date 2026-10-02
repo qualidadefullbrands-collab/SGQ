@@ -693,6 +693,277 @@ app.MapPost("/api/inspecoes/{id}/concluir", async (string id,FinishInspectionReq
     catch(Exception e){return Results.Json(Error("Falha ao concluir inspeção.",e.Message),statusCode:500);}
 });
 
+app.MapPost("/api/inspecoes/{id}/retencao", async (string id,RetentionRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,numero,grupo_inspecao_id&excluido_em=is.null&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (ins,found)=FirstRow(insRows);
+        if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+
+        if(input.Itens is null || input.Itens.Count==0)
+        {
+            if(string.IsNullOrWhiteSpace(input.MotivoSemRetencao))
+                return Results.Json(Error("Informe o motivo para não reter amostra."),statusCode:400);
+
+            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+                new {retencao_decisao=false,retencao_motivo=input.MotivoSemRetencao.Trim()},"return=minimal");
+            return Results.Ok(new {data=new {retidos=0},error=(object?)null});
+        }
+
+        var groupId=ins!.Value.GetProperty("grupo_inspecao_id").GetString()!;
+        var groupRows=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
+            $"select=processo_id&id=eq.{Uri.EscapeDataString(groupId)}&limit=1");
+        var (group,gfound)=FirstRow(groupRows);
+        if(!gfound) throw new InvalidOperationException("Grupo da inspeção não encontrado.");
+        var processId=group!.Value.GetProperty("processo_id").GetString()!;
+
+        var reportRows=await RestAsync(client,token,HttpMethod.Get,"laudos",
+            $"select=id,numero,storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (report,reportFound)=FirstRow(reportRows);
+        string reportId;
+        if(reportFound) reportId=report!.Value.GetProperty("id").GetString()!;
+        else
+        {
+            var createdReport=await RestAsync(client,token,HttpMethod.Post,"laudos","select=id",
+                new {inspecao_id=id,numero=ins.Value.GetProperty("numero").GetString()},"return=representation");
+            var (rr,rf)=FirstRow(createdReport);
+            if(!rf) throw new InvalidOperationException("Falha ao vincular laudo.");
+            reportId=rr!.Value.GetProperty("id").GetString()!;
+        }
+
+        var retained=0;
+        foreach(var item in input.Itens)
+        {
+            if(item.Quantidade<=0 || string.IsNullOrWhiteSpace(item.Endereco))
+                return Results.Json(Error("Quantidade e endereço são obrigatórios para retenção."),statusCode:400);
+            if(string.IsNullOrWhiteSpace(item.FotoCadastroPath))
+                return Results.Json(Error("Foto de cadastro é obrigatória para retenção."),statusCode:400);
+
+            var processItemRows=await RestAsync(client,token,HttpMethod.Get,"processo_itens",
+                $"select=id,produto_id,lote&processo_id=eq.{Uri.EscapeDataString(processId)}&id=eq.{Uri.EscapeDataString(item.ProcessoItemId)}&limit=1");
+            var (processItem,pif)=FirstRow(processItemRows);
+            if(!pif) return Results.Json(Error("Produto da inspeção não encontrado."),statusCode:404);
+            var productId=processItem!.Value.GetProperty("produto_id").GetString()!;
+
+            var alreadyRows=await RestAsync(client,token,HttpMethod.Get,"amostras",
+                $"select=id&inspecao_id=eq.{Uri.EscapeDataString(id)}&produto_id=eq.{Uri.EscapeDataString(productId)}&limit=1");
+            var (_,already)=FirstRow(alreadyRows);
+            if(already) continue;
+
+            var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
+                $"select=nome&id=eq.{Uri.EscapeDataString(productId)}&limit=1");
+            var (product,pf)=FirstRow(productRows);
+            var productName=pf && product!.Value.TryGetProperty("nome",out var pn)&&pn.ValueKind==JsonValueKind.String?pn.GetString():null;
+            var lote=processItem.Value.TryGetProperty("lote",out var lt)&&lt.ValueKind==JsonValueKind.String?lt.GetString():null;
+            var code=$"AMO-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+
+            var createdSample=await RestAsync(client,token,HttpMethod.Post,"amostras","select=id",
+                new {
+                    codigo=code,
+                    inspecao_id=id,
+                    produto_id=productId,
+                    processo_id=processId,
+                    grupo_inspecao_id=groupId,
+                    lote,
+                    quantidade_inicial=item.Quantidade,
+                    status="ativa",
+                    endereco=item.Endereco.Trim(),
+                    unidade_controle="unidade",
+                    descricao=productName,
+                    laudo_id=reportId,
+                    foto_cadastro_path=item.FotoCadastroPath
+                },"return=representation");
+            var (sample,sf)=FirstRow(createdSample);
+            if(!sf) throw new InvalidOperationException("Falha ao criar amostra retida.");
+            var sampleId=sample!.Value.GetProperty("id").GetString()!;
+
+            await RestAsync(client,token,HttpMethod.Post,"amostra_movimentacoes","",
+                new {
+                    amostra_id=sampleId,
+                    tipo="entrada",
+                    quantidade=item.Quantidade,
+                    endereco_destino=item.Endereco.Trim(),
+                    motivo="Retenção após finalização da inspeção",
+                    usuario_id=userId
+                },"return=minimal");
+            retained++;
+        }
+
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {retencao_decisao=true,retencao_motivo=(string?)null},"return=minimal");
+
+        return Results.Ok(new {data=new {retidos=retained,laudo_id=reportId},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao registrar retenção.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/amostras/criar", async (CreateSampleRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        if(string.IsNullOrWhiteSpace(input.GroupId)||input.Quantidade<=0||string.IsNullOrWhiteSpace(input.Endereco))
+            return Results.Json(Error("Selecione a inspeção e informe quantidade e endereço."),statusCode:400);
+
+        var groupRows=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
+            $"select=id,nome,processo_id&id=eq.{Uri.EscapeDataString(input.GroupId)}&limit=1");
+        var (group,found)=FirstRow(groupRows);
+        if(!found) return Results.Json(Error("Grupo de inspeção não encontrado."),statusCode:404);
+        var code=$"AMO-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+        var description=!string.IsNullOrWhiteSpace(input.Descricao)?input.Descricao.Trim():
+            (group!.Value.TryGetProperty("nome",out var gn)&&gn.ValueKind==JsonValueKind.String?gn.GetString():null);
+
+        var created=await RestAsync(client,token,HttpMethod.Post,"amostras","select=id",
+            new {
+                codigo=code,
+                processo_id=group!.Value.GetProperty("processo_id").GetString(),
+                grupo_inspecao_id=input.GroupId,
+                produto_id=(string?)null,
+                descricao=description,
+                lote=string.IsNullOrWhiteSpace(input.Lote)?null:input.Lote.Trim(),
+                quantidade_inicial=input.Quantidade,
+                unidade_controle=string.IsNullOrWhiteSpace(input.Unidade)?"conjunto":input.Unidade,
+                endereco=input.Endereco.Trim(),
+                status="ativa"
+            },"return=representation");
+        var (sample,sf)=FirstRow(created);
+        if(!sf) throw new InvalidOperationException("Falha ao criar amostra.");
+        var sampleId=sample!.Value.GetProperty("id").GetString()!;
+
+        await RestAsync(client,token,HttpMethod.Post,"amostra_movimentacoes","",
+            new {
+                amostra_id=sampleId,
+                tipo="entrada",
+                quantidade=input.Quantidade,
+                endereco_destino=input.Endereco.Trim(),
+                motivo="Retenção após inspeção",
+                usuario_id=userId
+            },"return=minimal");
+        return Results.Ok(new {data=new {id=sampleId,codigo=code},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao criar amostra.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/estoque/{sampleId}/movimentar", async (string sampleId,StockMoveRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        if(input.Quantidade<=0) return Results.Json(Error("Informe uma quantidade válida."),statusCode:400);
+        var allowed=new HashSet<string>(StringComparer.OrdinalIgnoreCase){"retirada","descarte","transferencia","devolucao","entrada"};
+        if(!allowed.Contains(input.Tipo)) return Results.Json(Error("Tipo de movimentação inválido."),statusCode:400);
+
+        var rows=await RestAsync(client,token,HttpMethod.Get,"vw_saldo_amostras",
+            $"select=id,saldo,endereco&id=eq.{Uri.EscapeDataString(sampleId)}&limit=1");
+        var (sample,found)=FirstRow(rows);
+        if(!found) return Results.Json(Error("Amostra não encontrada."),statusCode:404);
+        var saldo=sample!.Value.TryGetProperty("saldo",out var sl)&&sl.ValueKind==JsonValueKind.Number?sl.GetDecimal():0m;
+        var origin=sample.Value.TryGetProperty("endereco",out var ed)&&ed.ValueKind==JsonValueKind.String?ed.GetString():null;
+        if((input.Tipo=="retirada"||input.Tipo=="descarte")&&input.Quantidade>saldo)
+            return Results.Json(Error("Quantidade maior que o saldo disponível."),statusCode:400);
+
+        var dest=string.IsNullOrWhiteSpace(input.Endereco)?origin:input.Endereco.Trim();
+        await RestAsync(client,token,HttpMethod.Post,"amostra_movimentacoes","",
+            new {
+                amostra_id=sampleId,
+                tipo=input.Tipo,
+                quantidade=input.Quantidade,
+                endereco_origem=origin,
+                endereco_destino=(input.Tipo=="transferencia"||input.Tipo=="devolucao")?dest:null,
+                motivo=string.IsNullOrWhiteSpace(input.Motivo)?null:input.Motivo.Trim(),
+                usuario_id=userId
+            },"return=minimal");
+        if(input.Tipo=="transferencia"&&!string.IsNullOrWhiteSpace(dest))
+            await RestAsync(client,token,HttpMethod.Patch,"amostras",$"id=eq.{Uri.EscapeDataString(sampleId)}",new {endereco=dest},"return=minimal");
+
+        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao movimentar estoque.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/its/cadastrar", async (RegisterItRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        if(string.IsNullOrWhiteSpace(input.Codigo)||string.IsNullOrWhiteSpace(input.Titulo)||string.IsNullOrWhiteSpace(input.Versao)||string.IsNullOrWhiteSpace(input.ArquivoStoragePath))
+            return Results.Json(Error("Código, título, versão e arquivo são obrigatórios."),statusCode:400);
+
+        var itRows=await RestAsync(client,token,HttpMethod.Post,"instrucoes_trabalho","on_conflict=codigo&select=id",
+            new {codigo=input.Codigo.Trim(),titulo=input.Titulo.Trim(),ativo=true},
+            "resolution=merge-duplicates,return=representation");
+        var (it,found)=FirstRow(itRows);
+        if(!found) throw new InvalidOperationException("Falha ao cadastrar IT.");
+        var itId=it!.Value.GetProperty("id").GetString()!;
+
+        var versionRows=await RestAsync(client,token,HttpMethod.Post,"it_versoes","select=id",
+            new {
+                instrucao_trabalho_id=itId,
+                versao=input.Versao.Trim(),
+                vigencia=input.Vigencia,
+                status="rascunho",
+                arquivo_nome=input.ArquivoNome,
+                arquivo_storage_path=input.ArquivoStoragePath,
+                arquivo_mime=input.ArquivoMime,
+                leitura_ia_status="aguardando"
+            },"return=representation");
+        var (version,vf)=FirstRow(versionRows);
+        if(!vf) throw new InvalidOperationException("Falha ao criar versão da IT.");
+        var versionId=version!.Value.GetProperty("id").GetString()!;
+
+        object? structure=null;
+        string? structureError=null;
+        try
+        {
+            var msg=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/estruturar-it");
+            ApplyAuth(msg,token);
+            msg.Content=JsonContent.Create(new {it_versao_id=versionId});
+            var res=await client.SendAsync(msg);
+            var raw=await res.Content.ReadAsStringAsync();
+            if(res.IsSuccessStatusCode)
+            {
+                try{structure=JsonSerializer.Deserialize<JsonElement>(raw);}catch{structure=raw;}
+            }
+            else structureError=raw;
+        }
+        catch(Exception e){structureError=e.Message;}
+
+        return Results.Ok(new {data=new {id=versionId,estrutura=structure,estrutura_erro=structureError},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao cadastrar IT.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/its/{id}/publicar", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        await RestAsync(client,token,HttpMethod.Patch,"it_versoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {status="publicada",leitura_ia_status="publicada",revisado_por=userId,revisado_em=DateTimeOffset.UtcNow},"return=minimal");
+        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao publicar IT.",e.Message),statusCode:500);}
+});
+
+
 app.MapPost("/api/data/query", async (QueryRequest q, HttpRequest request, IHttpClientFactory factory) =>
 {
     try
@@ -901,6 +1172,45 @@ app.MapGet("/api/auditorias/generate/{executionId}", async (string executionId, 
 });
 
 app.Run();
+
+public sealed class RetentionRequest
+{
+    public string? MotivoSemRetencao { get; set; }
+    public List<RetentionItemRequest> Itens { get; set; } = [];
+}
+public sealed class RetentionItemRequest
+{
+    public string ProcessoItemId { get; set; } = "";
+    public decimal Quantidade { get; set; }
+    public string Endereco { get; set; } = "";
+    public string FotoCadastroPath { get; set; } = "";
+}
+public sealed class CreateSampleRequest
+{
+    public string GroupId { get; set; } = "";
+    public string? Descricao { get; set; }
+    public string? Lote { get; set; }
+    public decimal Quantidade { get; set; }
+    public string Endereco { get; set; } = "";
+    public string Unidade { get; set; } = "conjunto";
+}
+public sealed class StockMoveRequest
+{
+    public string Tipo { get; set; } = "retirada";
+    public decimal Quantidade { get; set; }
+    public string? Endereco { get; set; }
+    public string? Motivo { get; set; }
+}
+public sealed class RegisterItRequest
+{
+    public string Codigo { get; set; } = "";
+    public string Titulo { get; set; } = "";
+    public string Versao { get; set; } = "";
+    public DateOnly? Vigencia { get; set; }
+    public string ArquivoNome { get; set; } = "";
+    public string ArquivoStoragePath { get; set; } = "";
+    public string? ArquivoMime { get; set; }
+}
 
 public sealed class RegisterUnitRequest
 {
