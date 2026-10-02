@@ -1,0 +1,18 @@
+{
+  "name": "SGQ Qualidade",
+  "short_name": "SGQ",
+  "description": "Inspeções, auditorias e registros da Qualidade.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#123f6c",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/sgq-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
