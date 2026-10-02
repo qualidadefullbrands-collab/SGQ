@@ -1348,6 +1348,90 @@ app.MapPost("/api/inspecoes/{id}/concluir", async (string id,FinishInspectionReq
     catch(Exception e){return Results.Json(Error("Falha ao concluir inspeção.",e.Message),statusCode:500);}
 });
 
+app.MapPost("/api/inspecoes/{id}/assistente", async (string id,AssistantRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/sgq-assistente");
+        ApplyAuth(fn,token);
+        fn.Content=JsonContent.Create(new {mode=input.Mode,question=input.Question??"",context=input.Context});
+        var res=await client.SendAsync(fn);
+        var raw=await res.Content.ReadAsStringAsync();
+        if(!res.IsSuccessStatusCode)
+            return Results.Ok(new {data=(object?)null,error=new {message="A IA assistida não respondeu.",details=raw}});
+        object? data;
+        try{data=JsonSerializer.Deserialize<JsonElement>(raw);}catch{data=new {text=raw};}
+        return Results.Ok(new {data,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao consultar a IA assistida.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/inspecoes/{id}/conclusao-assistida", async (string id,AssistantConclusionRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/sgq-conclusao");
+        ApplyAuth(fn,token);
+        fn.Content=new StringContent(input.Payload.GetRawText(),Encoding.UTF8,"application/json");
+        var res=await client.SendAsync(fn);
+        var raw=await res.Content.ReadAsStringAsync();
+        object? data;
+        try{data=JsonSerializer.Deserialize<JsonElement>(raw);}catch{data=new {text=raw};}
+        if(!res.IsSuccessStatusCode)
+            return Results.Ok(new {data,error=new {message="Não foi possível gerar a conclusão com IA.",details=raw}});
+        return Results.Ok(new {data,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao gerar conclusão assistida.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/its/{id}/estruturar", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/estruturar-it");
+        ApplyAuth(fn,token);
+        fn.Content=JsonContent.Create(new {it_versao_id=id});
+        var res=await client.SendAsync(fn);
+        var raw=await res.Content.ReadAsStringAsync();
+        object? data;
+        try{data=JsonSerializer.Deserialize<JsonElement>(raw);}catch{data=new {message=raw};}
+        if(!res.IsSuccessStatusCode)
+            return Results.Ok(new {data=(object?)null,error=new {message="Não foi possível estruturar a IT.",details=raw}});
+        return Results.Ok(new {data,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao estruturar IT.",e.Message),statusCode:500);}
+});
+
+app.MapGet("/api/its/{id}/revisao", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var checks=RestAsync(client,token,HttpMethod.Get,"it_checklist",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(id)}&ativo=eq.true&order=ordem.asc");
+        var dims=RestAsync(client,token,HttpMethod.Get,"it_parametros_dimensionais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(id)}&ativo=eq.true&order=ordem.asc");
+        var tests=RestAsync(client,token,HttpMethod.Get,"it_testes_especiais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(id)}&ativo=eq.true&order=ordem.asc");
+        var version=RestAsync(client,token,HttpMethod.Get,"it_versoes",$"select=extracao_ia&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        await Task.WhenAll(checks,dims,tests,version);
+        var (versionRow,_)=FirstRow(version.Result);
+        JsonElement? extraction=versionRow.HasValue&&versionRow.Value.TryGetProperty("extracao_ia",out var ex)?ex.Clone():null;
+        return Results.Ok(new {data=new {
+            checklist=checks.Result,dimensionais=dims.Result,testes=tests.Result,extracao_ia=extraction
+        },error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar revisão da IT.",e.Message),statusCode:500);}
+});
+
 app.MapGet("/api/inspecoes/{id}/chat", async (string id,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -2323,6 +2407,17 @@ public sealed class ProductLookupRequest
 {
     public string Codigo { get; set; } = "";
 }
+public sealed class AssistantRequest
+{
+    public string Mode { get; set; } = "analisar";
+    public string? Question { get; set; }
+    public JsonElement? Context { get; set; }
+}
+public sealed class AssistantConclusionRequest
+{
+    public JsonElement Payload { get; set; }
+}
+
 public sealed class InspectionChatRequest
 {
     public string Message { get; set; } = "";
