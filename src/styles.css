@@ -1464,3 +1464,48 @@ input,select,textarea{min-height:46px;padding:11px 13px;font-size:15px}
   .environment-topbar .userbox span{display:none}
   .environment-topbar .userbox button:first-of-type{padding:8px 9px;font-size:11px}
 }
+
+
+.photo-final-lock{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:14px 16px;
+  border:1px dashed #355267;
+  border-radius:14px;
+  background:#0b1b25;
+  color:#95a9b7;
+}
+.photo-final-lock>div{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+.photo-final-lock strong{color:#e3eef4}
+.photo-final-lock span{font-size:12px}
+.product-id-photo-tag{
+  display:inline-flex;
+  width:max-content;
+  padding:5px 8px;
+  border-radius:999px;
+  background:#173a2b;
+  color:#8ed9aa;
+  border:1px solid #2b5a42;
+  font-size:10px;
+  font-weight:900;
+}
+.nc-photo-deferred{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:12px;
+  border-radius:12px;
+  border:1px solid #2b485a;
+  background:#0b1d27;
+  color:#95adbc;
+  font-size:12px;
+  line-height:1.45;
+}
+@media(max-width:650px){
+  .photo-final-lock{align-items:flex-start}
+}

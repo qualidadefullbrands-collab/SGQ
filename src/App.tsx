@@ -3,6 +3,7 @@ import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3,
 import QRCode from 'qrcode'
 import { supabase } from './lib/supabase'
 import AuditoriasPage from './auditorias/AuditoriasPage'
+import InspectionChat from './full-inspection/InspectionChat'
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
 type ItVersion = {
@@ -272,10 +273,11 @@ export default function App() {
   }>>({})
   const [retentionReason, setRetentionReason] = useState('')
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
-  const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string}>>([])
+  const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string;productId:string}>>([])
   const [pendingModal, setPendingModal] = useState<string[]>([])
   const [aiLoading, setAiLoading] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
+  const [inspectionChatOpen, setInspectionChatOpen] = useState(false)
   const [assistantLoading, setAssistantLoading] = useState(false)
   const [assistantText, setAssistantText] = useState('')
   const [assistantQuestion, setAssistantQuestion] = useState('')
@@ -932,8 +934,6 @@ export default function App() {
     if (!detail || !selectedInspectionId || !userId) return
     if (!conforme) {
       if (!nc?.checklistId) return setError('Selecione o item da IT relacionado à não conformidade.')
-      if (!nc?.photoFile) return setError('Toda não conformidade deve ter uma foto específica.')
-      if (!nc?.photoLegenda.trim()) return setError('Informe a legenda da foto da não conformidade.')
       if (!nc?.description.trim()) return setError('Descreva a não conformidade.')
     }
 
@@ -956,24 +956,6 @@ export default function App() {
         tipo: 'amostragem',
       }).select('id').single()
       if (created.error || !created.data) return setError(created.error?.message ?? 'Falha ao registrar NC.')
-
-      const safe = nc.photoFile!.name.replace(/[^a-zA-Z0-9._-]/g,'_')
-      const path = `${selectedInspectionId}/nc/${created.data.id}-${Date.now()}-${safe}`
-      const up = await supabase.storage.from('inspecao-fotos').upload(path,nc.photoFile!,{contentType:nc.photoFile!.type||undefined})
-      if (up.error) return setError(up.error.message)
-
-      const photo = await supabase.from('inspecao_fotos').insert({
-        inspecao_id:selectedInspectionId,
-        storage_path:path,
-        legenda:nc.photoLegenda.trim(),
-        nc_id:created.data.id,
-      })
-      if (photo.error) return setError(photo.error.message)
-
-      await supabase.from('inspecao_nao_conformidades').update({
-        foto_storage_path:path,
-        foto_legenda:nc.photoLegenda.trim(),
-      }).eq('id',created.data.id)
 
       await supabase.from('inspecao_checklist_resultados').upsert({
         inspecao_id:selectedInspectionId,
@@ -1174,6 +1156,7 @@ export default function App() {
       file,
       url: URL.createObjectURL(file),
       legenda: '',
+      productId: '',
     }))
     setPendingPhotos((old)=>[...old,...next])
   }
@@ -1191,9 +1174,12 @@ export default function App() {
     if (pendingPhotos.some((p)=>!p.legenda.trim())) {
       return setError('Todas as fotos precisam de legenda antes de enviar.')
     }
+    const validProductIds=new Set((detail?.items ?? []).map((x:any)=>x.processo_itens?.produto_id).filter(Boolean))
+    const productPhotosUpdated:string[]=[]
     for (const p of pendingPhotos) {
       const safe = p.file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-      const path = `${selectedInspectionId}/gerais/${Date.now()}-${safe}`
+      const stamp=Date.now()
+      const path = `${selectedInspectionId}/gerais/${stamp}-${safe}`
       const up = await supabase.storage.from('inspecao-fotos').upload(path,p.file,{contentType:p.file.type||undefined})
       if (up.error) return setError(up.error.message)
       const row = await supabase.from('inspecao_fotos').insert({
@@ -1202,9 +1188,26 @@ export default function App() {
         legenda:p.legenda.trim(),
       })
       if (row.error) return setError(row.error.message)
+
+      if (p.productId && validProductIds.has(p.productId)) {
+        const productPath=`${p.productId}/${stamp}-${safe}`
+        const productUpload=await supabase.storage.from('produto-fotos').upload(productPath,p.file,{contentType:p.file.type||undefined})
+        if (productUpload.error) return setError('A foto da inspeção foi salva, mas não foi possível defini-la como identificação do produto: '+productUpload.error.message)
+        const productUpdate=await supabase.from('produtos').update({
+          foto_principal_path:productPath,
+          atualizado_em:new Date().toISOString(),
+        }).eq('id',p.productId)
+        if (productUpdate.error) return setError(productUpdate.error.message)
+        productPhotosUpdated.push(p.productId)
+      }
     }
     pendingPhotos.forEach((p)=>URL.revokeObjectURL(p.url))
     setPendingPhotos([])
+    if (productPhotosUpdated.length) {
+      setMessage('Fotos enviadas. A imagem selecionada também foi definida como identificação principal do produto.')
+    } else {
+      setMessage('Fotos da inspeção enviadas.')
+    }
     await openInspection(selectedInspectionId)
   }
 
@@ -1917,6 +1920,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   const dimsDone = detail ? (detail.params?.length ?? 0) === 0 || detail.dimensionais_finalizados : false
   const testsDone = detail ? (detail.tests?.length ?? 0) === 0 || detail.testes_finalizados : false
   const samplingDone = detail ? (detail.total_inspecionado ?? 0) >= (detail.tamanho_amostra ?? 0) || (!!detail.limite_rejeicao && detail.total_nao_conforme >= detail.limite_rejeicao) : false
+  const inspectionCoreDone = samplingDone && checklistDone && dimsDone && testsDone
 
   return (
     <main className="app-shell">
@@ -2111,22 +2115,13 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                           <input value={row.distribuicaoCaixas} placeholder="Ex.: 44x136 + 1x49 + 1x60" onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,distribuicaoCaixas:e.target.value}:r))}/>
                           {row.distribuicaoCaixas && (()=>{const d=parseBoxDistribution(row.distribuicaoCaixas); const mismatch=d.valid && (d.boxes!==Number(row.caixasRecebidas) || Math.abs(d.units-Number(row.quantidade))>0.0001); return <small className={'field-status '+(!d.valid||mismatch?'bad':'ok')}>{!d.valid?d.error:`${d.boxes} caixa(s) · ${d.units.toLocaleString('pt-BR')} unidades${mismatch?' — confira com os totais informados.':' — conferência fechada.'}`}</small>})()}
                         </label>
-                        <div className="span-2 product-photo-editor">
+                        <div className="span-2 product-photo-editor product-photo-later">
                           <div>
-                            <strong>Foto principal do produto</strong>
-                            <small>Fica vinculada ao código e reaparece automaticamente nas próximas inspeções.</small>
+                            <strong>Identificação visual do produto</strong>
+                            <small>{row.fotoPreview?'Este produto já possui uma foto principal cadastrada.':'A foto não precisa ser cadastrada agora. No final da inspeção, você poderá usar uma das fotos da inspeção como ID do produto.'}</small>
                           </div>
                           {row.fotoPreview && <img src={row.fotoPreview} alt={'Foto principal de '+(row.nome||row.sku)}/>}
-                          <label className="secondary product-photo-button">
-                            <Camera size={16}/> {row.fotoPreview?'Trocar foto':'Cadastrar foto'}
-                            <input type="file" accept="image/*" onChange={(e)=>{
-                              const file=e.target.files?.[0] ?? null
-                              if (!file) return
-                              const preview=URL.createObjectURL(file)
-                              if (row.fotoPreview?.startsWith('blob:')) URL.revokeObjectURL(row.fotoPreview)
-                              setSkuRows(skuRows.map((r,j)=>j===i?{...r,fotoFile:file,fotoPreview:preview}:r))
-                            }}/>
-                          </label>
+                          {!row.fotoPreview && <span className="pill">Foto no final</span>}
                         </div>
                         {isComponentSet && <label>Unidades por conjunto<input type="number" min="0.01" step="0.01" value={row.unidadesPorConjunto} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPorConjunto:e.target.value}:r))}/></label>}
                       </div>
@@ -2161,6 +2156,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
+              <button className="secondary" type="button" onClick={()=>setInspectionChatOpen(true)}>
+                <MessageCircle size={16}/> Modo chat
+              </button>
               {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
@@ -2399,23 +2397,41 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
           <section className="panel section-card">
             <div className="section-title">
-              <div><h2>Fotos da inspeção</h2><span className="section-note">Cada foto deve ter uma legenda antes do envio.</span></div>
+              <div><h2>Fotos da inspeção</h2><span className="section-note">Etapa final: adicione as evidências somente depois de concluir amostragem, verificações, dimensionais e testes.</span></div>
               <span className="pill">{detail.photos?.length ?? 0} enviada(s)</span>
             </div>
 
-            {detail.status!=='concluida' && (
+            {detail.status!=='concluida' && !inspectionCoreDone && (
+              <div className="photo-final-lock">
+                <Camera size={20}/>
+                <div><strong>Fotos liberadas no final</strong><span>Finalize as etapas técnicas acima. Depois você envia as fotos da inspeção em um único lugar.</span></div>
+              </div>
+            )}
+
+            {detail.status!=='concluida' && inspectionCoreDone && (
               <>
-                <label className="upload-box"><Camera size={22}/><span>Selecionar fotos</span><input type="file" accept="image/*" multiple onChange={(e)=>addPendingPhotos(e.target.files)}/></label>
+                <label className="upload-box"><Camera size={22}/><span>Selecionar fotos finais</span><input type="file" accept="image/*" multiple onChange={(e)=>addPendingPhotos(e.target.files)}/></label>
                 {!!pendingPhotos.length && <div className="pending-photo-grid">
                   {pendingPhotos.map((p)=>(
                     <article className="photo-card" key={p.id}>
                       <img src={p.url} alt="Prévia"/>
                       <label>Legenda<input value={p.legenda} onChange={(e)=>setPendingPhotos((old)=>old.map((x)=>x.id===p.id?{...x,legenda:e.target.value}:x))} placeholder="Ex.: Tampa com risco na lateral"/></label>
+                      <label>Usar também como identificação do produto
+                        <select value={p.productId} onChange={(e)=>setPendingPhotos((old)=>old.map((x)=>x.id===p.id?{...x,productId:e.target.value}:x))}>
+                          <option value="">Não usar como foto principal</option>
+                          {(detail.items ?? []).map((link:any)=>(
+                            <option key={link.processo_itens.produto_id} value={link.processo_itens.produto_id}>
+                              {link.processo_itens.produtos?.sku} · {link.processo_itens.produtos?.nome}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {!!p.productId && <span className="product-id-photo-tag">ID do produto</span>}
                       <button className="secondary small" type="button" onClick={()=>removePendingPhoto(p.id)}>Remover</button>
                     </article>
                   ))}
                 </div>}
-                {!!pendingPhotos.length && <div className="actions"><button className="primary" type="button" onClick={uploadInspectionPhotos}>Enviar fotos</button></div>}
+                {!!pendingPhotos.length && <div className="actions"><button className="primary" type="button" onClick={uploadInspectionPhotos}>Enviar fotos finais</button></div>}
               </>
             )}
 
@@ -2501,6 +2517,21 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </section>
           )}
         </section>
+      )}
+
+      {inspectionChatOpen && tab==='execucao' && detail && userId && (
+        <InspectionChat
+          inspectionId={detail.id}
+          detail={detail}
+          userId={userId}
+          onClose={()=>{
+            setInspectionChatOpen(false)
+            if (selectedInspectionId) void openInspection(selectedInspectionId)
+          }}
+          onChanged={async()=>{
+            if (selectedInspectionId) await openInspection(selectedInspectionId)
+          }}
+        />
       )}
 
       {assistantOpen && tab==='execucao' && detail && (
@@ -2860,17 +2891,12 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
             <label>Descrição<textarea required rows={4} value={ncDraft.description} onChange={(e)=>setNcDraft({...ncDraft,description:e.target.value})}/></label>
 
-            <label>Foto específica da NC
-              <input required type="file" accept="image/*" onChange={(e)=>{
-                const file=e.target.files?.[0] ?? null
-                if (ncDraft.photoPreview) URL.revokeObjectURL(ncDraft.photoPreview)
-                setNcDraft({...ncDraft,photoFile:file,photoPreview:file?URL.createObjectURL(file):''})
-              }}/>
-            </label>
-            {ncDraft.photoPreview && <img className="nc-preview" src={ncDraft.photoPreview} alt="Prévia da NC"/>}
-            <label>Legenda da foto<input required value={ncDraft.photoLegenda} onChange={(e)=>setNcDraft({...ncDraft,photoLegenda:e.target.value})} placeholder="Ex.: Trinca próxima ao gargalo"/></label>
+            <div className="nc-photo-deferred">
+              <Camera size={18}/>
+              <span>A foto não é cadastrada aqui. As evidências serão adicionadas juntas na etapa final da inspeção.</span>
+            </div>
 
-            <button className="danger wide" type="submit">Registrar NC e foto</button>
+            <button className="danger wide" type="submit">Registrar NC</button>
           </form>
         </div>
       )}
