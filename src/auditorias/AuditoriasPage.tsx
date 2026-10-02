@@ -281,25 +281,6 @@ export default function AuditoriasPage({profileName}:Props) {
   }
 
 
-  async function persistProgress(nextAnswers:AuditAnswer[]) {
-    if (!active || !definition) return
-    const done=new Set(nextAnswers.map((a)=>a.item_key)).size
-    const total=definition.fixedChecklist ? definition.criteria.length : Math.max(active.progresso_total,done)
-    const {data}=await supabase.from('auditoria_execucoes').update({
-      progresso_total:total,
-      progresso_concluido:done,
-      atualizado_em:new Date().toISOString(),
-      resumo:{
-        ...(active.resumo || {}),
-        respostas:nextAnswers.length,
-        achados:findings.length,
-        objetos:objects.length,
-        ultima_localizacao:currentLocation || null,
-      }
-    }).eq('id',active.id).select('*').single()
-    if (data) setActive(data as AuditExecution)
-  }
-
   async function saveManualAnswer(criterion:AuditCriterion,result:'C'|'NC'|'NA') {
     if (!active) return
     const local=definition?.code==='RQ016B' ? currentLocation.trim() : ''
@@ -347,124 +328,35 @@ export default function AuditoriasPage({profileName}:Props) {
         if (upload.error) throw upload.error
       }
 
-      const inserted=await supabase.from('auditoria_mensagens').insert({
-        execucao_id:active.id,
-        autor:'auditor',
-        texto:text,
-        foto_path:photoPath,
-        foto_mime:photo?.type || null,
-        metadata:{local:currentLocation || null,area:definition.code==='RQ016B'?rq016bArea:null}
-      }).select('*').single()
-      if (inserted.error) throw inserted.error
-      const auditorMessage=inserted.data as AuditMessage
-      if (photoPath) {
-        const signed=await supabase.storage.from('auditoria-evidencias').createSignedUrl(photoPath,3600)
-        auditorMessage.photoUrl=signed.data?.signedUrl ?? ''
+      const criteriaForAi=(definition.code==='RQ016B' ? relevantCriteria : definition.criteria).map((criterion)=>({
+        key:criterion.key,label:criterion.label,section:criterion.section,
+      }))
+      const state={
+        currentLocation,
+        area:definition.code==='RQ016B'?rq016bArea:null,
+        answers:answers.map((a)=>({key:a.item_key,local:a.local_ref,result:a.resultado})),
+        findings:findings.map((finding)=>({criteria:finding.criterios,location:finding.local_ref,address:finding.endereco,description:finding.descricao_tecnica})),
+        objects:objects.map((obj)=>({type:obj.objeto_tipo,key:obj.chave,identification:obj.identificacao,location:obj.local_ref,status:obj.status})),
       }
-      setMessages((x)=>[...x,auditorMessage])
 
-      const criteriaForAi=(definition.code==='RQ016B' ? relevantCriteria : definition.criteria).map((c)=>({key:c.key,label:c.label,section:c.section}))
-      const {data:ai,error:aiError}=await supabase.functions.invoke('sgq-auditoria-assistente',{
-        body:{
-          rqCode:definition.code,
-          message:text,
-          imageDataUrl,
-          criteria:criteriaForAi,
-          state:{
-            currentLocation,
-            area:definition.code==='RQ016B'?rq016bArea:null,
-            answers:answers.map((a)=>({key:a.item_key,local:a.local_ref,result:a.resultado})),
-            findings:findings.map((f)=>({criteria:f.criterios,location:f.local_ref,address:f.endereco,description:f.descricao_tecnica})),
-            objects:objects.map((o)=>({type:o.objeto_tipo,key:o.chave,identification:o.identificacao,location:o.local_ref,status:o.status}))
-          }
-        }
+      const processed=await apiPost<any>(`/api/auditorias/${active.id}/mensagens`,{
+        rqCode:definition.code,
+        message:text,
+        imageDataUrl,
+        criteria:criteriaForAi,
+        state,
+        currentLocation:currentLocation || null,
+        area:definition.code==='RQ016B'?rq016bArea:null,
+        photoPath,
+        photoMime:photo?.type || null,
+        fixedChecklist:definition.fixedChecklist,
+        criteriaCount:definition.criteria.length,
       })
-
-      const interpreted=aiError ? {
-        reply:'Registro salvo. A análise assistida não respondeu agora; você pode revisar pelo checklist.',
-        matches:[],finding:null,subject:null,finishRequested:false,degraded:true
-      } : ai
-
-      let nextAnswers=[...answers]
-      for (const match of interpreted?.matches ?? []) {
-        const local=String(match.location || ((definition.code==='RQ016B'||definition.code==='RQ015')?currentLocation:'') || '')
-        const up=await supabase.from('auditoria_respostas').upsert({
-          execucao_id:active.id,
-          item_key:String(match.key),
-          local_ref:local,
-          resultado:match.result,
-          observacao:match.observation || text,
-          confianca:Number(match.confidence || 0),
-          origem_mensagem_id:auditorMessage.id,
-          atualizado_em:new Date().toISOString(),
-        },{onConflict:'execucao_id,item_key,local_ref'}).select('*').single()
-        if (up.data) {
-          const row=up.data as AuditAnswer
-          nextAnswers=[...nextAnswers.filter((a)=>!(a.item_key===row.item_key && a.local_ref===row.local_ref)),row]
-        }
-      }
-      setAnswers(nextAnswers)
-
-      if (interpreted?.subject?.type && definition.code==='RQ014') {
-        const s=interpreted.subject
-        const objectKey=String(s.key || s.identification || s.location || currentLocation || '').trim()
-        if (objectKey) {
-          const up=await supabase.from('auditoria_objetos').upsert({
-            execucao_id:active.id,
-            objeto_tipo:s.type,
-            chave:objectKey,
-            identificacao:s.identification || null,
-            local_ref:s.location || currentLocation || null,
-            dados:s.data || {},
-            criterios_nc:s.criteria_nc || [],
-            status:s.status || null,
-            observacao:text,
-            origem_mensagem_id:auditorMessage.id,
-            atualizado_em:new Date().toISOString(),
-          },{onConflict:'execucao_id,objeto_tipo,chave'}).select('*').single()
-          if (up.data) {
-            const row=up.data as AuditObject
-            setObjects((prev)=>[...prev.filter((o)=>!(o.objeto_tipo===row.objeto_tipo && o.chave===row.chave)),row])
-          }
-        }
-      }
-
-      if (interpreted?.finding?.description || interpreted?.finding?.criteria?.length) {
-        const f=interpreted.finding
-        const ins=await supabase.from('auditoria_achados').insert({
-          execucao_id:active.id,
-          endereco:f.address || null,
-          local_ref:f.location || currentLocation || null,
-          criterios:f.criteria || [],
-          descricao_original:text,
-          descricao_tecnica:f.description || text,
-          risco:f.riskSuggestion || null,
-          acao_imediata:f.immediateAction || null,
-          status:'pendente',
-          foto_path:photoPath,
-          origem_mensagem_id:auditorMessage.id,
-          metadata:{ia:true,risco_sugerido_pela_ia:Boolean(f.riskSuggestion)}
-        }).select('*').single()
-        if (ins.data) setFindings((x)=>[...x,ins.data as AuditFinding])
-      }
-
-      const assistant=await supabase.from('auditoria_mensagens').insert({
-        execucao_id:active.id,
-        autor:'assistente',
-        texto:interpreted?.reply || 'Registro interpretado.',
-        metadata:{
-          matches:interpreted?.matches ?? [],
-          finding:interpreted?.finding ?? null,
-          subject:interpreted?.subject ?? null,
-          clarification:interpreted?.clarification ?? null,
-          degraded:Boolean(interpreted?.degraded)
-        }
-      }).select('*').single()
-      if (assistant.data) setMessages((x)=>[...x,assistant.data as AuditMessage])
-      await persistProgress(nextAnswers)
+      if (processed.error) throw new Error(processed.error.message || 'Não foi possível registrar a mensagem.')
 
       choosePhoto(null)
-      if (interpreted?.finishRequested) await requestFinish(nextAnswers)
+      await openAudit(active.id)
+      if (processed.data?.finishRequested) await requestFinish()
     } catch (e:any) {
       setNotice(e?.message || 'Não foi possível registrar a mensagem.')
     } finally {
