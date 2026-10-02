@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, MessageCircle, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, X } from 'lucide-react'
 import QRCode from 'qrcode'
-import { apiPost, supabase } from './lib/supabase'
+import { apiPost, apiPut, supabase } from './lib/supabase'
 import AuditoriasPage from './auditorias/AuditoriasPage'
 import InspectionChat from './full-inspection/InspectionChat'
 
@@ -833,90 +833,55 @@ export default function App() {
     severity:string; description:string; itemId:string; checklistId:string;
     photoFile:File|null; photoPreview:string; photoLegenda:string;
   }) {
-    if (!detail || !selectedInspectionId || !userId) return
+    if (!detail || !selectedInspectionId) return
     if (!conforme) {
       if (!nc?.checklistId) return setError('Selecione o item da IT relacionado à não conformidade.')
       if (!nc?.description.trim()) return setError('Descreva a não conformidade.')
     }
 
-    const seq = (detail.registers?.length ?? 0) + 1
-    const reg = await supabase.from('inspecao_registros').insert({
-      inspecao_id: selectedInspectionId,
-      sequencia: seq,
+    const result=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/unidades`,{
       conforme,
-    }).select('id').single()
-    if (reg.error || !reg.data) return setError(reg.error?.message ?? 'Falha ao registrar unidade.')
-
-    if (!conforme && nc) {
-      const created = await supabase.from('inspecao_nao_conformidades').insert({
-        inspecao_id: selectedInspectionId,
-        inspecao_registro_id: reg.data.id,
-        processo_item_id: nc.itemId || null,
-        checklist_id: nc.checklistId,
-        descricao: nc.description.trim(),
-        severidade: nc.severity,
-        tipo: 'amostragem',
-      }).select('id').single()
-      if (created.error || !created.data) return setError(created.error?.message ?? 'Falha ao registrar NC.')
-
-      await supabase.from('inspecao_checklist_resultados').upsert({
-        inspecao_id:selectedInspectionId,
-        checklist_id:nc.checklistId,
-        resultado:'nao_conforme',
-        severidade_confirmada:nc.severity,
-        registrado_por:userId,
-        registrado_em:new Date().toISOString(),
-      },{onConflict:'inspecao_id,checklist_id'})
-    }
-
-    const total = seq
-    const ncCount = (detail.registers ?? []).filter((x:any)=>x.conforme===false).length + (conforme?0:1)
-    const okCount = total - ncCount
-    await supabase.from('inspecoes').update({
-      total_inspecionado:total,
-      total_conforme:okCount,
-      total_nao_conforme:ncCount,
-    }).eq('id',selectedInspectionId)
+      severidade:nc?.severity || null,
+      descricao:nc?.description?.trim() || null,
+      itemId:nc?.itemId || null,
+      checklistId:nc?.checklistId || null,
+    })
+    if (result.error) return setError(result.error.message || 'Falha ao registrar unidade.')
 
     resetNcDraft()
     await openInspection(selectedInspectionId)
-    if (detail.limite_rejeicao && ncCount >= detail.limite_rejeicao) {
+    if (result.data?.re_atingido) {
       setMessage('Limite de rejeição atingido. Você pode encerrar agora ou continuar até completar a amostra.')
     }
   }
 
   async function saveChecklist(checkId: string, result: string, severity?: string) {
-    if (!selectedInspectionId || !userId) return
+    if (!selectedInspectionId) return
     const existing = detail?.checklistResults?.find((x:any) => x.checklist_id === checkId)
-    const payload = {
-      inspecao_id: selectedInspectionId,
-      checklist_id: checkId,
-      resultado: result,
-      severidade_confirmada: result === 'nao_conforme' ? (severity || existing?.severidade_confirmada || 'grave') : null,
-      registrado_por: userId,
-      registrado_em: new Date().toISOString(),
-    }
-    const q = await supabase.from('inspecao_checklist_resultados').upsert(payload, { onConflict: 'inspecao_id,checklist_id' })
-    if (q.error) return setError(q.error.message)
+    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/checklist/${checkId}`,{
+      resultado:result,
+      severidade:result==='nao_conforme' ? (severity || existing?.severidade_confirmada || 'grave') : null,
+    })
+    if (saved.error) return setError(saved.error.message)
     await openInspection(selectedInspectionId)
   }
 
   async function saveChecklistSeverity(checkId: string, severity: string) {
     if (!selectedInspectionId) return
-    const q = await supabase.from('inspecao_checklist_resultados')
-      .update({ severidade_confirmada: severity })
-      .eq('inspecao_id', selectedInspectionId)
-      .eq('checklist_id', checkId)
-    if (q.error) return setError(q.error.message)
+    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/checklist/${checkId}`,{
+      resultado:null,
+      severidade:severity,
+    })
+    if (saved.error) return setError(saved.error.message)
     await openInspection(selectedInspectionId)
   }
 
   async function saveInternalObservation() {
     if (!selectedInspectionId || !canWrite) return
-    const q=await supabase.from('inspecoes')
-      .update({observacao_interna:internalObservation.trim() || null})
-      .eq('id',selectedInspectionId)
-    if (q.error) return setError(q.error.message)
+    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/observacao-interna`,{
+      texto:internalObservation.trim() || null,
+    })
+    if (saved.error) return setError(saved.error.message)
     setDetail((d:any)=>d?{...d,observacao_interna:internalObservation.trim() || null}:d)
     setMessage('Observação interna salva. Ela fica somente no SGQ e não é incluída no laudo.')
   }
@@ -925,6 +890,7 @@ export default function App() {
     return detail?.dimConfigs?.find((x:any)=>x.processo_item_id===itemId && x.parametro_id===paramId) ?? null
   }
 
+
   async function saveDimConfig(itemId:string, param:any, patch:any) {
     if (!selectedInspectionId) return
     const current = getDimConfig(itemId,param.id) ?? {}
@@ -932,31 +898,22 @@ export default function App() {
     const nominal = next.valor_nominal === '' || next.valor_nominal == null ? null : Number(next.valor_nominal)
     const minus = next.desvio_menos === '' || next.desvio_menos == null ? null : Number(next.desvio_menos)
     const plus = next.desvio_mais === '' || next.desvio_mais == null ? null : Number(next.desvio_mais)
-    if (nominal != null && minus != null) next.minimo_aceitavel = nominal - minus
-    if (nominal != null && plus != null) next.maximo_aceitavel = nominal + plus
 
-    const payload = {
-      inspecao_id:selectedInspectionId,
-      processo_item_id:itemId,
-      parametro_id:param.id,
-      nao_aplicavel:!!next.nao_aplicavel,
+    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/dimensionais/${itemId}/${param.id}/config`,{
+      naoAplicavel:!!next.nao_aplicavel,
       equipamento:next.equipamento || null,
-      codigo_equipamento:next.codigo_equipamento || null,
+      codigoEquipamento:next.codigo_equipamento || null,
       unidade:next.unidade || param.unidade || null,
-      valor_nominal:nominal,
-      desvio_menos:minus,
-      desvio_mais:plus,
-      minimo_aceitavel:next.minimo_aceitavel ?? null,
-      maximo_aceitavel:next.maximo_aceitavel ?? null,
-      especificacao_desvio:next.especificacao_desvio || null,
-      tipo_referencia:next.tipo_referencia || param.tipo_referencia || null,
-      atualizado_em:new Date().toISOString(),
-    }
-    const q=await supabase.from('inspecao_dimensional_configuracoes').upsert(payload,{onConflict:'inspecao_id,processo_item_id,parametro_id'}).select('*').single()
-    if (q.error || !q.data) return setError(q.error?.message ?? 'Falha ao salvar configuração dimensional.')
+      valorNominal:nominal,
+      desvioMenos:minus,
+      desvioMais:plus,
+      especificacaoDesvio:next.especificacao_desvio || null,
+      tipoReferencia:next.tipo_referencia || param.tipo_referencia || null,
+    })
+    if (saved.error || !saved.data) return setError(saved.error?.message ?? 'Falha ao salvar configuração dimensional.')
     setDetail((d:any)=>{
       const others=(d.dimConfigs ?? []).filter((x:any)=>!(x.processo_item_id===itemId && x.parametro_id===param.id))
-      return { ...d, dimConfigs:[...others,q.data] }
+      return { ...d, dimConfigs:[...others,saved.data] }
     })
   }
 
@@ -965,24 +922,16 @@ export default function App() {
     const cfg=getDimConfig(itemId,param.id)
     if (cfg?.nao_aplicavel) return
     const numeric=Number(value.replace(',','.'))
-    const min=cfg?.minimo_aceitavel == null ? null : Number(cfg.minimo_aceitavel)
-    const max=cfg?.maximo_aceitavel == null ? null : Number(cfg.maximo_aceitavel)
-    const conforme = min == null && max == null ? null :
-      (min == null || numeric >= min) && (max == null || numeric <= max)
+    if (!Number.isFinite(numeric)) return setError('Informe um valor dimensional válido.')
 
-    const q = await supabase.from('inspecao_dimensionais').upsert({
-      inspecao_id: selectedInspectionId,
-      processo_item_id: itemId,
-      parametro_id: param.id,
-      sequencia_amostra: seq,
-      valor: numeric,
-      unidade: cfg?.unidade || param.unidade || null,
-      conforme,
-    }, { onConflict: 'inspecao_id,processo_item_id,parametro_id,sequencia_amostra' }).select('*').single()
-    if (q.error || !q.data) return setError(q.error?.message ?? 'Falha ao salvar medição.')
+    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/dimensionais/${itemId}/${param.id}/${seq}`,{
+      valor:numeric,
+      unidade:cfg?.unidade || param.unidade || null,
+    })
+    if (saved.error || !saved.data) return setError(saved.error?.message ?? 'Falha ao salvar medição.')
     setDetail((d:any)=>{
       const others=(d.dimResults ?? []).filter((x:any)=>!(x.processo_item_id===itemId && x.parametro_id===param.id && x.sequencia_amostra===seq))
-      return { ...d, dimResults:[...others,q.data] }
+      return { ...d, dimResults:[...others,saved.data] }
     })
   }
 
@@ -999,31 +948,26 @@ export default function App() {
     return { total:rows.length, nc, c, decision }
   }
 
+
   async function markDimensionalsDone() {
     if (!selectedInspectionId) return
-    const q=await supabase.from('inspecoes').update({dimensionais_finalizados:true}).eq('id',selectedInspectionId)
-    if (q.error) return setError(q.error.message)
+    const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/dimensionais/finalizar`,{})
+    if (saved.error) return setError(saved.error.message)
     setMessage('Dimensionais marcados como concluídos. Nesta fase de testes, campos pendentes não bloqueiam o avanço.')
     await openInspection(selectedInspectionId)
   }
 
   async function saveTest(testId: string, result: string) {
-    if (!selectedInspectionId || !userId) return
-    const q = await supabase.from('inspecao_testes_resultados').upsert({
-      inspecao_id: selectedInspectionId,
-      teste_id: testId,
-      resultado: result,
-      registrado_por: userId,
-      registrado_em: new Date().toISOString(),
-    }, { onConflict: 'inspecao_id,teste_id' })
-    if (q.error) return setError(q.error.message)
+    if (!selectedInspectionId) return
+    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/testes/${testId}`,{resultado:result})
+    if (saved.error) return setError(saved.error.message)
     await openInspection(selectedInspectionId)
   }
 
   async function markTestsDone() {
     if (!selectedInspectionId) return
-    const q = await supabase.from('inspecoes').update({ testes_finalizados: true }).eq('id', selectedInspectionId)
-    if (q.error) return setError(q.error.message)
+    const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/testes/finalizar`,{})
+    if (saved.error) return setError(saved.error.message)
     await openInspection(selectedInspectionId)
   }
 
@@ -1266,43 +1210,13 @@ export default function App() {
 
   async function finishInspection(result: 'aprovado' | 'reprovado') {
     if (!detail || !selectedInspectionId) return
+    const finished=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/concluir`,{
+      resultado:result,
+      observacoes:finalObservation.trim() || null,
+    })
+    if (finished.error) return setError(finished.error.message)
 
-    const pendencias:string[] = []
-    const faltamAmostras = Math.max(0, Number(detail.tamanho_amostra ?? 0) - Number(detail.total_inspecionado ?? 0))
-    const reAtingido = !!detail.limite_rejeicao && Number(detail.total_nao_conforme) >= Number(detail.limite_rejeicao)
-
-    if (faltamAmostras > 0 && !reAtingido) {
-      pendencias.push(`Amostragem incompleta: ${detail.total_inspecionado ?? 0}/${detail.tamanho_amostra ?? 0}.`)
-    }
-
-    const pendingChecks=(detail.checklist ?? []).filter((item:any)=>
-      !detail.checklistResults?.some((r:any)=>r.checklist_id===item.id)
-    )
-    if (pendingChecks.length) pendencias.push(`${pendingChecks.length} verificação(ões) sem preenchimento.`)
-
-    const dimPending=(detail.params ?? []).length>0 && !detail.dimensionais_finalizados
-    if (dimPending) pendencias.push('Dimensionais não marcados como concluídos.')
-
-    const pendingTests=(detail.tests ?? []).filter((t:any)=>
-      !detail.testResults?.some((r:any)=>r.teste_id===t.id)
-    )
-    if (pendingTests.length || ((detail.tests?.length ?? 0)>0 && !detail.testes_finalizados)) {
-      pendencias.push('Testes especiais incompletos.')
-    }
-
-    const thresholdExceeded = !!detail.limite_rejeicao && Number(detail.total_nao_conforme) >= Number(detail.limite_rejeicao)
-
-    const q = await supabase.from('inspecoes').update({
-      status: 'concluida',
-      resultado: result,
-      observacoes: finalObservation.trim() || null,
-      justificativa_decisao: thresholdExceeded ? (finalObservation.trim() || null) : null,
-      revisao_obrigatoria: pendencias.length > 0 || thresholdExceeded,
-      concluida_em: new Date().toISOString(),
-    }).eq('id', selectedInspectionId)
-    if (q.error) return setError(q.error.message)
-
-    await supabase.from('grupos_inspecao').update({ status: 'concluido' }).eq('id', detail.grupo_inspecao_id)
+    const pendencias:string[]=finished.data?.pendencias ?? []
     setMessage(pendencias.length
       ? 'Inspeção finalizada em modo de teste, mesmo com campos pendentes.'
       : 'Inspeção finalizada. Agora defina a retenção das amostras.')
