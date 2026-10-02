@@ -402,6 +402,297 @@ app.MapGet("/api/amostragem/plano", (long lote, string? nivel) =>
     return Results.Ok(new { data = new { codigo = plan.Code, amostra = plan.Sample, ac = plan.Ac, re = plan.Re, lote }, error = (object?)null });
 });
 
+app.MapPost("/api/inspecoes/{id}/unidades", async (string id, RegisterUnitRequest input, HttpRequest request, IHttpClientFactory factory) =>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+
+        var existing=await RestAsync(client,token,HttpMethod.Get,"inspecao_registros",
+            $"select=id,conforme&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=sequencia.asc");
+        var rows=existing is { ValueKind:JsonValueKind.Array } ? existing.Value.EnumerateArray().ToList() : [];
+        var seq=rows.Count+1;
+
+        var created=await RestAsync(client,token,HttpMethod.Post,"inspecao_registros","select=id",
+            new { inspecao_id=id, sequencia=seq, conforme=input.Conforme },"return=representation");
+        var (regRow,found)=FirstRow(created);
+        if(!found) throw new InvalidOperationException("Falha ao registrar unidade.");
+        var regId=regRow!.Value.GetProperty("id").GetString()!;
+
+        if(!input.Conforme)
+        {
+            if(string.IsNullOrWhiteSpace(input.ChecklistId)) return Results.Json(Error("Selecione o item da IT relacionado à não conformidade."),statusCode:400);
+            if(string.IsNullOrWhiteSpace(input.Descricao)) return Results.Json(Error("Descreva a não conformidade."),statusCode:400);
+
+            await RestAsync(client,token,HttpMethod.Post,"inspecao_nao_conformidades","",
+                new {
+                    inspecao_id=id,
+                    inspecao_registro_id=regId,
+                    processo_item_id=string.IsNullOrWhiteSpace(input.ItemId)?null:input.ItemId,
+                    checklist_id=input.ChecklistId,
+                    descricao=input.Descricao.Trim(),
+                    severidade=string.IsNullOrWhiteSpace(input.Severidade)?"grave":input.Severidade,
+                    tipo="amostragem"
+                },"return=minimal");
+
+            await RestAsync(client,token,HttpMethod.Post,"inspecao_checklist_resultados",
+                "on_conflict=inspecao_id,checklist_id",
+                new {
+                    inspecao_id=id,
+                    checklist_id=input.ChecklistId,
+                    resultado="nao_conforme",
+                    severidade_confirmada=string.IsNullOrWhiteSpace(input.Severidade)?"grave":input.Severidade,
+                    registrado_por=userId,
+                    registrado_em=DateTimeOffset.UtcNow
+                },"resolution=merge-duplicates,return=minimal");
+        }
+
+        var all=await RestAsync(client,token,HttpMethod.Get,"inspecao_registros",
+            $"select=conforme&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+        var allRows=all is { ValueKind:JsonValueKind.Array } ? all.Value.EnumerateArray().ToList() : [];
+        var total=allRows.Count;
+        var nc=allRows.Count(x=>x.TryGetProperty("conforme",out var conf) && conf.ValueKind==JsonValueKind.False);
+        var ok=total-nc;
+
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new { total_inspecionado=total,total_conforme=ok,total_nao_conforme=nc },"return=minimal");
+
+        var ins=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=limite_rejeicao&revisao_obrigatoria=id.eq.none&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        int? re=null;
+        var (ir,ifound)=FirstRow(ins);
+        if(ifound && ir!.Value.TryGetProperty("limite_rejeicao",out var reEl) && reEl.ValueKind==JsonValueKind.Number && reEl.TryGetInt32(out var rv)) re=rv;
+
+        return Results.Ok(new { data=new { sequencia=seq,total,total_conforme=ok,total_nao_conforme=nc,limite_rejeicao=re,re_atingido=re.HasValue&&nc>=re.Value }, error=(object?)null });
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao registrar unidade.",e.Message),statusCode:500);}
+});
+
+app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string checkId,ChecklistResultRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+
+        if(string.IsNullOrWhiteSpace(input.Resultado))
+        {
+            await RestAsync(client,token,HttpMethod.Patch,"inspecao_checklist_resultados",
+                $"inspecao_id=eq.{Uri.EscapeDataString(id)}&checklist_id=eq.{Uri.EscapeDataString(checkId)}",
+                new { severidade_confirmada=string.IsNullOrWhiteSpace(input.Severidade)?null:input.Severidade },"return=minimal");
+        }
+        else
+        {
+            await RestAsync(client,token,HttpMethod.Post,"inspecao_checklist_resultados",
+                "on_conflict=inspecao_id,checklist_id",
+                new {
+                    inspecao_id=id,
+                    checklist_id=checkId,
+                    resultado=input.Resultado,
+                    severidade_confirmada=input.Resultado=="nao_conforme"?(string.IsNullOrWhiteSpace(input.Severidade)?"grave":input.Severidade):null,
+                    registrado_por=userId,
+                    registrado_em=DateTimeOffset.UtcNow
+                },"resolution=merge-duplicates,return=minimal");
+        }
+        return Results.Ok(new { data=new { ok=true },error=(object?)null });
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao salvar checklist.",e.Message),statusCode:500);}
+});
+
+app.MapPut("/api/inspecoes/{id}/observacao-interna", async (string id,InternalNoteRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"inspecoes",
+            $"id=eq.{Uri.EscapeDataString(id)}",new { observacao_interna=string.IsNullOrWhiteSpace(input.Texto)?null:input.Texto.Trim() },"return=minimal");
+        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao salvar observação interna.",e.Message),statusCode:500);}
+});
+
+app.MapPut("/api/inspecoes/{id}/dimensionais/{itemId}/{paramId}/config", async (string id,string itemId,string paramId,DimConfigRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        decimal? min=null,max=null;
+        if(input.ValorNominal.HasValue && input.DesvioMenos.HasValue) min=input.ValorNominal.Value-input.DesvioMenos.Value;
+        if(input.ValorNominal.HasValue && input.DesvioMais.HasValue) max=input.ValorNominal.Value+input.DesvioMais.Value;
+
+        var saved=await RestAsync(client,token,HttpMethod.Post,"inspecao_dimensional_configuracoes",
+            "on_conflict=inspecao_id,processo_item_id,parametro_id&select=*",
+            new {
+                inspecao_id=id,
+                processo_item_id=itemId,
+                parametro_id=paramId,
+                nao_aplicavel=input.NaoAplicavel,
+                equipamento=input.Equipamento,
+                codigo_equipamento=input.CodigoEquipamento,
+                unidade=input.Unidade,
+                valor_nominal=input.ValorNominal,
+                desvio_menos=input.DesvioMenos,
+                desvio_mais=input.DesvioMais,
+                minimo_aceitavel=min,
+                maximo_aceitavel=max,
+                especificacao_desvio=input.EspecificacaoDesvio,
+                tipo_referencia=input.TipoReferencia,
+                atualizado_em=DateTimeOffset.UtcNow
+            },"resolution=merge-duplicates,return=representation");
+        var (row,found)=FirstRow(saved);
+        return Results.Ok(new {data=found?row:(object?)null,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao salvar configuração dimensional.",e.Message),statusCode:500);}
+});
+
+app.MapPut("/api/inspecoes/{id}/dimensionais/{itemId}/{paramId}/{seq:int}", async (string id,string itemId,string paramId,int seq,DimValueRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var cfgRows=await RestAsync(client,token,HttpMethod.Get,"inspecao_dimensional_configuracoes",
+            $"select=nao_aplicavel,unidade,minimo_aceitavel,maximo_aceitavel&inspecao_id=eq.{Uri.EscapeDataString(id)}&processo_item_id=eq.{Uri.EscapeDataString(itemId)}&parametro_id=eq.{Uri.EscapeDataString(paramId)}&limit=1");
+        var (cfg,found)=FirstRow(cfgRows);
+        if(found && cfg!.Value.TryGetProperty("nao_aplicavel",out var na) && na.ValueKind==JsonValueKind.True)
+            return Results.Json(Error("Este parâmetro está marcado como não aplicável."),statusCode:409);
+
+        decimal? min=null,max=null;
+        string? unit=input.Unidade;
+        if(found)
+        {
+            if(cfg!.Value.TryGetProperty("minimo_aceitavel",out var mn)&&mn.ValueKind==JsonValueKind.Number) min=mn.GetDecimal();
+            if(cfg.Value.TryGetProperty("maximo_aceitavel",out var mx)&&mx.ValueKind==JsonValueKind.Number) max=mx.GetDecimal();
+            if(string.IsNullOrWhiteSpace(unit)&&cfg.Value.TryGetProperty("unidade",out var un)&&un.ValueKind==JsonValueKind.String) unit=un.GetString();
+        }
+        bool? conforme=min is null&&max is null?null:(min is null||input.Valor>=min)&&(max is null||input.Valor<=max);
+
+        var saved=await RestAsync(client,token,HttpMethod.Post,"inspecao_dimensionais",
+            "on_conflict=inspecao_id,processo_item_id,parametro_id,sequencia_amostra&select=*",
+            new {
+                inspecao_id=id,
+                processo_item_id=itemId,
+                parametro_id=paramId,
+                sequencia_amostra=seq,
+                valor=input.Valor,
+                unidade=unit,
+                conforme
+            },"resolution=merge-duplicates,return=representation");
+        var (row,ok)=FirstRow(saved);
+        return Results.Ok(new {data=ok?row:(object?)null,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao salvar medição.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/inspecoes/{id}/dimensionais/finalizar", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {dimensionais_finalizados=true},"return=minimal");
+        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+    }
+    catch(Exception e){return Results.Json(Error("Falha ao finalizar dimensionais.",e.Message),statusCode:500);}
+});
+
+app.MapPut("/api/inspecoes/{id}/testes/{testId}", async (string id,string testId,TestResultRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        await RestAsync(client,token,HttpMethod.Post,"inspecao_testes_resultados",
+            "on_conflict=inspecao_id,teste_id",
+            new {inspecao_id=id,teste_id=testId,resultado=input.Resultado,registrado_por=userId,registrado_em=DateTimeOffset.UtcNow},
+            "resolution=merge-duplicates,return=minimal");
+        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao salvar teste.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/inspecoes/{id}/testes/finalizar", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {testes_finalizados=true},"return=minimal");
+        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+    }
+    catch(Exception e){return Results.Json(Error("Falha ao finalizar testes.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/inspecoes/{id}/concluir", async (string id,FinishInspectionRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=grupo_inspecao_id,it_versao_id,tamanho_amostra,total_inspecionado,total_nao_conforme,limite_rejeicao,dimensionais_finalizados,testes_finalizados&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (ins,found)=FirstRow(insRows);
+        if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var i=ins!.Value;
+
+        int sample=i.TryGetProperty("tamanho_amostra",out var sm)&&sm.ValueKind==JsonValueKind.Number?sm.GetInt32():0;
+        int inspected=i.TryGetProperty("total_inspecionado",out var ti)&&ti.ValueKind==JsonValueKind.Number?ti.GetInt32():0;
+        int nc=i.TryGetProperty("total_nao_conforme",out var tn)&&tn.ValueKind==JsonValueKind.Number?tn.GetInt32():0;
+        int? re=i.TryGetProperty("limite_rejeicao",out var rr)&&rr.ValueKind==JsonValueKind.Number?rr.GetInt32():null;
+        var reHit=re.HasValue&&nc>=re.Value;
+        var pending=new List<string>();
+        if(inspected<sample&&!reHit) pending.Add($"Amostragem incompleta: {inspected}/{sample}.");
+
+        var itId=i.GetProperty("it_versao_id").GetString()!;
+        var checks=await RestAsync(client,token,HttpMethod.Get,"it_checklist",$"select=id&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true");
+        var checkResults=await RestAsync(client,token,HttpMethod.Get,"inspecao_checklist_resultados",$"select=checklist_id&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+        var checkCount=checks is {ValueKind:JsonValueKind.Array}?checks.Value.GetArrayLength():0;
+        var checkDone=checkResults is {ValueKind:JsonValueKind.Array}?checkResults.Value.GetArrayLength():0;
+        if(checkDone<checkCount) pending.Add($"{checkCount-checkDone} verificação(ões) sem preenchimento.");
+
+        var dims=await RestAsync(client,token,HttpMethod.Get,"it_parametros_dimensionais",$"select=id&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true");
+        var dimCount=dims is {ValueKind:JsonValueKind.Array}?dims.Value.GetArrayLength():0;
+        var dimsDone=i.TryGetProperty("dimensionais_finalizados",out var df)&&df.ValueKind==JsonValueKind.True;
+        if(dimCount>0&&!dimsDone) pending.Add("Dimensionais não marcados como concluídos.");
+
+        var tests=await RestAsync(client,token,HttpMethod.Get,"it_testes_especiais",$"select=id&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true");
+        var testResults=await RestAsync(client,token,HttpMethod.Get,"inspecao_testes_resultados",$"select=teste_id&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+        var testCount=tests is {ValueKind:JsonValueKind.Array}?tests.Value.GetArrayLength():0;
+        var testDone=testResults is {ValueKind:JsonValueKind.Array}?testResults.Value.GetArrayLength():0;
+        var testsMarked=i.TryGetProperty("testes_finalizados",out var tf)&&tf.ValueKind==JsonValueKind.True;
+        if(testDone<testCount||(testCount>0&&!testsMarked)) pending.Add("Testes especiais incompletos.");
+
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {
+                status="concluida",
+                resultado=input.Resultado,
+                observacoes=string.IsNullOrWhiteSpace(input.Observacoes)?null:input.Observacoes.Trim(),
+                justificativa_decisao=reHit?(string.IsNullOrWhiteSpace(input.Observacoes)?null:input.Observacoes.Trim()):null,
+                revisao_obrigatoria=pending.Count>0||reHit,
+                concluida_em=DateTimeOffset.UtcNow
+            },"return=minimal");
+
+        var groupId=i.GetProperty("grupo_inspecao_id").GetString();
+        if(!string.IsNullOrWhiteSpace(groupId))
+            await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",$"id=eq.{Uri.EscapeDataString(groupId)}",new {status="concluido"},"return=minimal");
+
+        return Results.Ok(new {data=new {pendencias=pending,re_atingido=reHit},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao concluir inspeção.",e.Message),statusCode:500);}
+});
+
 app.MapPost("/api/data/query", async (QueryRequest q, HttpRequest request, IHttpClientFactory factory) =>
 {
     try
@@ -610,6 +901,50 @@ app.MapGet("/api/auditorias/generate/{executionId}", async (string executionId, 
 });
 
 app.Run();
+
+public sealed class RegisterUnitRequest
+{
+    public bool Conforme { get; set; }
+    public string? Severidade { get; set; }
+    public string? Descricao { get; set; }
+    public string? ItemId { get; set; }
+    public string? ChecklistId { get; set; }
+}
+public sealed class ChecklistResultRequest
+{
+    public string? Resultado { get; set; }
+    public string? Severidade { get; set; }
+}
+public sealed class InternalNoteRequest
+{
+    public string? Texto { get; set; }
+}
+public sealed class DimConfigRequest
+{
+    public bool NaoAplicavel { get; set; }
+    public string? Equipamento { get; set; }
+    public string? CodigoEquipamento { get; set; }
+    public string? Unidade { get; set; }
+    public decimal? ValorNominal { get; set; }
+    public decimal? DesvioMenos { get; set; }
+    public decimal? DesvioMais { get; set; }
+    public string? EspecificacaoDesvio { get; set; }
+    public string? TipoReferencia { get; set; }
+}
+public sealed class DimValueRequest
+{
+    public decimal Valor { get; set; }
+    public string? Unidade { get; set; }
+}
+public sealed class TestResultRequest
+{
+    public string Resultado { get; set; } = "";
+}
+public sealed class FinishInspectionRequest
+{
+    public string Resultado { get; set; } = "";
+    public string? Observacoes { get; set; }
+}
 
 public sealed class CreateInspectionRequest
 {
