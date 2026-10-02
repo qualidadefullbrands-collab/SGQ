@@ -581,14 +581,23 @@ export default function App() {
       omieMessage:'Produto confirmado no OMIE.',
     }:r))
 
-    const local = await supabase.from('produtos').select('id').eq('sku', code).maybeSingle()
+    const local = await supabase.from('produtos').select('id,foto_principal_path').eq('sku', code).maybeSingle()
     let productId = local.data?.id
+    let fotoPrincipalPath=String(local.data?.foto_principal_path ?? '')
     if (!productId) {
-      const created = await supabase.from('produtos').insert({ sku: code, nome: String(data.descricao) }).select('id').single()
+      const created = await supabase.from('produtos').insert({ sku: code, nome: String(data.descricao) }).select('id,foto_principal_path').single()
       productId = created.data?.id
+      fotoPrincipalPath=String(created.data?.foto_principal_path ?? '')
     } else {
       await supabase.from('produtos').update({ nome: String(data.descricao) }).eq('id', productId)
     }
+
+    let fotoPreview=''
+    if (fotoPrincipalPath) {
+      const signed=await supabase.storage.from('produto-fotos').createSignedUrl(fotoPrincipalPath,3600)
+      fotoPreview=signed.data?.signedUrl ?? ''
+    }
+    setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,fotoPrincipalPath,fotoPreview}:r))
 
     if (!productId) return
     const items = await supabase.from('processo_itens').select('id').eq('produto_id', productId)
@@ -673,7 +682,7 @@ export default function App() {
     const groupId = ins.data.grupo_inspecao_id
     const itId = ins.data.it_versao_id
     const [items, checklist, checkResults, params, dimResults, dimConfigs, tests, testResults, photos, registers, ncs, retained] = await Promise.all([
-      supabase.from('grupo_inspecao_itens').select('id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,material,capacidade,quantidade_por_caixa,caixas_recebidas,caixas_inspecionadas,produtos(id,sku,nome))').eq('grupo_inspecao_id', groupId),
+      supabase.from('grupo_inspecao_itens').select('id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,material,capacidade,quantidade_por_caixa,caixas_recebidas,caixas_inspecionadas,distribuicao_caixas,produtos(id,sku,nome,foto_principal_path))').eq('grupo_inspecao_id', groupId),
       supabase.from('it_checklist').select('*').eq('it_versao_id', itId).eq('ativo', true).order('ordem'),
       supabase.from('inspecao_checklist_resultados').select('*').eq('inspecao_id', id),
       supabase.from('it_parametros_dimensionais').select('*').eq('it_versao_id', itId).eq('ativo', true).order('ordem'),
@@ -741,6 +750,18 @@ export default function App() {
       return setError('Em cada produto, confirme o Código no OMIE e informe Quantidade recebida, Caixas recebidas e Caixas inspecionadas.')
     }
     if (statisticalLot <= 0) return setError('Não foi possível calcular o lote estatístico.')
+    for (const row of skuRows) {
+      const dist=parseBoxDistribution(row.distribuicaoCaixas)
+      if (!dist.valid) return setError(`${row.sku}: ${dist.error}`)
+      if (dist.groups.length) {
+        if (dist.boxes !== Number(row.caixasRecebidas)) {
+          return setError(`${row.sku}: a distribuição informa ${dist.boxes} caixas, mas "Caixas recebidas" está em ${row.caixasRecebidas}.`)
+        }
+        if (Math.abs(dist.units-Number(row.quantidade))>0.0001) {
+          return setError(`${row.sku}: a distribuição soma ${dist.units.toLocaleString('pt-BR')} unidades, diferente da quantidade recebida (${Number(row.quantidade).toLocaleString('pt-BR')}).`)
+        }
+      }
+    }
 
     let processId = inspection.processoId
     const processCode = fstDigits(inspection.codigo)
@@ -790,7 +811,7 @@ export default function App() {
     let firstItemId: string | null = null
     for (const row of skuRows) {
       let productId: string
-      const existing = await supabase.from('produtos').select('id,nome').eq('sku', row.sku.trim()).maybeSingle()
+      const existing = await supabase.from('produtos').select('id,nome,foto_principal_path').eq('sku', row.sku.trim()).maybeSingle()
       if (existing.data?.id) {
         productId = existing.data.id
         if (existing.data.nome !== row.nome.trim()) {
@@ -801,6 +822,15 @@ export default function App() {
         if (created.error || !created.data) return setError(created.error?.message ?? 'Falha ao cadastrar código.')
         productId = created.data.id
       }
+      if (row.fotoFile) {
+        const safe=row.fotoFile.name.replace(/[^a-zA-Z0-9._-]/g,'_')
+        const photoPath=`${productId}/${Date.now()}-${safe}`
+        const upload=await supabase.storage.from('produto-fotos').upload(photoPath,row.fotoFile,{contentType:row.fotoFile.type||undefined})
+        if (upload.error) return setError('Falha ao salvar foto principal do produto: '+upload.error.message)
+        const photoUpdate=await supabase.from('produtos').update({foto_principal_path:photoPath}).eq('id',productId)
+        if (photoUpdate.error) return setError(photoUpdate.error.message)
+      }
+      const dist=parseBoxDistribution(row.distribuicaoCaixas)
       const item = await supabase.from('processo_itens').insert({
         processo_id: processId,
         produto_id: productId,
@@ -812,6 +842,7 @@ export default function App() {
         quantidade_por_caixa: Number(row.quantidadePorCaixa) || null,
         caixas_recebidas: Number(row.caixasRecebidas),
         caixas_inspecionadas: Number(row.caixasInspecionadas),
+        distribuicao_caixas: dist.groups.length ? dist.groups : null,
       }).select('id').single()
       if (item.error || !item.data) return setError(item.error?.message ?? 'Falha ao cadastrar produto.')
       if (!firstItemId) firstItemId = item.data.id
