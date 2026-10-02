@@ -946,8 +946,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     capacidade = string.IsNullOrWhiteSpace(item.Capacidade) ? null : item.Capacidade.Trim(),
                     quantidade = Math.Max(0m, item.Quantidade),
                     quantidade_por_caixa = item.QuantidadePorCaixa is > 0 ? item.QuantidadePorCaixa : null,
-                    caixas_recebidas = item.CaixasRecebidas > 0 ? item.CaixasRecebidas : null,
-                    caixas_inspecionadas = item.CaixasInspecionadas > 0 ? item.CaixasInspecionadas : null,
+                    caixas_recebidas = item.CaixasRecebidas > 0 ? (decimal?)item.CaixasRecebidas : null,
+                    caixas_inspecionadas = item.CaixasInspecionadas > 0 ? (decimal?)item.CaixasInspecionadas : null,
                     distribuicao_caixas = item.DistribuicaoCaixas is { Count: > 0 } ? item.DistribuicaoCaixas : null
                 }, "return=representation");
             var (ir, inf) = FirstRow(itemCreated);
@@ -992,8 +992,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 nqa_critico = 0.40m,
                 nqa_grave = 1.50m,
                 nqa_toleravel = 4.00m,
-                caixas_recebidas = totalBoxesReceived > 0 ? totalBoxesReceived : null,
-                caixas_avaliar = totalBoxesInspect > 0 ? totalBoxesInspect : null,
+                caixas_recebidas = totalBoxesReceived > 0 ? (decimal?)totalBoxesReceived : null,
+                caixas_avaliar = totalBoxesInspect > 0 ? (decimal?)totalBoxesInspect : null,
                 data_inspecao = inspectionDate,
                 responsavel_id = userId,
                 iniciada_em = DateTimeOffset.UtcNow,
