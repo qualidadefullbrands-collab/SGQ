@@ -1306,7 +1306,9 @@ export default function App() {
     if (pendingTests.length) steps.push(`Testes: ${pendingTests.length} teste(s) ainda estão pendentes.`)
     if (Number(plan.re ?? 0)>0 && Number(plan.nao_conformes ?? 0)>=Number(plan.re)) steps.push('Atenção: o limite de rejeição registrado no plano já foi atingido.')
     if (!steps.length) steps.push('Os registros principais estão preenchidos. Revise evidências, conclusão e retenção antes do encerramento.')
-    return (question ? `Pergunta: ${question}\n\n` : '') + steps.join('\n')
+    return (question ? `Pergunta: ${question}
+
+` : '') + steps.join('\n')
   }
 
   async function runInspectionAssistant(mode:'analisar'|'pergunta') {
@@ -1908,7 +1910,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </section>
       )}
 
-      {tab==='auditorias' && <AuditoriasPage profileName={profile.nome}/>}\n\n      {tab==='inspecoes' && (
+      {tab==='auditorias' && <AuditoriasPage profileName={profile.nome}/>}
+
+      {tab==='inspecoes' && (
         <section className="workspace">
           <div className="page-title">
             <div><span className="eyebrow">PROCESSOS</span><h1>Inspeções</h1></div>
