@@ -679,13 +679,13 @@ export default function AuditoriasPage({profileName}:Props) {
   return (
     <section className="audit-page audit-session">
       <div className="audit-session-header">
-        <button className="audit-back" onClick={()=>{setActive(null);setMessages([]);setAnswers([]);setFindings([]);setNotice('')}}><ArrowLeft size={20}/></button>
+        <button className="audit-back" onClick={()=>{setActive(null);setMessages([]);setAnswers([]);setFindings([]);setObjects([]);setNotice('')}}><ArrowLeft size={20}/></button>
         <div className="audit-session-title">
           <span>{definition?.displayCode} · versão {definition?.version}</span>
           <strong>{definition?.title}</strong>
         </div>
         <div className="audit-progress-mini">
-          {definition?.fixedChecklist ? <><b>{progressDone}/{progressTotal}</b><small>itens</small></> : <><b>{findings.length}</b><small>achados</small></>}
+          {definition?.fixedChecklist ? <><b>{progressDone}/{progressTotal}</b><small>itens</small></> : definition?.code==='RQ014' ? <><b>{objects.length}</b><small>equipamentos</small></> : <><b>{findings.length}</b><small>achados</small></>}
         </div>
       </div>
 
@@ -709,7 +709,7 @@ export default function AuditoriasPage({profileName}:Props) {
         )}
         <label className="grow">
           <MapPin size={15}/> Local / endereço atual
-          <input value={currentLocation} onChange={(e)=>setCurrentLocation(e.target.value)} placeholder={definition?.code==='RQ016B'?'Ex.: Rua 02, Checkout 04, Doca 17':'Ex.: Doca 17, Rua 03 / A17, EXT-022'}/>
+          <input value={currentLocation} onChange={(e)=>setCurrentLocation(e.target.value)} placeholder={definition?.code==='RQ016B'?'Ex.: Rua 02, Checkout 04, Doca 17':definition?.code==='RQ014'?'Ex.: EXT-022 · Doca 17':'Ex.: Rua 03 / A17'}/>
         </label>
         <button className="audit-checklist-button" onClick={()=>setShowChecklist(!showChecklist)}>
           <ClipboardCheck size={17}/> Checklist
