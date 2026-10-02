@@ -990,6 +990,247 @@ app.MapPost("/api/inspecoes/{id}/concluir", async (string id,FinishInspectionReq
     catch(Exception e){return Results.Json(Error("Falha ao concluir inspeção.",e.Message),statusCode:500);}
 });
 
+app.MapGet("/api/inspecoes/{id}/chat", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var rows=await RestAsync(client,token,HttpMethod.Get,"inspecao_chat_mensagens",
+            $"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+        if(rows is {ValueKind:JsonValueKind.Array} && rows.Value.GetArrayLength()>0)
+            return Results.Ok(new {data=rows,error=(object?)null});
+
+        var intro="Modo chat iniciado. Você pode registrar unidades, verificações, testes e medições em linguagem natural. Fotos ficam para a etapa final da inspeção.";
+        var created=await RestAsync(client,token,HttpMethod.Post,"inspecao_chat_mensagens","select=*",
+            new {inspecao_id=id,autor="assistente",texto=intro,metadata=new {tipo="intro"}},"return=representation");
+        return Results.Ok(new {data=created,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar o chat.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/inspecoes/{id}/chat", async (string id,InspectionChatRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        if(string.IsNullOrWhiteSpace(input.Message))
+            return Results.Json(Error("Mensagem vazia."),statusCode:400);
+
+        var inspectorRows=await RestAsync(client,token,HttpMethod.Post,"inspecao_chat_mensagens","select=*",
+            new {inspecao_id=id,autor="inspetor",texto=input.Message.Trim(),metadata=new {}},"return=representation");
+        var (inspectorMessage,imf)=FirstRow(inspectorRows);
+        if(!imf) throw new InvalidOperationException("Falha ao salvar mensagem do inspetor.");
+
+        JsonElement parsed;
+        var degraded=false;
+        try
+        {
+            var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/sgq-inspecao-chat");
+            ApplyAuth(fn,token);
+            fn.Content=JsonContent.Create(new {message=input.Message.Trim(),context=input.Context});
+            var res=await client.SendAsync(fn);
+            var raw=await res.Content.ReadAsStringAsync();
+            if(!res.IsSuccessStatusCode) throw new InvalidOperationException(raw);
+            using var doc=JsonDocument.Parse(raw);
+            parsed=doc.RootElement.Clone();
+        }
+        catch
+        {
+            degraded=true;
+            using var fallback=JsonDocument.Parse("""{"reply":"Mensagem registrada. A IA não respondeu agora; os dados podem ser preenchidos pelo modo tradicional.","finishRequested":false,"checklistUpdates":[],"sampleResults":[],"testUpdates":[],"dimensionMeasurements":[],"degraded":true}""");
+            parsed=fallback.RootElement.Clone();
+        }
+
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=it_versao_id,grupo_inspecao_id,tamanho_amostra&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inspection,insFound)=FirstRow(insRows);
+        if(!insFound) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var itId=inspection!.Value.GetProperty("it_versao_id").GetString()!;
+        var groupId=inspection.Value.GetProperty("grupo_inspecao_id").GetString()!;
+        var sampleLimit=inspection.Value.TryGetProperty("tamanho_amostra",out var ss)&&ss.ValueKind==JsonValueKind.Number?ss.GetInt32():0;
+
+        var checkRows=await RestAsync(client,token,HttpMethod.Get,"it_checklist",$"select=id&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true");
+        var validChecks=new HashSet<string>(
+            checkRows is {ValueKind:JsonValueKind.Array}
+                ? checkRows.Value.EnumerateArray().Select(x=>x.GetProperty("id").GetString()!).Where(x=>!string.IsNullOrWhiteSpace(x))
+                : [],
+            StringComparer.OrdinalIgnoreCase);
+
+        var linkRows=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",$"select=processo_item_id&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
+        var validItems=new HashSet<string>(
+            linkRows is {ValueKind:JsonValueKind.Array}
+                ? linkRows.Value.EnumerateArray().Select(x=>x.GetProperty("processo_item_id").GetString()!).Where(x=>!string.IsNullOrWhiteSpace(x))
+                : [],
+            StringComparer.OrdinalIgnoreCase);
+
+        if(parsed.TryGetProperty("checklistUpdates",out var checklistUpdates)&&checklistUpdates.ValueKind==JsonValueKind.Array)
+        {
+            foreach(var item in checklistUpdates.EnumerateArray())
+            {
+                var checkId=item.TryGetProperty("checklistId",out var ci)&&ci.ValueKind==JsonValueKind.String?ci.GetString():null;
+                var result=item.TryGetProperty("result",out var rs)&&rs.ValueKind==JsonValueKind.String?rs.GetString():null;
+                if(string.IsNullOrWhiteSpace(checkId)||!validChecks.Contains(checkId)||string.IsNullOrWhiteSpace(result)) continue;
+                var severity=item.TryGetProperty("severity",out var se)&&se.ValueKind==JsonValueKind.String?se.GetString():null;
+                var observation=item.TryGetProperty("observation",out var ob)&&ob.ValueKind==JsonValueKind.String?ob.GetString():null;
+                await RestAsync(client,token,HttpMethod.Post,"inspecao_checklist_resultados",
+                    "on_conflict=inspecao_id,checklist_id",
+                    new {
+                        inspecao_id=id,checklist_id=checkId,resultado=result,observacao=observation,
+                        severidade_confirmada=result=="nao_conforme"?(string.IsNullOrWhiteSpace(severity)?"grave":severity):null,
+                        registrado_por=userId,registrado_em=DateTimeOffset.UtcNow
+                    },"resolution=merge-duplicates,return=minimal");
+            }
+        }
+
+        if(parsed.TryGetProperty("sampleResults",out var sampleResults)&&sampleResults.ValueKind==JsonValueKind.Array)
+        {
+            var currentRows=await RestAsync(client,token,HttpMethod.Get,"inspecao_registros",$"select=sequencia,conforme&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=sequencia.asc");
+            var seq=0;
+            if(currentRows is {ValueKind:JsonValueKind.Array})
+                foreach(var row in currentRows.Value.EnumerateArray())
+                    if(row.TryGetProperty("sequencia",out var sq)&&sq.ValueKind==JsonValueKind.Number) seq=Math.Max(seq,sq.GetInt32());
+
+            foreach(var item in sampleResults.EnumerateArray())
+            {
+                if(sampleLimit>0 && seq>=sampleLimit) break;
+                var conforme=item.TryGetProperty("conforme",out var cf)&&cf.ValueKind==JsonValueKind.True;
+                string? checkId=item.TryGetProperty("checklistId",out var ci)&&ci.ValueKind==JsonValueKind.String?ci.GetString():null;
+                string? description=item.TryGetProperty("description",out var ds)&&ds.ValueKind==JsonValueKind.String?ds.GetString():null;
+                if(!conforme && (string.IsNullOrWhiteSpace(checkId)||!validChecks.Contains(checkId)||string.IsNullOrWhiteSpace(description))) continue;
+                seq++;
+
+                var regRows=await RestAsync(client,token,HttpMethod.Post,"inspecao_registros","select=id",
+                    new {inspecao_id=id,sequencia=seq,conforme,observacao=conforme?"Registrado pelo modo chat":description},"return=representation");
+                var (reg,rf)=FirstRow(regRows);
+                if(!rf) continue;
+
+                if(!conforme)
+                {
+                    var processItemId=item.TryGetProperty("processoItemId",out var pi)&&pi.ValueKind==JsonValueKind.String?pi.GetString():null;
+                    if(!string.IsNullOrWhiteSpace(processItemId)&&!validItems.Contains(processItemId)) processItemId=null;
+                    var severity=item.TryGetProperty("severity",out var sv)&&sv.ValueKind==JsonValueKind.String?sv.GetString():"grave";
+                    var ncSeverity=severity=="critico"?"critica":severity=="toleravel"?"leve":"maior";
+                    await RestAsync(client,token,HttpMethod.Post,"inspecao_nao_conformidades","",
+                        new {
+                            inspecao_id=id,inspecao_registro_id=reg!.Value.GetProperty("id").GetString(),
+                            processo_item_id=processItemId,checklist_id=checkId,descricao=description,
+                            severidade=ncSeverity,tipo="amostragem_chat"
+                        },"return=minimal");
+                    await RestAsync(client,token,HttpMethod.Post,"inspecao_checklist_resultados",
+                        "on_conflict=inspecao_id,checklist_id",
+                        new {
+                            inspecao_id=id,checklist_id=checkId,resultado="nao_conforme",
+                            severidade_confirmada=severity,observacao=description,
+                            registrado_por=userId,registrado_em=DateTimeOffset.UtcNow
+                        },"resolution=merge-duplicates,return=minimal");
+                }
+            }
+
+            var all=await RestAsync(client,token,HttpMethod.Get,"inspecao_registros",$"select=conforme&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+            var total=all is {ValueKind:JsonValueKind.Array}?all.Value.GetArrayLength():0;
+            var nc=all is {ValueKind:JsonValueKind.Array}?all.Value.EnumerateArray().Count(x=>x.TryGetProperty("conforme",out var cf)&&cf.ValueKind==JsonValueKind.False):0;
+            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+                new {total_inspecionado=total,total_conforme=total-nc,total_nao_conforme=nc},"return=minimal");
+        }
+
+        if(parsed.TryGetProperty("testUpdates",out var testUpdates)&&testUpdates.ValueKind==JsonValueKind.Array)
+        {
+            var tests=await RestAsync(client,token,HttpMethod.Get,"it_testes_especiais",$"select=id&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true");
+            var validTests=new HashSet<string>(
+                tests is {ValueKind:JsonValueKind.Array}?tests.Value.EnumerateArray().Select(x=>x.GetProperty("id").GetString()!).Where(x=>!string.IsNullOrWhiteSpace(x)):[],
+                StringComparer.OrdinalIgnoreCase);
+            foreach(var item in testUpdates.EnumerateArray())
+            {
+                var testId=item.TryGetProperty("testId",out var ti)&&ti.ValueKind==JsonValueKind.String?ti.GetString():null;
+                var result=item.TryGetProperty("result",out var tr)&&tr.ValueKind==JsonValueKind.String?tr.GetString():null;
+                if(string.IsNullOrWhiteSpace(testId)||!validTests.Contains(testId)||string.IsNullOrWhiteSpace(result)) continue;
+                await RestAsync(client,token,HttpMethod.Post,"inspecao_testes_resultados","on_conflict=inspecao_id,teste_id",
+                    new {inspecao_id=id,teste_id=testId,resultado=result,registrado_por=userId,registrado_em=DateTimeOffset.UtcNow},
+                    "resolution=merge-duplicates,return=minimal");
+            }
+        }
+
+        if(parsed.TryGetProperty("dimensionMeasurements",out var measurements)&&measurements.ValueKind==JsonValueKind.Array)
+        {
+            var paramRows=await RestAsync(client,token,HttpMethod.Get,"it_parametros_dimensionais",$"select=id,unidade&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true");
+            var validParams=new Dictionary<string,string?>(StringComparer.OrdinalIgnoreCase);
+            if(paramRows is {ValueKind:JsonValueKind.Array})
+                foreach(var p in paramRows.Value.EnumerateArray())
+                {
+                    var pid=p.GetProperty("id").GetString();
+                    if(!string.IsNullOrWhiteSpace(pid)) validParams[pid]=p.TryGetProperty("unidade",out var un)&&un.ValueKind==JsonValueKind.String?un.GetString():null;
+                }
+
+            foreach(var item in measurements.EnumerateArray())
+            {
+                var paramId=item.TryGetProperty("parametroId",out var pm)&&pm.ValueKind==JsonValueKind.String?pm.GetString():null;
+                var processItemId=item.TryGetProperty("processoItemId",out var pi)&&pi.ValueKind==JsonValueKind.String?pi.GetString():null;
+                if(string.IsNullOrWhiteSpace(paramId)||!validParams.ContainsKey(paramId)||string.IsNullOrWhiteSpace(processItemId)||!validItems.Contains(processItemId)) continue;
+                if(!item.TryGetProperty("value",out var vl)||vl.ValueKind!=JsonValueKind.Number) continue;
+                var value=vl.GetDecimal();
+
+                var cfgRows=await RestAsync(client,token,HttpMethod.Get,"inspecao_dimensional_configuracoes",
+                    $"select=nao_aplicavel,unidade,minimo_aceitavel,maximo_aceitavel&inspecao_id=eq.{Uri.EscapeDataString(id)}&processo_item_id=eq.{Uri.EscapeDataString(processItemId)}&parametro_id=eq.{Uri.EscapeDataString(paramId)}&limit=1");
+                var (cfg,cfgFound)=FirstRow(cfgRows);
+                if(cfgFound&&cfg!.Value.TryGetProperty("nao_aplicavel",out var na)&&na.ValueKind==JsonValueKind.True) continue;
+
+                var current=await RestAsync(client,token,HttpMethod.Get,"inspecao_dimensionais",
+                    $"select=sequencia_amostra&inspecao_id=eq.{Uri.EscapeDataString(id)}&processo_item_id=eq.{Uri.EscapeDataString(processItemId)}&parametro_id=eq.{Uri.EscapeDataString(paramId)}");
+                var used=new HashSet<int>();
+                if(current is {ValueKind:JsonValueKind.Array})
+                    foreach(var r in current.Value.EnumerateArray())
+                        if(r.TryGetProperty("sequencia_amostra",out var sq)&&sq.ValueKind==JsonValueKind.Number) used.Add(sq.GetInt32());
+                var seq=Enumerable.Range(1,10).FirstOrDefault(x=>!used.Contains(x));
+                if(seq==0) continue;
+
+                decimal? min=null,max=null;
+                string? unit=validParams[paramId];
+                if(cfgFound)
+                {
+                    if(cfg!.Value.TryGetProperty("minimo_aceitavel",out var mn)&&mn.ValueKind==JsonValueKind.Number) min=mn.GetDecimal();
+                    if(cfg.Value.TryGetProperty("maximo_aceitavel",out var mx)&&mx.ValueKind==JsonValueKind.Number) max=mx.GetDecimal();
+                    if(cfg.Value.TryGetProperty("unidade",out var un)&&un.ValueKind==JsonValueKind.String&&!string.IsNullOrWhiteSpace(un.GetString())) unit=un.GetString();
+                }
+                if(item.TryGetProperty("unit",out var iu)&&iu.ValueKind==JsonValueKind.String&&!string.IsNullOrWhiteSpace(iu.GetString())) unit=iu.GetString();
+                bool? conforme=min is null&&max is null?null:(min is null||value>=min)&&(max is null||value<=max);
+                await RestAsync(client,token,HttpMethod.Post,"inspecao_dimensionais",
+                    "on_conflict=inspecao_id,processo_item_id,parametro_id,sequencia_amostra",
+                    new {inspecao_id=id,processo_item_id=processItemId,parametro_id=paramId,sequencia_amostra=seq,valor=value,unidade=unit,conforme},
+                    "resolution=merge-duplicates,return=minimal");
+            }
+        }
+
+        var reply=parsed.TryGetProperty("reply",out var rp)&&rp.ValueKind==JsonValueKind.String?rp.GetString():"Registro interpretado.";
+        var finishRequested=parsed.TryGetProperty("finishRequested",out var fr)&&fr.ValueKind==JsonValueKind.True;
+        var assistantRows=await RestAsync(client,token,HttpMethod.Post,"inspecao_chat_mensagens","select=*",
+            new {
+                inspecao_id=id,autor="assistente",texto=reply,
+                metadata=new {
+                    checklistUpdates=parsed.TryGetProperty("checklistUpdates",out var cu)?cu:(JsonElement?)null,
+                    sampleResults=parsed.TryGetProperty("sampleResults",out var sr)?sr:(JsonElement?)null,
+                    testUpdates=parsed.TryGetProperty("testUpdates",out var tu)?tu:(JsonElement?)null,
+                    dimensionMeasurements=parsed.TryGetProperty("dimensionMeasurements",out var dm)?dm:(JsonElement?)null,
+                    finishRequested,
+                    degraded=degraded||(parsed.TryGetProperty("degraded",out var dg)&&dg.ValueKind==JsonValueKind.True)
+                }
+            },"return=representation");
+        var (assistantMessage,amf)=FirstRow(assistantRows);
+
+        return Results.Ok(new {data=new {
+            inspectorMessage,
+            assistantMessage=amf?assistantMessage:(object?)null,
+            finishRequested,
+            degraded
+        },error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao processar mensagem da inspeção.",e.Message),statusCode:500);}
+});
+
 app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInspectionPhotosRequest input,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -1685,6 +1926,12 @@ public sealed class ProductLookupRequest
 {
     public string Codigo { get; set; } = "";
 }
+public sealed class InspectionChatRequest
+{
+    public string Message { get; set; } = "";
+    public JsonElement? Context { get; set; }
+}
+
 public sealed class RegisterInspectionPhotosRequest
 {
     public List<RegisterInspectionPhotoItem> Fotos { get; set; } = [];
