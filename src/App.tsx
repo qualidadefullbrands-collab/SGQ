@@ -108,6 +108,12 @@ function formatFst(value: string | null | undefined) {
   const d = String(value ?? '').replace(/\D/g, '')
   return d ? 'FST' + d : '—'
 }
+function formatDateBR(value: string | null | undefined) {
+  if (!value) return '—'
+  const raw=String(value).slice(0,10)
+  const [y,m,d]=raw.split('-')
+  return y && m && d ? `${d}/${m}/${y}` : raw
+}
 function toggleTransport(current: string, mode: 'Aéreo' | 'Marítimo') {
   const set = new Set(current.split(',').map((x)=>x.trim()).filter(Boolean))
   set.has(mode) ? set.delete(mode) : set.add(mode)
@@ -217,6 +223,14 @@ export default function App() {
     vigencia: '',
   })
   const [itFile, setItFile] = useState<File | null>(null)
+  const [itBusyId, setItBusyId] = useState<string | null>(null)
+  const [itReview, setItReview] = useState<{
+    it: ItVersion
+    checklist: any[]
+    dimensionais: any[]
+    testes: any[]
+    avisos: string[]
+  } | null>(null)
 
   const [sampleForm, setSampleForm] = useState({
     groupId: '',
@@ -1377,6 +1391,63 @@ export default function App() {
     await openInspection(selectedInspectionId)
   }
 
+  async function structureItVersion(itVersionId:string, openReview=true) {
+    setItBusyId(itVersionId)
+    setError('')
+    const {data,error}=await supabase.functions.invoke('estruturar-it',{body:{it_versao_id:itVersionId}})
+    setItBusyId(null)
+    if (error || data?.error) {
+      const msg=String(data?.message ?? error?.message ?? 'Falha na estruturação automática.')
+      setError('Não foi possível estruturar a IT: '+msg)
+      await loadApp()
+      return false
+    }
+    setMessage(`IT estruturada: ${data?.checklist ?? 0} verificações, ${data?.dimensionais ?? 0} dimensionais e ${data?.testes ?? 0} testes. Revise antes de publicar.`)
+    await loadApp()
+    if (openReview) {
+      const current=itVersions.find((x)=>x.id===itVersionId)
+      if (current) await reviewItVersion({...current,status:'em_revisao',leitura_ia_status:'revisao'})
+    }
+    return true
+  }
+
+  async function reviewItVersion(it:ItVersion) {
+    setItBusyId(it.id)
+    const [checks,dims,tests,version]=await Promise.all([
+      supabase.from('it_checklist').select('*').eq('it_versao_id',it.id).eq('ativo',true).order('ordem'),
+      supabase.from('it_parametros_dimensionais').select('*').eq('it_versao_id',it.id).eq('ativo',true).order('ordem'),
+      supabase.from('it_testes_especiais').select('*').eq('it_versao_id',it.id).eq('ativo',true).order('ordem'),
+      supabase.from('it_versoes').select('extracao_ia').eq('id',it.id).single(),
+    ])
+    setItBusyId(null)
+    setItReview({
+      it,
+      checklist:checks.data ?? [],
+      dimensionais:dims.data ?? [],
+      testes:tests.data ?? [],
+      avisos:Array.isArray((version.data as any)?.extracao_ia?.avisos_revisao)
+        ? (version.data as any).extracao_ia.avisos_revisao
+        : [],
+    })
+  }
+
+  async function publishItVersion(it:ItVersion) {
+    if (!userId) return
+    if (!window.confirm(`Publicar ${it.instrucoes_trabalho?.codigo ?? 'IT'} versão ${it.versao}? Esta estrutura passará a ser usada nas novas inspeções.`)) return
+    setItBusyId(it.id)
+    const {error}=await supabase.from('it_versoes').update({
+      status:'publicada',
+      leitura_ia_status:'publicada',
+      revisado_por:userId,
+      revisado_em:new Date().toISOString(),
+    }).eq('id',it.id)
+    setItBusyId(null)
+    if (error) return setError(error.message)
+    setItReview(null)
+    setMessage('Versão da IT publicada e disponível para novas inspeções.')
+    await loadApp()
+  }
+
   async function uploadIt(e: React.FormEvent) {
     e.preventDefault()
     if (!canManageIts || !itFile) return
@@ -1408,13 +1479,13 @@ export default function App() {
       arquivo_storage_path: path,
       arquivo_mime: itFile.type || null,
       leitura_ia_status: 'aguardando',
-    })
-    if (version.error) return setError(version.error.message)
+    }).select('id').single()
+    if (version.error || !version.data) return setError(version.error?.message ?? 'Falha ao criar versão da IT.')
 
     setItForm({ codigo: '', titulo: '', versao: '', vigencia: '' })
     setItFile(null)
-    setMessage('IT enviada. Aguardando leitura e revisão.')
-    await loadApp()
+    setMessage('IT enviada. Estruturando checklist, dimensionais e testes…')
+    await structureItVersion(version.data.id,false)
   }
 
   async function createSample(e: React.FormEvent) {
@@ -1651,7 +1722,7 @@ export default function App() {
             {inspections.filter((i)=>i.status==='em_andamento').slice(0,8).map((i)=>(
               <div className="queue-row" key={i.id}>
                 <div>
-                  <strong>{i.numero} · {formatFst(i.grupos_inspecao?.processos?.codigo)}</strong>
+                  <strong>{formatFst(i.grupos_inspecao?.processos?.codigo)} · Recebimento {formatDateBR(i.grupos_inspecao?.processos?.chegada_cd || i.grupos_inspecao?.processos?.data_processo)}</strong>
                   <span>{i.grupos_inspecao?.nome} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0} unidades</span>
                 </div>
                 <button className="primary small" onClick={()=>openInspection(i.id)}><Play size={15}/> Continuar</button>
@@ -2179,20 +2250,77 @@ export default function App() {
                 <label>Título<input value={itForm.titulo} onChange={(e)=>setItForm({...itForm,titulo:e.target.value})}/></label>
                 <label>Versão<input value={itForm.versao} onChange={(e)=>setItForm({...itForm,versao:e.target.value})} placeholder="01/2026"/></label>
                 <label>Vigência<input type="date" value={itForm.vigencia} onChange={(e)=>setItForm({...itForm,vigencia:e.target.value})}/></label>
-                <label className="span-2">Word ou PDF<input type="file" accept=".doc,.docx,.pdf" onChange={(e)=>setItFile(e.target.files?.[0] ?? null)}/></label>
+                <label className="span-2">Word ou PDF<input type="file" accept=".docx,.pdf" onChange={(e)=>setItFile(e.target.files?.[0] ?? null)}/></label>
               </div>
               <div className="actions"><button className="primary" type="submit" disabled={!itFile}><Upload size={17}/> Enviar para leitura</button></div>
             </form>
           )}
           <div className="list">
             {itVersions.map((it)=>(
-              <article className="row-card" key={it.id}>
-                <div><strong>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo}</strong><span>Versão {it.versao}{it.arquivo_nome?' · '+it.arquivo_nome:''}</span></div>
-                <span className="pill">{it.leitura_ia_status.replaceAll('_',' ')}</span>
+              <article className="row-card it-row" key={it.id}>
+                <div>
+                  <strong>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo}</strong>
+                  <span>Versão {it.versao}{it.arquivo_nome?' · '+it.arquivo_nome:''}</span>
+                </div>
+                <div className="row-actions">
+                  <span className="pill">{it.leitura_ia_status.replaceAll('_',' ')}</span>
+                  {canManageIts && ['nao_iniciada','aguardando','erro'].includes(it.leitura_ia_status) && (
+                    <button className="secondary small" disabled={itBusyId===it.id} onClick={()=>structureItVersion(it.id)}>
+                      {itBusyId===it.id?'Lendo…':'Estruturar com IA'}
+                    </button>
+                  )}
+                  {['revisao','publicada'].includes(it.leitura_ia_status) && (
+                    <button className="secondary small" disabled={itBusyId===it.id} onClick={()=>reviewItVersion(it)}>
+                      Revisar estrutura
+                    </button>
+                  )}
+                </div>
               </article>
             ))}
           </div>
         </section>
+      )}
+
+      {itReview && (
+        <div className="modal-backdrop" onClick={()=>setItReview(null)}>
+          <article className="sample-detail it-review-modal" onClick={(e)=>e.stopPropagation()}>
+            <button className="close" type="button" onClick={()=>setItReview(null)}>×</button>
+            <span className="eyebrow">REVISÃO DA ESTRUTURA</span>
+            <h2>{itReview.it.instrucoes_trabalho?.codigo} · {itReview.it.instrucoes_trabalho?.titulo}</h2>
+            <p>Versão {itReview.it.versao}</p>
+
+            {!!itReview.avisos.length && <div className="alert error">
+              <b>Revisar:</b> {itReview.avisos.join(' · ')}
+            </div>}
+
+            <div className="it-review-section">
+              <h3>Verificações C / NC / NA <span>{itReview.checklist.length}</span></h3>
+              {itReview.checklist.map((x:any)=><div className="it-review-row" key={x.id}><b>{x.ordem}</b><div><strong>{x.requisito}</strong><span>{x.instrucao || '—'}</span></div></div>)}
+              {!itReview.checklist.length && <div className="empty">Nenhuma verificação extraída.</div>}
+            </div>
+
+            <div className="it-review-section">
+              <h3>Dimensionais <span>{itReview.dimensionais.length}</span></h3>
+              {itReview.dimensionais.map((x:any)=><div className="it-review-row" key={x.id}><b>{x.ordem}</b><div><strong>{x.nome}{x.unidade?' · '+x.unidade:''}</strong><span>{x.observacao || 'Sem observação específica.'}</span></div></div>)}
+              {!itReview.dimensionais.length && <div className="muted">A IT não trouxe parâmetros dimensionais estruturáveis.</div>}
+            </div>
+
+            <div className="it-review-section">
+              <h3>Testes especiais <span>{itReview.testes.length}</span></h3>
+              {itReview.testes.map((x:any)=><div className="it-review-row" key={x.id}><b>{x.ordem}</b><div><strong>{x.nome}</strong><span>{x.procedimento || '—'}</span></div></div>)}
+              {!itReview.testes.length && <div className="muted">Nenhum teste especial extraído.</div>}
+            </div>
+
+            <div className="result-actions">
+              <button className="secondary" type="button" disabled={itBusyId===itReview.it.id} onClick={()=>structureItVersion(itReview.it.id)}>
+                Reprocessar leitura
+              </button>
+              {itReview.it.status!=='publicada' && <button className="primary" type="button" disabled={itBusyId===itReview.it.id} onClick={()=>publishItVersion(itReview.it)}>
+                Publicar versão
+              </button>}
+            </div>
+          </article>
+        </div>
       )}
 
       {tab==='estoque' && (
