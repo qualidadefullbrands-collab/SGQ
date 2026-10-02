@@ -2423,23 +2423,41 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
           <section className="panel section-card">
             <div className="section-title">
-              <div><h2>Fotos da inspeção</h2><span className="section-note">Cada foto deve ter uma legenda antes do envio.</span></div>
+              <div><h2>Fotos da inspeção</h2><span className="section-note">Etapa final: adicione as evidências somente depois de concluir amostragem, verificações, dimensionais e testes.</span></div>
               <span className="pill">{detail.photos?.length ?? 0} enviada(s)</span>
             </div>
 
-            {detail.status!=='concluida' && (
+            {detail.status!=='concluida' && !inspectionCoreDone && (
+              <div className="photo-final-lock">
+                <Camera size={20}/>
+                <div><strong>Fotos liberadas no final</strong><span>Finalize as etapas técnicas acima. Depois você envia as fotos da inspeção em um único lugar.</span></div>
+              </div>
+            )}
+
+            {detail.status!=='concluida' && inspectionCoreDone && (
               <>
-                <label className="upload-box"><Camera size={22}/><span>Selecionar fotos</span><input type="file" accept="image/*" multiple onChange={(e)=>addPendingPhotos(e.target.files)}/></label>
+                <label className="upload-box"><Camera size={22}/><span>Selecionar fotos finais</span><input type="file" accept="image/*" multiple onChange={(e)=>addPendingPhotos(e.target.files)}/></label>
                 {!!pendingPhotos.length && <div className="pending-photo-grid">
                   {pendingPhotos.map((p)=>(
                     <article className="photo-card" key={p.id}>
                       <img src={p.url} alt="Prévia"/>
                       <label>Legenda<input value={p.legenda} onChange={(e)=>setPendingPhotos((old)=>old.map((x)=>x.id===p.id?{...x,legenda:e.target.value}:x))} placeholder="Ex.: Tampa com risco na lateral"/></label>
+                      <label>Usar também como identificação do produto
+                        <select value={p.productId} onChange={(e)=>setPendingPhotos((old)=>old.map((x)=>x.id===p.id?{...x,productId:e.target.value}:x))}>
+                          <option value="">Não usar como foto principal</option>
+                          {(detail.items ?? []).map((link:any)=>(
+                            <option key={link.processo_itens.produto_id} value={link.processo_itens.produto_id}>
+                              {link.processo_itens.produtos?.sku} · {link.processo_itens.produtos?.nome}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {!!p.productId && <span className="product-id-photo-tag">ID do produto</span>}
                       <button className="secondary small" type="button" onClick={()=>removePendingPhoto(p.id)}>Remover</button>
                     </article>
                   ))}
                 </div>}
-                {!!pendingPhotos.length && <div className="actions"><button className="primary" type="button" onClick={uploadInspectionPhotos}>Enviar fotos</button></div>}
+                {!!pendingPhotos.length && <div className="actions"><button className="primary" type="button" onClick={uploadInspectionPhotos}>Enviar fotos finais</button></div>}
               </>
             )}
 
