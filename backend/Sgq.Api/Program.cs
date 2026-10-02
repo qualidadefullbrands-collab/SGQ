@@ -154,6 +154,134 @@ app.MapGet("/health", () => Results.Ok(new
     utc = DateTimeOffset.UtcNow
 }));
 
+app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+
+        var profileTask=RestAsync(client,token,HttpMethod.Get,"profiles",$"select=nome,perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
+        var processesTask=RestAsync(client,token,HttpMethod.Get,"processos",
+            "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em&excluido_em=is.null&order=criado_em.desc");
+        var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            "select=id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
+        var itsTask=RestAsync(client,token,HttpMethod.Get,"it_versoes",
+            "select=id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)&order=criado_em.desc");
+        var groupsTask=RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
+            "select=id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)&order=criado_em.desc");
+        var samplesTask=RestAsync(client,token,HttpMethod.Get,"vw_saldo_amostras",
+            "select=id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id,sku,processo_referencia,data_chegada_referencia,nota_fiscal_referencia,cliente_referencia,observacao,origem_importacao,linha_origem,laudo_id,laudo_numero,laudo_storage_path,foto_cadastro_path,produto_foto_principal_path,data_inspecao_referencia&order=codigo.desc");
+        var reportsTask=RestAsync(client,token,HttpMethod.Get,"laudos","select=id");
+
+        await Task.WhenAll(profileTask,processesTask,inspectionsTask,itsTask,groupsTask,samplesTask,reportsTask);
+        var (profile,profileFound)=FirstRow(profileTask.Result);
+        if(!profileFound) return Results.Json(Error("Seu usuário ainda não possui perfil liberado no SGQ."),statusCode:403);
+
+        int Count(JsonElement? value)=>value is {ValueKind:JsonValueKind.Array}?value.Value.GetArrayLength():0;
+        return Results.Ok(new {
+            data=new {
+                profile,
+                processes=processesTask.Result,
+                inspections=inspectionsTask.Result,
+                itVersions=itsTask.Result,
+                groups=groupsTask.Result,
+                samples=samplesTask.Result,
+                counts=new {
+                    processos=Count(processesTask.Result),
+                    inspecoes=Count(inspectionsTask.Result),
+                    amostras=Count(samplesTask.Result),
+                    laudos=Count(reportsTask.Result)
+                }
+            },
+            error=(object?)null
+        });
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar o SGQ.",e.Message),statusCode:500);}
+});
+
+app.MapGet("/api/inspecoes/{id}/detalhe", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=*,grupos_inspecao(*,processos(*)),it_versoes(*,instrucoes_trabalho(*))&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (ins,found)=FirstRow(insRows);
+        if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var i=ins!.Value;
+        var groupId=i.GetProperty("grupo_inspecao_id").GetString()!;
+        var itId=i.GetProperty("it_versao_id").GetString()!;
+
+        var itemsTask=RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+            $"select=id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,material,capacidade,quantidade_por_caixa,caixas_recebidas,caixas_inspecionadas,distribuicao_caixas,produtos(id,sku,nome,foto_principal_path))&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
+        var checklistTask=RestAsync(client,token,HttpMethod.Get,"it_checklist",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
+        var checkResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_checklist_resultados",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+        var paramsTask=RestAsync(client,token,HttpMethod.Get,"it_parametros_dimensionais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
+        var dimResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_dimensionais",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+        var dimConfigsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_dimensional_configuracoes",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+        var testsTask=RestAsync(client,token,HttpMethod.Get,"it_testes_especiais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
+        var testResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_testes_resultados",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+        var photosTask=RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+        var registersTask=RestAsync(client,token,HttpMethod.Get,"inspecao_registros",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=sequencia.asc");
+        var ncsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_nao_conformidades",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+        var retainedTask=RestAsync(client,token,HttpMethod.Get,"amostras",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+
+        await Task.WhenAll(itemsTask,checklistTask,checkResultsTask,paramsTask,dimResultsTask,dimConfigsTask,testsTask,testResultsTask,photosTask,registersTask,ncsTask,retainedTask);
+
+        var photoUrls=new Dictionary<string,string?>();
+        if(photosTask.Result is {ValueKind:JsonValueKind.Array})
+        {
+            foreach(var photo in photosTask.Result.Value.EnumerateArray())
+            {
+                if(!photo.TryGetProperty("storage_path",out var sp)||sp.ValueKind!=JsonValueKind.String) continue;
+                var path=sp.GetString();
+                if(string.IsNullOrWhiteSpace(path)) continue;
+                var sign=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/storage/v1/object/sign/inspecao-fotos/{EncodedPath(path)}");
+                ApplyAuth(sign,token);
+                sign.Content=JsonContent.Create(new {expiresIn=3600});
+                var res=await client.SendAsync(sign);
+                string? url=null;
+                if(res.IsSuccessStatusCode)
+                {
+                    var raw=await res.Content.ReadAsStringAsync();
+                    using var doc=JsonDocument.Parse(raw);
+                    var root=doc.RootElement;
+                    url=root.TryGetProperty("signedURL",out var s1)?s1.GetString():
+                        root.TryGetProperty("signedUrl",out var s2)?s2.GetString():null;
+                    if(!string.IsNullOrWhiteSpace(url)&&url.StartsWith("/")) url=supabaseUrl+"/storage/v1"+url;
+                }
+                photoUrls[path]=url;
+            }
+        }
+
+        return Results.Ok(new {
+            data=new {
+                inspecao=i,
+                items=itemsTask.Result,
+                checklist=checklistTask.Result,
+                checklistResults=checkResultsTask.Result,
+                @params=paramsTask.Result,
+                dimResults=dimResultsTask.Result,
+                dimConfigs=dimConfigsTask.Result,
+                tests=testsTask.Result,
+                testResults=testResultsTask.Result,
+                photos=photosTask.Result,
+                photoUrls,
+                registers=registersTask.Result,
+                ncs=ncsTask.Result,
+                retained=retainedTask.Result
+            },
+            error=(object?)null
+        });
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar inspeção.",e.Message),statusCode:500);}
+});
+
 app.MapGet("/api/me", async (HttpRequest request, IHttpClientFactory factory) =>
 {
     try
