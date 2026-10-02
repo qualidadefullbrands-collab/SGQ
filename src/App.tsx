@@ -1940,6 +1940,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   const dimsDone = detail ? (detail.params?.length ?? 0) === 0 || detail.dimensionais_finalizados : false
   const testsDone = detail ? (detail.tests?.length ?? 0) === 0 || detail.testes_finalizados : false
   const samplingDone = detail ? (detail.total_inspecionado ?? 0) >= (detail.tamanho_amostra ?? 0) || (!!detail.limite_rejeicao && detail.total_nao_conforme >= detail.limite_rejeicao) : false
+  const inspectionCoreDone = samplingDone && checklistDone && dimsDone && testsDone
 
   return (
     <main className="app-shell">
