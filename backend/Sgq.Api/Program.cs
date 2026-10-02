@@ -305,6 +305,180 @@ app.MapPut("/api/auditorias/{id}/respostas/{itemKey}", async (string id,string i
     catch(Exception e){return Results.Json(Error("Falha ao salvar resposta da auditoria.",e.Message),statusCode:500);}
 });
 
+app.MapPost("/api/auditorias/{id}/mensagens", async (string id,AuditMessageRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        if(string.IsNullOrWhiteSpace(input.Message))
+            return Results.Json(Error("Mensagem vazia."),statusCode:400);
+
+        var auditorRows=await RestAsync(client,token,HttpMethod.Post,"auditoria_mensagens","select=*",
+            new {
+                execucao_id=id,
+                autor="auditor",
+                texto=input.Message.Trim(),
+                foto_path=input.PhotoPath,
+                foto_mime=input.PhotoMime,
+                metadata=new {local=input.CurrentLocation,area=input.Area}
+            },"return=representation");
+        var (auditorMessage,auditorFound)=FirstRow(auditorRows);
+        if(!auditorFound) throw new InvalidOperationException("Falha ao salvar mensagem do auditor.");
+        var auditorMessageId=auditorMessage!.Value.GetProperty("id").GetString()!;
+
+        JsonElement interpreted;
+        var degraded=false;
+        try
+        {
+            var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/sgq-auditoria-assistente");
+            ApplyAuth(fn,token);
+            fn.Content=JsonContent.Create(new {
+                rqCode=input.RqCode,
+                message=input.Message.Trim(),
+                imageDataUrl=input.ImageDataUrl,
+                criteria=input.Criteria,
+                state=input.State
+            });
+            var res=await client.SendAsync(fn);
+            var raw=await res.Content.ReadAsStringAsync();
+            if(!res.IsSuccessStatusCode) throw new InvalidOperationException(raw);
+            using var doc=JsonDocument.Parse(raw);
+            interpreted=doc.RootElement.Clone();
+        }
+        catch
+        {
+            degraded=true;
+            using var fallback=JsonDocument.Parse("""{"reply":"Registro salvo. A análise assistida não respondeu agora; você pode revisar pelo checklist.","matches":[],"finding":null,"subject":null,"finishRequested":false,"degraded":true}""");
+            interpreted=fallback.RootElement.Clone();
+        }
+
+        if(interpreted.TryGetProperty("matches",out var matches)&&matches.ValueKind==JsonValueKind.Array)
+        {
+            foreach(var match in matches.EnumerateArray())
+            {
+                var key=match.TryGetProperty("key",out var ke)&&ke.ValueKind==JsonValueKind.String?ke.GetString():null;
+                var result=match.TryGetProperty("result",out var rs)&&rs.ValueKind==JsonValueKind.String?rs.GetString():null;
+                if(string.IsNullOrWhiteSpace(key)||result is not ("C" or "NC" or "NA")) continue;
+                var location=match.TryGetProperty("location",out var lo)&&lo.ValueKind==JsonValueKind.String?lo.GetString():
+                    ((input.RqCode=="RQ016B"||input.RqCode=="RQ015")?input.CurrentLocation:"");
+                var observation=match.TryGetProperty("observation",out var ob)&&ob.ValueKind==JsonValueKind.String?ob.GetString():input.Message.Trim();
+                decimal confidence=0m;
+                if(match.TryGetProperty("confidence",out var co)&&co.ValueKind==JsonValueKind.Number) confidence=co.GetDecimal();
+
+                await RestAsync(client,token,HttpMethod.Post,"auditoria_respostas",
+                    "on_conflict=execucao_id,item_key,local_ref",
+                    new {
+                        execucao_id=id,item_key=key,local_ref=location??"",resultado=result,
+                        observacao=observation,confianca=confidence,origem_mensagem_id=auditorMessageId,
+                        atualizado_em=DateTimeOffset.UtcNow
+                    },"resolution=merge-duplicates,return=minimal");
+            }
+        }
+
+        object? savedSubject=null;
+        if(input.RqCode=="RQ014" &&
+           interpreted.TryGetProperty("subject",out var subject) &&
+           subject.ValueKind==JsonValueKind.Object &&
+           subject.TryGetProperty("type",out var st) && st.ValueKind==JsonValueKind.String)
+        {
+            var type=st.GetString();
+            var key=subject.TryGetProperty("key",out var sk)&&sk.ValueKind==JsonValueKind.String?sk.GetString():null;
+            var identification=subject.TryGetProperty("identification",out var si)&&si.ValueKind==JsonValueKind.String?si.GetString():null;
+            var location=subject.TryGetProperty("location",out var sl)&&sl.ValueKind==JsonValueKind.String?sl.GetString():input.CurrentLocation;
+            var objectKey=(key??identification??location??input.CurrentLocation??"").Trim();
+            if(!string.IsNullOrWhiteSpace(type)&&!string.IsNullOrWhiteSpace(objectKey))
+            {
+                JsonElement? data=subject.TryGetProperty("data",out var sd)?sd.Clone():null;
+                JsonElement? criteriaNc=subject.TryGetProperty("criteria_nc",out var sc)?sc.Clone():null;
+                var status=subject.TryGetProperty("status",out var ss)&&ss.ValueKind==JsonValueKind.String?ss.GetString():null;
+                var objRows=await RestAsync(client,token,HttpMethod.Post,"auditoria_objetos",
+                    "on_conflict=execucao_id,objeto_tipo,chave&select=*",
+                    new {
+                        execucao_id=id,objeto_tipo=type,chave=objectKey,identificacao=identification,
+                        local_ref=location,dados=data,criterios_nc=criteriaNc,status,
+                        observacao=input.Message.Trim(),origem_mensagem_id=auditorMessageId,atualizado_em=DateTimeOffset.UtcNow
+                    },"resolution=merge-duplicates,return=representation");
+                var (obj,of)=FirstRow(objRows);
+                if(of) savedSubject=obj;
+            }
+        }
+
+        object? savedFinding=null;
+        if(interpreted.TryGetProperty("finding",out var finding)&&finding.ValueKind==JsonValueKind.Object)
+        {
+            var hasDescription=finding.TryGetProperty("description",out var fd)&&fd.ValueKind==JsonValueKind.String&&!string.IsNullOrWhiteSpace(fd.GetString());
+            var hasCriteria=finding.TryGetProperty("criteria",out var fc)&&fc.ValueKind==JsonValueKind.Array&&fc.GetArrayLength()>0;
+            if(hasDescription||hasCriteria)
+            {
+                var address=finding.TryGetProperty("address",out var fa)&&fa.ValueKind==JsonValueKind.String?fa.GetString():null;
+                var location=finding.TryGetProperty("location",out var fl)&&fl.ValueKind==JsonValueKind.String?fl.GetString():input.CurrentLocation;
+                var description=hasDescription?fd.GetString():input.Message.Trim();
+                var risk=finding.TryGetProperty("riskSuggestion",out var fr)&&fr.ValueKind==JsonValueKind.String?fr.GetString():null;
+                var action=finding.TryGetProperty("immediateAction",out var fi)&&fi.ValueKind==JsonValueKind.String?fi.GetString():null;
+                JsonElement? criteria=hasCriteria?fc.Clone():null;
+
+                var findingRows=await RestAsync(client,token,HttpMethod.Post,"auditoria_achados","select=*",
+                    new {
+                        execucao_id=id,endereco=address,local_ref=location,criterios=criteria,
+                        descricao_original=input.Message.Trim(),descricao_tecnica=description,risco=risk,
+                        acao_imediata=action,status="pendente",foto_path=input.PhotoPath,
+                        origem_mensagem_id=auditorMessageId,
+                        metadata=new {ia=true,risco_sugerido_pela_ia=!string.IsNullOrWhiteSpace(risk)}
+                    },"return=representation");
+                var (foundFinding,ff)=FirstRow(findingRows);
+                if(ff) savedFinding=foundFinding;
+            }
+        }
+
+        var reply=interpreted.TryGetProperty("reply",out var rp)&&rp.ValueKind==JsonValueKind.String?rp.GetString():"Registro interpretado.";
+        var finishRequested=interpreted.TryGetProperty("finishRequested",out var fq)&&fq.ValueKind==JsonValueKind.True;
+        var assistantRows=await RestAsync(client,token,HttpMethod.Post,"auditoria_mensagens","select=*",
+            new {
+                execucao_id=id,autor="assistente",texto=reply,
+                metadata=new {
+                    matches=interpreted.TryGetProperty("matches",out var im)?im:(JsonElement?)null,
+                    finding=interpreted.TryGetProperty("finding",out var iff)?iff:(JsonElement?)null,
+                    subject=interpreted.TryGetProperty("subject",out var isu)?isu:(JsonElement?)null,
+                    clarification=interpreted.TryGetProperty("clarification",out var ic)?ic:(JsonElement?)null,
+                    degraded=degraded||(interpreted.TryGetProperty("degraded",out var dg)&&dg.ValueKind==JsonValueKind.True)
+                }
+            },"return=representation");
+        var (assistantMessage,assistantFound)=FirstRow(assistantRows);
+
+        var answers=await RestAsync(client,token,HttpMethod.Get,"auditoria_respostas",$"select=item_key&execucao_id=eq.{Uri.EscapeDataString(id)}");
+        var findings=await RestAsync(client,token,HttpMethod.Get,"auditoria_achados",$"select=id&execucao_id=eq.{Uri.EscapeDataString(id)}");
+        var objects=await RestAsync(client,token,HttpMethod.Get,"auditoria_objetos",$"select=id&execucao_id=eq.{Uri.EscapeDataString(id)}");
+        var done=answers is {ValueKind:JsonValueKind.Array}
+            ? answers.Value.EnumerateArray().Select(x=>x.GetProperty("item_key").GetString()).Where(x=>!string.IsNullOrWhiteSpace(x)).Distinct().Count()
+            : 0;
+        int Count(JsonElement? x)=>x is {ValueKind:JsonValueKind.Array}?x.Value.GetArrayLength():0;
+        var executionRows=await RestAsync(client,token,HttpMethod.Get,"auditoria_execucoes",$"select=progresso_total&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (execution,ef)=FirstRow(executionRows);
+        var oldTotal=ef&&execution!.Value.TryGetProperty("progresso_total",out var ot)&&ot.ValueKind==JsonValueKind.Number?ot.GetInt32():0;
+        var total=input.FixedChecklist&&input.CriteriaCount>0?input.CriteriaCount:Math.Max(oldTotal,done);
+        await RestAsync(client,token,HttpMethod.Patch,"auditoria_execucoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {
+                progresso_total=total,progresso_concluido=done,atualizado_em=DateTimeOffset.UtcNow,
+                resumo=new {
+                    respostas=answers is {ValueKind:JsonValueKind.Array}?answers.Value.GetArrayLength():0,
+                    achados=Count(findings),objetos=Count(objects),ultima_localizacao=input.CurrentLocation
+                }
+            },"return=minimal");
+
+        return Results.Ok(new {data=new {
+            auditorMessage,
+            assistantMessage=assistantFound?assistantMessage:(object?)null,
+            finding=savedFinding,
+            subject=savedSubject,
+            finishRequested,
+            degraded
+        },error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao processar mensagem da auditoria.",e.Message),statusCode:500);}
+});
+
 app.MapPost("/api/auditorias/{id}/concluir", async (string id,FinishAuditRequest input,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -2112,6 +2286,21 @@ public sealed class AuditAnswerRequest
     public decimal? Confianca { get; set; }
     public int ProgressoTotalEsperado { get; set; }
 }
+public sealed class AuditMessageRequest
+{
+    public string RqCode { get; set; } = "";
+    public string Message { get; set; } = "";
+    public string? ImageDataUrl { get; set; }
+    public JsonElement? Criteria { get; set; }
+    public JsonElement? State { get; set; }
+    public string? CurrentLocation { get; set; }
+    public string? Area { get; set; }
+    public string? PhotoPath { get; set; }
+    public string? PhotoMime { get; set; }
+    public bool FixedChecklist { get; set; }
+    public int CriteriaCount { get; set; }
+}
+
 public sealed class FinishAuditRequest
 {
     public string? Observacao { get; set; }
