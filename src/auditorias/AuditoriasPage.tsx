@@ -81,7 +81,7 @@ type Props = {
   profileName?: string | null
 }
 
-const DOCS_URL=(import.meta.env.VITE_AUDIT_DOCS_URL || 'https://app-sgq-docs.onrender.com').replace(/\/$/,'')
+const DOCS_URL=((import.meta.env.VITE_API_URL || 'https://app-sgq-api.onrender.com').replace(/\/$/,'') + '/api/auditorias')
 
 function monthReference(date:string) {
   if (!date) return ''
