@@ -188,7 +188,7 @@ export default function InspectionChat({inspectionId,detail,userId,onClose,onCha
   }
 
   async function applyDimensionMeasurements(items:any[]){
-    const validParams=new Map((detail?.params ?? []).map((x:any)=>[x.id,x]))
+    const validParams=new Map<string,any>((detail?.params ?? []).map((x:any)=>[String(x.id),x]))
     const validProcessItems=new Set((detail?.items ?? []).map((x:any)=>x.processo_itens?.id).filter(Boolean))
     const existing=[...(detail?.dimResults ?? [])]
     for(const item of items ?? []){
