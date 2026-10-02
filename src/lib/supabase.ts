@@ -178,7 +178,7 @@ function storageBucket(bucket:string) {
   }
 }
 
-export const supabase:any = {
+export const supabase = {
   auth: authClient.auth,
   from(table:string) {
     return new ApiQueryBuilder(table)
