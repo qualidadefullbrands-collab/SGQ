@@ -604,6 +604,7 @@ export default function AuditoriasPage({profileName}:Props) {
   if (loadingPage) return <section className="audit-center"><Loader2 className="spin"/> Carregando auditorias…</section>
 
   if (!active) {
+    const readyCount=templates.filter((t)=>t.ativo && t.storage_path).length
     return (
       <section className="audit-page">
         <div className="audit-hero">
@@ -615,7 +616,7 @@ export default function AuditoriasPage({profileName}:Props) {
           <div className="audit-hero-icon"><Sparkles size={28}/></div>
         </div>
 
-        {notice && <div className="audit-notice">{notice}</div>}
+        {notice && <div className="audit-notice">{notice}<button onClick={()=>setNotice('')}><X size={15}/></button></div>}
 
         <div className="audit-grid">
           {AUDIT_DEFINITIONS.map((def)=>(
