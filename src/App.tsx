@@ -249,6 +249,7 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [environment, setEnvironment] = useState<'full' | 'contlog' | null>(null)
   const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias'>('painel')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -401,6 +402,7 @@ export default function App() {
   useEffect(() => {
     if (!userId) {
       setProfile(null)
+      setEnvironment(null)
       return
     }
     loadApp()
@@ -1852,6 +1854,65 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
   if (!profile) return <div className="center-screen">{error || 'Carregando perfil…'}</div>
 
+  if (!environment) {
+    return (
+      <main className="environment-shell">
+        <section className="environment-picker">
+          <div className="environment-heading">
+            <div className="brand-mark"><ShieldCheck size={26}/><span>SGQ</span></div>
+            <span className="eyebrow">SELECIONE O AMBIENTE</span>
+            <h1>Onde você vai trabalhar?</h1>
+            <p>O mesmo acesso da Qualidade atende os dois ambientes. Você pode trocar a qualquer momento.</p>
+          </div>
+
+          <div className="environment-grid">
+            <button className="environment-card full" onClick={()=>{setTab('painel');setEnvironment('full')}}>
+              <div className="environment-card-icon"><PackageSearch size={30}/></div>
+              <div>
+                <span className="environment-kicker">FULL</span>
+                <h2>Full</h2>
+                <p>Inspeções de recebimento, ITs, laudos e estoque de amostras.</p>
+              </div>
+              <ChevronRight size={24}/>
+            </button>
+
+            <button className="environment-card contlog" onClick={()=>setEnvironment('contlog')}>
+              <div className="environment-card-icon"><ClipboardCheck size={30}/></div>
+              <div>
+                <span className="environment-kicker">CONTLOG</span>
+                <h2>Contlog</h2>
+                <p>Auditorias de campo e preenchimento dos RQs oficiais.</p>
+              </div>
+              <ChevronRight size={24}/>
+            </button>
+          </div>
+
+          <div className="environment-user">
+            <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
+            <button type="button" onClick={()=>supabase.auth.signOut()}><LogOut size={16}/> Sair</button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (environment==='contlog') {
+    return (
+      <main className="app-shell environment-app contlog-environment">
+        <header className="topbar environment-topbar">
+          <div className="brand-mark"><ClipboardCheck size={24}/><span>SGQ · CONTLOG</span></div>
+          <div className="environment-badge">Auditorias</div>
+          <div className="userbox">
+            <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
+            <button type="button" onClick={()=>setEnvironment(null)}>Trocar ambiente</button>
+            <button title="Sair" onClick={()=>supabase.auth.signOut()}><LogOut size={18}/></button>
+          </div>
+        </header>
+        <AuditoriasPage profileName={profile.nome}/>
+      </main>
+    )
+  }
+
   const checklistDone = detail ? (detail.checklist?.length ?? 0) === 0 || (detail.checklistResults?.length ?? 0) >= detail.checklist.length : false
   const dimsDone = detail ? (detail.params?.length ?? 0) === 0 || detail.dimensionais_finalizados : false
   const testsDone = detail ? (detail.tests?.length ?? 0) === 0 || detail.testes_finalizados : false
@@ -1864,13 +1925,13 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <nav>
           <button className={tab==='painel'?'active':''} onClick={()=>setTab('painel')}>Painel</button>
           <button className={tab==='inspecoes'?'active':''} onClick={()=>setTab('inspecoes')}>Inspeções</button>
-          <button className={tab==='auditorias'?'active':''} onClick={()=>setTab('auditorias')}>Auditorias</button>
           <button className={tab==='nova'?'active':''} onClick={()=>setTab('nova')}>Nova inspeção</button>
           <button className={tab==='its'?'active':''} onClick={()=>setTab('its')}>ITs</button>
           <button className={tab==='estoque'?'active':''} onClick={()=>setTab('estoque')}>Estoque</button>
         </nav>
         <div className="userbox">
           <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
+          <button type="button" onClick={()=>setEnvironment(null)}>Trocar ambiente</button>
           <button title="Sair" onClick={()=>supabase.auth.signOut()}><LogOut size={18}/></button>
         </div>
       </header>
@@ -1909,8 +1970,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
         </section>
       )}
-
-      {tab==='auditorias' && <AuditoriasPage profileName={profile.nome}/>}
 
       {tab==='inspecoes' && (
         <section className="workspace">
