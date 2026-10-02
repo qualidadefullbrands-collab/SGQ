@@ -107,7 +107,7 @@ app.MapPost("/api/data/query", async (QueryRequest q, HttpRequest request, IHttp
 
         var query = new List<string>();
         if (!string.IsNullOrWhiteSpace(q.Select))
-            query.Add("select=" + Uri.EscapeDataString(q.Select));
+            query.Add("select=" + Uri.EscapeDataString(q.Select!));
         if (q.Filters is not null)
         {
             foreach (var f in q.Filters)
@@ -295,7 +295,7 @@ app.MapGet("/api/auditorias/generate/{executionId}", async (string executionId, 
         var res = await factory.CreateClient("supabase").SendAsync(msg);
         var bytes = await res.Content.ReadAsByteArrayAsync();
         if (!res.IsSuccessStatusCode)
-            return Results.Bytes(bytes, "application/json", statusCode: (int)res.StatusCode);
+            return Results.Text(Encoding.UTF8.GetString(bytes), "application/json", statusCode: (int)res.StatusCode);
 
         var contentType = res.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
         var fileName = res.Headers.TryGetValues("X-SGQ-File-Name", out var values) ? values.FirstOrDefault() : null;
