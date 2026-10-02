@@ -168,6 +168,61 @@ app.MapGet("/api/me", async (HttpRequest request, IHttpClientFactory factory) =>
     catch (UnauthorizedAccessException e) { return Results.Json(Error(e.Message), statusCode: 401); }
 });
 
+app.MapPut("/api/processos/{id}", async (string id,ProcessUpdateRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"processos",
+            $"id=eq.{Uri.EscapeDataString(id)}",
+            new {
+                cliente=input.Cliente,
+                nota_fiscal=input.NotaFiscal,
+                origem=input.Origem,
+                transporte=input.Transporte,
+                chegada_cd=input.ChegadaCd,
+                atualizado_em=DateTimeOffset.UtcNow
+            },"return=minimal");
+        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao atualizar processo.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/processos/{id}/excluir", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {excluido_em=DateTimeOffset.UtcNow,excluido_por=userId,status="cancelado"},"return=minimal");
+        await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+            new {usuario_id=userId,entidade="processos",entidade_id=id,acao="exclusao_logica",dados=new {}},"return=minimal");
+        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao excluir processo.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/inspecoes/{id}/excluir", async (string id,DeleteInspectionRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {excluido_em=DateTimeOffset.UtcNow,excluido_por=userId,status="cancelada"},"return=minimal");
+        await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+            new {usuario_id=userId,entidade="inspecoes",entidade_id=id,acao="exclusao_logica",dados=new {numero=input.Numero}},"return=minimal");
+        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao excluir inspeção.",e.Message),statusCode:500);}
+});
+
 app.MapPost("/api/produtos/consultar", async (ProductLookupRequest input,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -1286,6 +1341,19 @@ app.MapGet("/api/auditorias/generate/{executionId}", async (string executionId, 
 });
 
 app.Run();
+
+public sealed class ProcessUpdateRequest
+{
+    public string? Cliente { get; set; }
+    public string? NotaFiscal { get; set; }
+    public string? Origem { get; set; }
+    public string? Transporte { get; set; }
+    public DateOnly? ChegadaCd { get; set; }
+}
+public sealed class DeleteInspectionRequest
+{
+    public string? Numero { get; set; }
+}
 
 public sealed class ProductLookupRequest
 {
