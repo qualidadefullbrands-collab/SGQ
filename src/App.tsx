@@ -952,39 +952,40 @@ export default function App() {
       return setError('Todas as fotos precisam de legenda antes de enviar.')
     }
     const validProductIds=new Set((detail?.items ?? []).map((x:any)=>x.processo_itens?.produto_id).filter(Boolean))
-    const productPhotosUpdated:string[]=[]
+    const registros:any[]=[]
+    let hasProductPhoto=false
+
     for (const p of pendingPhotos) {
       const safe = p.file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
       const stamp=Date.now()
       const path = `${selectedInspectionId}/gerais/${stamp}-${safe}`
       const up = await supabase.storage.from('inspecao-fotos').upload(path,p.file,{contentType:p.file.type||undefined})
       if (up.error) return setError(up.error.message)
-      const row = await supabase.from('inspecao_fotos').insert({
-        inspecao_id:selectedInspectionId,
-        storage_path:path,
-        legenda:p.legenda.trim(),
-      })
-      if (row.error) return setError(row.error.message)
 
+      let productPhotoPath:string|null=null
       if (p.productId && validProductIds.has(p.productId)) {
-        const productPath=`${p.productId}/${stamp}-${safe}`
-        const productUpload=await supabase.storage.from('produto-fotos').upload(productPath,p.file,{contentType:p.file.type||undefined})
+        productPhotoPath=`${p.productId}/${stamp}-${safe}`
+        const productUpload=await supabase.storage.from('produto-fotos').upload(productPhotoPath,p.file,{contentType:p.file.type||undefined})
         if (productUpload.error) return setError('A foto da inspeção foi salva, mas não foi possível defini-la como identificação do produto: '+productUpload.error.message)
-        const productUpdate=await supabase.from('produtos').update({
-          foto_principal_path:productPath,
-          atualizado_em:new Date().toISOString(),
-        }).eq('id',p.productId)
-        if (productUpdate.error) return setError(productUpdate.error.message)
-        productPhotosUpdated.push(p.productId)
+        hasProductPhoto=true
       }
+
+      registros.push({
+        storagePath:path,
+        legenda:p.legenda.trim(),
+        productId:p.productId || null,
+        productPhotoPath,
+      })
     }
+
+    const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/fotos/registrar`,{fotos:registros})
+    if (saved.error) return setError(saved.error.message)
+
     pendingPhotos.forEach((p)=>URL.revokeObjectURL(p.url))
     setPendingPhotos([])
-    if (productPhotosUpdated.length) {
-      setMessage('Fotos enviadas. A imagem selecionada também foi definida como identificação principal do produto.')
-    } else {
-      setMessage('Fotos da inspeção enviadas.')
-    }
+    setMessage(hasProductPhoto
+      ? 'Fotos enviadas. A imagem selecionada também foi definida como identificação principal do produto.'
+      : 'Fotos da inspeção enviadas.')
     await openInspection(selectedInspectionId)
   }
 
@@ -1177,21 +1178,6 @@ export default function App() {
       : 'Inspeção finalizada. Agora defina a retenção das amostras.')
     await loadApp()
     await openInspection(selectedInspectionId)
-  }
-
-  async function ensureInspectionReportRecord() {
-    if (!selectedInspectionId || !detail) return null
-    const existing=await supabase.from('laudos').select('id,numero,storage_path').eq('inspecao_id',selectedInspectionId).maybeSingle()
-    if (existing.data) return existing.data
-    const created=await supabase.from('laudos').insert({
-      inspecao_id:selectedInspectionId,
-      numero:detail.numero,
-    }).select('id,numero,storage_path').single()
-    if (created.error || !created.data) {
-      setError(created.error?.message ?? 'Falha ao vincular o laudo à inspeção.')
-      return null
-    }
-    return created.data
   }
 
   async function saveRetention() {
@@ -1440,70 +1426,18 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   }
 
   async function downloadInspectionWord() {
-    if (!detail) return
-    const process = detail.grupos_inspecao?.processos
-    const products = (detail.items ?? []).map((x:any) =>
-      `<tr><td>${x.processo_itens?.produtos?.sku ?? ''}</td><td>${x.processo_itens?.produtos?.nome ?? ''}</td><td>${x.processo_itens?.lote ?? ''}</td><td>${x.processo_itens?.quantidade ?? ''}</td></tr>`
-    ).join('')
-    const checks = (detail.checklist ?? []).map((x:any) => {
-      const r = detail.checklistResults?.find((z:any) => z.checklist_id === x.id)
-      return `<tr><td>${x.ordem}</td><td>${x.requisito}</td><td>${statusLabel(r?.resultado)}</td><td>${r?.severidade_confirmada ?? ''}</td></tr>`
-    }).join('')
-    const html = `<html><head><meta charset="utf-8"><style>
-      body{font-family:Arial,sans-serif;font-size:10.5pt}h1{font-size:17pt}h2{font-size:12pt;margin-top:18px}
-      table{border-collapse:collapse;width:100%;margin:8px 0}td,th{border:1px solid #777;padding:5px}th{background:#eee;text-align:left}
-    </style></head><body>
-      <h1>REGISTRO DE INSPEÇÃO</h1>
-      <p><b>${detail.it_versoes?.instrucoes_trabalho?.codigo ?? ''}</b> · ${detail.it_versoes?.instrucoes_trabalho?.titulo ?? ''} · versão ${detail.it_versoes?.versao ?? ''}</p>
-      <h2>Identificação</h2>
-      <table><tr><th>Processo FST</th><td>${formatFst(process?.codigo)}</td><th>Cliente</th><td>${process?.cliente ?? ''}</td></tr>
-      <tr><th>Nota fiscal</th><td>${process?.nota_fiscal ?? ''}</td><th>Data</th><td>${detail.data_inspecao ?? ''}</td></tr>
-      <tr><th>Origem</th><td>${process?.origem ?? ''}</td><th>Transporte</th><td>${process?.transporte ?? ''}</td></tr></table>
-      <h2>Produtos / componentes</h2><table><tr><th>Código</th><th>Descrição</th><th>Lote</th><th>Quantidade</th></tr>${products}</table>
-      <h2>Plano de amostragem</h2><table>
-      <tr><th>Lote estatístico</th><td>${detail.tamanho_lote ?? ''}</td><th>Nível</th><td>${detail.nivel_inspecao ?? ''}</td></tr>
-      <tr><th>Código</th><td>${detail.codigo_amostragem ?? ''}</td><th>Amostra prevista</th><td>${detail.tamanho_amostra ?? ''}</td></tr>
-      <tr><th>Amostra efetiva</th><td>${detail.total_inspecionado ?? 0}</td><th>Não conformes</th><td>${detail.total_nao_conforme ?? 0}</td></tr></table>
-      <h2>Verificações</h2><table><tr><th>Nº</th><th>Análise</th><th>Resultado</th><th>Classe</th></tr>${checks}</table>
-      <h2>Resultado final</h2><p><b>${statusLabel(detail.resultado).toUpperCase()}</b></p>
-      <p>${detail.observacoes ?? ''}</p>
-    </body></html>`
-    const blob = new Blob([html], { type:'application/msword;charset=utf-8' })
+    if (!detail || !selectedInspectionId) return
+    const generated=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/laudo`,{})
+    if (generated.error) return setError(generated.error.message || 'Não foi possível gerar o laudo.')
+    if (!generated.data?.url) return setError('O laudo foi gerado, mas a URL para download não ficou disponível.')
 
-    if (selectedInspectionId) {
-      const report=await ensureInspectionReportRecord()
-      if (!report) return
-      const storagePath=`${selectedInspectionId}/${detail.numero}.doc`
-      const upload=await supabase.storage.from('laudos').upload(storagePath,blob,{
-        contentType:'application/msword',
-        upsert:true,
-      })
-      if (upload.error) {
-        setError('Não foi possível armazenar o laudo no SGQ: '+upload.error.message)
-        return
-      }
-      const generatedAt=new Date().toISOString()
-      const updated=await supabase.from('laudos').update({
-        storage_path:storagePath,
-        gerado_em:generatedAt,
-      }).eq('id',report.id)
-      if (updated.error) {
-        setError('O Word foi gerado, mas não foi possível vincular o arquivo ao laudo.')
-        return
-      }
-      await supabase.from('amostras')
-        .update({laudo_id:report.id})
-        .eq('inspecao_id',selectedInspectionId)
-        .is('laudo_id',null)
-      await supabase.from('inspecoes').update({documento_gerado_em:generatedAt}).eq('id',selectedInspectionId)
-    }
-
-    const href = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = href
-    a.download = `${formatFst(process?.codigo)}-${detail.numero}.doc`
+    const a=document.createElement('a')
+    a.href=generated.data.url
+    a.download=generated.data.filename || `${detail.numero}.doc`
+    a.target='_blank'
+    a.rel='noopener'
     a.click()
-    URL.revokeObjectURL(href)
+    setMessage('Laudo gerado e armazenado pelo backend.')
     await loadApp()
   }
 
