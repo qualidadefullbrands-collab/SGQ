@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, MessageCircle, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, X } from 'lucide-react'
 import QRCode from 'qrcode'
-import { supabase } from './lib/supabase'
+import { apiPost, supabase } from './lib/supabase'
 import AuditoriasPage from './auditorias/AuditoriasPage'
 import InspectionChat from './full-inspection/InspectionChat'
 
@@ -756,156 +756,58 @@ export default function App() {
     if (skuRows.some((r) => !r.sku.trim() || r.omieStatus !== 'found' || !r.nome.trim() || Number(r.quantidade) <= 0 || Number(r.caixasRecebidas) <= 0 || Number(r.caixasInspecionadas) <= 0)) {
       return setError('Em cada produto, confirme o Código no OMIE e informe Quantidade recebida, Caixas recebidas e Caixas inspecionadas.')
     }
-    if (statisticalLot <= 0) return setError('Não foi possível calcular o lote estatístico.')
+
+    const itens:any[]=[]
     for (const row of skuRows) {
       const dist=parseBoxDistribution(row.distribuicaoCaixas)
       if (!dist.valid) return setError(`${row.sku}: ${dist.error}`)
-      if (dist.groups.length) {
-        if (dist.boxes !== Number(row.caixasRecebidas)) {
-          return setError(`${row.sku}: a distribuição informa ${dist.boxes} caixas, mas "Caixas recebidas" está em ${row.caixasRecebidas}.`)
-        }
-        if (Math.abs(dist.units-Number(row.quantidade))>0.0001) {
-          return setError(`${row.sku}: a distribuição soma ${dist.units.toLocaleString('pt-BR')} unidades, diferente da quantidade recebida (${Number(row.quantidade).toLocaleString('pt-BR')}).`)
-        }
-      }
-    }
 
-    let processId = inspection.processoId
-    const processCode = fstDigits(inspection.codigo)
-    const existingByCode = processes.find((p) => fstDigits(p.codigo) === processCode)
-    if (!processId && existingByCode) processId = existingByCode.id
-
-    if (processId) {
-      const { error } = await supabase.from('processos').update({
-        cliente: inspection.cliente.trim(),
-        nota_fiscal: inspection.notaFiscal.trim() || null,
-        origem: inspection.origem.trim() || null,
-        transporte: inspection.transporte.trim() || null,
-        chegada_cd: inspection.chegadaCd || null,
-        status: 'em_inspecao',
-        atualizado_em: new Date().toISOString(),
-      }).eq('id', processId)
-      if (error) return setError(error.message)
-    } else {
-      const created = await supabase.from('processos').insert({
-        codigo: processCode,
-        cliente: inspection.cliente.trim(),
-        nota_fiscal: inspection.notaFiscal.trim() || null,
-        origem: inspection.origem.trim() || null,
-        transporte: inspection.transporte.trim() || null,
-        chegada_cd: inspection.chegadaCd || null,
-        status: 'em_inspecao',
-        data_processo: inspection.dataInspecao,
-        criado_por: userId,
-      }).select('id').single()
-      if (created.error || !created.data) return setError(created.error?.message ?? 'Falha ao criar processo.')
-      processId = created.data.id
-    }
-
-    const groupCount = await supabase.from('grupos_inspecao').select('*', { count: 'exact', head: true }).eq('processo_id', processId)
-    const groupCode = `G${String((groupCount.count ?? 0) + 1).padStart(2, '0')}`
-    const groupName = skuRows.map((r) => r.nome.trim()).join(' + ')
-    const group = await supabase.from('grupos_inspecao').insert({
-      processo_id: processId,
-      codigo: groupCode,
-      nome: groupName,
-      tipo: isComponentSet ? 'kit_componentes' : 'individual',
-      tamanho_lote_estatistico: statisticalLot,
-      status: 'em_inspecao',
-    }).select('id').single()
-    if (group.error || !group.data) return setError(group.error?.message ?? 'Falha ao iniciar inspeção.')
-
-    let firstItemId: string | null = null
-    for (const row of skuRows) {
-      let productId: string
-      const existing = await supabase.from('produtos').select('id,nome,foto_principal_path').eq('sku', row.sku.trim()).maybeSingle()
-      if (existing.data?.id) {
-        productId = existing.data.id
-        if (existing.data.nome !== row.nome.trim()) {
-          await supabase.from('produtos').update({ nome: row.nome.trim() }).eq('id', productId)
-        }
-      } else {
-        const created = await supabase.from('produtos').insert({ sku: row.sku.trim(), nome: row.nome.trim() }).select('id').single()
-        if (created.error || !created.data) return setError(created.error?.message ?? 'Falha ao cadastrar código.')
-        productId = created.data.id
-      }
+      let fotoPrincipalPath=row.fotoPrincipalPath || ''
       if (row.fotoFile) {
         const safe=row.fotoFile.name.replace(/[^a-zA-Z0-9._-]/g,'_')
-        const photoPath=`${productId}/${Date.now()}-${safe}`
+        const photoPath=`${row.sku.trim()}/${Date.now()}-${safe}`
         const upload=await supabase.storage.from('produto-fotos').upload(photoPath,row.fotoFile,{contentType:row.fotoFile.type||undefined})
         if (upload.error) return setError('Falha ao salvar foto principal do produto: '+upload.error.message)
-        const photoUpdate=await supabase.from('produtos').update({foto_principal_path:photoPath}).eq('id',productId)
-        if (photoUpdate.error) return setError(photoUpdate.error.message)
+        fotoPrincipalPath=photoPath
       }
-      const dist=parseBoxDistribution(row.distribuicaoCaixas)
-      const item = await supabase.from('processo_itens').insert({
-        processo_id: processId,
-        produto_id: productId,
-        codigo_cliente: null,
-        lote: row.lote.trim() || null,
-        material: row.material.trim() || null,
-        capacidade: row.capacidade.trim() || null,
-        quantidade: Number(row.quantidade),
-        quantidade_por_caixa: Number(row.quantidadePorCaixa) || null,
-        caixas_recebidas: Number(row.caixasRecebidas),
-        caixas_inspecionadas: Number(row.caixasInspecionadas),
-        distribuicao_caixas: dist.groups.length ? dist.groups : null,
-      }).select('id').single()
-      if (item.error || !item.data) return setError(item.error?.message ?? 'Falha ao cadastrar produto.')
-      if (!firstItemId) firstItemId = item.data.id
 
-      const linkItem = await supabase.from('grupo_inspecao_itens').insert({
-        grupo_inspecao_id: group.data.id,
-        processo_item_id: item.data.id,
-        quantidade_componente: Number(row.quantidade),
-        unidades_por_conjunto: Number(row.unidadesPorConjunto || 1),
+      itens.push({
+        sku:row.sku.trim(),
+        nome:row.nome.trim(),
+        lote:row.lote.trim() || null,
+        material:row.material.trim() || null,
+        capacidade:row.capacidade.trim() || null,
+        quantidade:Number(row.quantidade),
+        quantidadePorCaixa:Number(row.quantidadePorCaixa) || null,
+        caixasRecebidas:Number(row.caixasRecebidas),
+        caixasInspecionadas:Number(row.caixasInspecionadas),
+        unidadesPorConjunto:Number(row.unidadesPorConjunto || 1),
+        distribuicaoCaixas:dist.groups.length ? dist.groups : null,
+        fotoPrincipalPath:fotoPrincipalPath || null,
       })
-      if (linkItem.error) return setError(linkItem.error.message)
     }
 
-    const linkIt = await supabase.from('grupo_inspecao_its').insert({
-      grupo_inspecao_id: group.data.id,
-      it_versao_id: inspection.itVersionId,
-      principal: true,
+    const created=await apiPost<any>('/api/inspecoes/criar',{
+      codigo:inspection.codigo.trim(),
+      cliente:inspection.cliente.trim(),
+      notaFiscal:inspection.notaFiscal.trim() || null,
+      origem:inspection.origem.trim() || null,
+      transporte:inspection.transporte.trim() || null,
+      chegadaCd:inspection.chegadaCd || null,
+      dataInspecao:inspection.dataInspecao,
+      itVersionId:inspection.itVersionId,
+      inspectionLevel:inspection.inspectionLevel,
+      itens,
     })
-    if (linkIt.error) return setError(linkIt.error.message)
 
-    const plan = samplingPlan(statisticalLot, inspection.inspectionLevel)
-    const inspectionNumber = `INS-${new Date().getFullYear()}-${Date.now().toString().slice(-7)}`
-    const createdInspection = await supabase.from('inspecoes').insert({
-      numero: inspectionNumber,
-      processo_item_id: firstItemId,
-      grupo_inspecao_id: group.data.id,
-      it_versao_id: inspection.itVersionId,
-      status: 'em_andamento',
-      resultado: 'pendente',
-      tamanho_lote: statisticalLot,
-      tamanho_amostra: plan.sample,
-      limite_aceitacao: plan.ac,
-      limite_rejeicao: plan.re,
-      nivel_inspecao: inspection.inspectionLevel,
-      nivel_inspecao_origem: 'it',
-      regime_inspecao: 'normal',
-      tipo_plano: 'simples',
-      codigo_amostragem: plan.code,
-      nqa_critico: 0.40,
-      nqa_grave: 1.50,
-      nqa_toleravel: 4.00,
-      caixas_recebidas: totalBoxesReceived,
-      caixas_avaliar: totalBoxesToInspect,
-      data_inspecao: inspection.dataInspecao,
-      responsavel_id: userId,
-      iniciada_em: new Date().toISOString(),
-      parametros_amostragem: { formula_caixas: 'ceil(sqrt(n+1))' },
-    }).select('id').single()
-    if (createdInspection.error || !createdInspection.data) {
-      return setError(createdInspection.error?.message ?? 'Falha ao criar inspeção.')
+    if (created.error || !created.data?.id) {
+      return setError(created.error?.message || 'Falha ao criar inspeção.')
     }
 
-    setMessage(`Inspeção ${inspectionNumber} iniciada.`)
+    setMessage(`Inspeção ${created.data.numero} iniciada pelo backend .NET.`)
     resetNewInspection()
     await loadApp()
-    await openInspection(createdInspection.data.id)
+    await openInspection(created.data.id)
   }
 
   function resetNcDraft() {
