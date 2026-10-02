@@ -154,6 +154,190 @@ app.MapGet("/health", () => Results.Ok(new
     utc = DateTimeOffset.UtcNow
 }));
 
+app.MapGet("/api/auditorias/bootstrap", async (HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var executions=RestAsync(client,token,HttpMethod.Get,"auditoria_execucoes","select=*&order=criado_em.desc&limit=30");
+        var templates=RestAsync(client,token,HttpMethod.Get,"auditoria_templates","select=rq_code,rq_version,arquivo_nome,storage_path,ativo&order=rq_code.asc");
+        await Task.WhenAll(executions,templates);
+        return Results.Ok(new {data=new {executions=executions.Result,templates=templates.Result},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar auditorias.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/auditorias/criar", async (CreateAuditRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        if(string.IsNullOrWhiteSpace(input.RqCode)||string.IsNullOrWhiteSpace(input.RqVersion)||string.IsNullOrWhiteSpace(input.Titulo))
+            return Results.Json(Error("RQ, versão e título são obrigatórios."),statusCode:400);
+
+        var date=input.DataAvaliacao ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var created=await RestAsync(client,token,HttpMethod.Post,"auditoria_execucoes","select=*",
+            new {
+                rq_code=input.RqCode,
+                rq_version=input.RqVersion,
+                titulo=input.Titulo,
+                data_avaliacao=date,
+                mes_referencia=input.MesReferencia,
+                responsavel_nome=input.ResponsavelNome,
+                progresso_total=input.ProgressoTotal,
+                progresso_concluido=0,
+                resumo=new {origem="chat_mobile"}
+            },"return=representation");
+        var (execution,found)=FirstRow(created);
+        if(!found) throw new InvalidOperationException("Falha ao criar auditoria.");
+        var executionId=execution!.Value.GetProperty("id").GetString()!;
+
+        var intro=input.RqCode switch {
+            "RQ016B"=>"Pré-avaliação iniciada. Selecione a área e informe o local atual. Registre o que encontrar por mensagem. Neste RQ não é necessário anexar fotos.",
+            "RQ014"=>"Inspeção iniciada. Informe o equipamento e o local, por exemplo “EXT-021, corredor 3”. Depois descreva normalmente o que encontrou ou diga que está tudo certo.",
+            _ when input.FixedChecklist=>"Avaliação iniciada. Vá registrando o que observar por texto, voz ou foto. Eu organizo os achados e acompanho os itens do modelo.",
+            _=>"Inspeção iniciada. Informe o local/endereço atual e registre cada achado por texto, voz ou foto. Eu organizo as evidências no modelo do RQ."
+        };
+        await RestAsync(client,token,HttpMethod.Post,"auditoria_mensagens","",
+            new {execucao_id=executionId,autor="assistente",texto=intro},"return=minimal");
+
+        return Results.Ok(new {data=execution,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao iniciar auditoria.",e.Message),statusCode:500);}
+});
+
+app.MapGet("/api/auditorias/{id}/detalhe", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var executionTask=RestAsync(client,token,HttpMethod.Get,"auditoria_execucoes",$"select=*&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var messagesTask=RestAsync(client,token,HttpMethod.Get,"auditoria_mensagens",$"select=*&execucao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+        var answersTask=RestAsync(client,token,HttpMethod.Get,"auditoria_respostas",$"select=*&execucao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+        var findingsTask=RestAsync(client,token,HttpMethod.Get,"auditoria_achados",$"select=*&execucao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+        var objectsTask=RestAsync(client,token,HttpMethod.Get,"auditoria_objetos",$"select=*&execucao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+        await Task.WhenAll(executionTask,messagesTask,answersTask,findingsTask,objectsTask);
+        var (execution,found)=FirstRow(executionTask.Result);
+        if(!found) return Results.Json(Error("Auditoria não encontrada."),statusCode:404);
+
+        var photoUrls=new Dictionary<string,string?>();
+        if(messagesTask.Result is {ValueKind:JsonValueKind.Array})
+        {
+            foreach(var m in messagesTask.Result.Value.EnumerateArray())
+            {
+                if(!m.TryGetProperty("foto_path",out var fp)||fp.ValueKind!=JsonValueKind.String) continue;
+                var path=fp.GetString();
+                if(string.IsNullOrWhiteSpace(path)||photoUrls.ContainsKey(path)) continue;
+                var sign=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/storage/v1/object/sign/auditoria-evidencias/{EncodedPath(path)}");
+                ApplyAuth(sign,token);
+                sign.Content=JsonContent.Create(new {expiresIn=3600});
+                var res=await client.SendAsync(sign);
+                string? url=null;
+                if(res.IsSuccessStatusCode)
+                {
+                    var raw=await res.Content.ReadAsStringAsync();
+                    using var doc=JsonDocument.Parse(raw);
+                    var root=doc.RootElement;
+                    url=root.TryGetProperty("signedURL",out var s1)?s1.GetString():
+                        root.TryGetProperty("signedUrl",out var s2)?s2.GetString():null;
+                    if(!string.IsNullOrWhiteSpace(url)&&url.StartsWith("/")) url=supabaseUrl+"/storage/v1"+url;
+                }
+                photoUrls[path]=url;
+            }
+        }
+
+        return Results.Ok(new {data=new {
+            execution,
+            messages=messagesTask.Result,
+            answers=answersTask.Result,
+            findings=findingsTask.Result,
+            objects=objectsTask.Result,
+            photoUrls
+        },error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao abrir auditoria.",e.Message),statusCode:500);}
+});
+
+app.MapPut("/api/auditorias/{id}/respostas/{itemKey}", async (string id,string itemKey,AuditAnswerRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        if(input.Resultado is not ("C" or "NC" or "NA"))
+            return Results.Json(Error("Resultado inválido."),statusCode:400);
+
+        var saved=await RestAsync(client,token,HttpMethod.Post,"auditoria_respostas",
+            "on_conflict=execucao_id,item_key,local_ref&select=*",
+            new {
+                execucao_id=id,
+                item_key=itemKey,
+                local_ref=input.LocalRef??"",
+                resultado=input.Resultado,
+                observacao=input.Observacao??"Registro manual do auditor",
+                confianca=input.Confianca??1m,
+                atualizado_em=DateTimeOffset.UtcNow
+            },"resolution=merge-duplicates,return=representation");
+        var (row,found)=FirstRow(saved);
+        if(!found) throw new InvalidOperationException("Falha ao salvar resposta.");
+
+        var all=await RestAsync(client,token,HttpMethod.Get,"auditoria_respostas",$"select=item_key&execucao_id=eq.{Uri.EscapeDataString(id)}");
+        var done=all is {ValueKind:JsonValueKind.Array}
+            ? all.Value.EnumerateArray().Select(x=>x.GetProperty("item_key").GetString()).Where(x=>!string.IsNullOrWhiteSpace(x)).Distinct().Count()
+            : 0;
+        var executionRows=await RestAsync(client,token,HttpMethod.Get,"auditoria_execucoes",
+            $"select=progresso_total,resumo&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (execution,ef)=FirstRow(executionRows);
+        var currentTotal=ef&&execution!.Value.TryGetProperty("progresso_total",out var pt)&&pt.ValueKind==JsonValueKind.Number?pt.GetInt32():0;
+        var total=input.ProgressoTotalEsperado>0?input.ProgressoTotalEsperado:Math.Max(currentTotal,done);
+        await RestAsync(client,token,HttpMethod.Patch,"auditoria_execucoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {progresso_total=total,progresso_concluido=done,atualizado_em=DateTimeOffset.UtcNow},"return=minimal");
+
+        return Results.Ok(new {data=new {resposta=row,progresso_concluido=done,progresso_total=total},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao salvar resposta da auditoria.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/auditorias/{id}/concluir", async (string id,FinishAuditRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var answers=await RestAsync(client,token,HttpMethod.Get,"auditoria_respostas",$"select=id&execucao_id=eq.{Uri.EscapeDataString(id)}");
+        var findings=await RestAsync(client,token,HttpMethod.Get,"auditoria_achados",$"select=id&execucao_id=eq.{Uri.EscapeDataString(id)}");
+        var objects=await RestAsync(client,token,HttpMethod.Get,"auditoria_objetos",$"select=id&execucao_id=eq.{Uri.EscapeDataString(id)}");
+        int Count(JsonElement? v)=>v is {ValueKind:JsonValueKind.Array}?v.Value.GetArrayLength():0;
+        var now=DateTimeOffset.UtcNow;
+        var updated=await RestAsync(client,token,HttpMethod.Patch,"auditoria_execucoes",
+            $"id=eq.{Uri.EscapeDataString(id)}&select=*",
+            new {
+                status="concluida",
+                finalizado_em=now,
+                atualizado_em=now,
+                power_automate_status="aguardando_geracao_documento",
+                resumo=new {
+                    respostas=Count(answers),
+                    achados=Count(findings),
+                    objetos=Count(objects),
+                    observacao_integracao="Word oficial será gerado antes do POST HTTP ao Power Automate."
+                }
+            },"return=representation");
+        var (row,found)=FirstRow(updated);
+        if(!found) throw new InvalidOperationException("Falha ao concluir auditoria.");
+        return Results.Ok(new {data=row,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao concluir auditoria.",e.Message),statusCode:500);}
+});
+
 app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -1908,6 +2092,30 @@ app.MapGet("/api/auditorias/generate/{executionId}", async (string executionId, 
 });
 
 app.Run();
+
+public sealed class CreateAuditRequest
+{
+    public string RqCode { get; set; } = "";
+    public string RqVersion { get; set; } = "";
+    public string Titulo { get; set; } = "";
+    public DateOnly? DataAvaliacao { get; set; }
+    public string? MesReferencia { get; set; }
+    public string? ResponsavelNome { get; set; }
+    public int ProgressoTotal { get; set; }
+    public bool FixedChecklist { get; set; }
+}
+public sealed class AuditAnswerRequest
+{
+    public string Resultado { get; set; } = "";
+    public string? LocalRef { get; set; }
+    public string? Observacao { get; set; }
+    public decimal? Confianca { get; set; }
+    public int ProgressoTotalEsperado { get; set; }
+}
+public sealed class FinishAuditRequest
+{
+    public string? Observacao { get; set; }
+}
 
 public sealed class ProcessUpdateRequest
 {
