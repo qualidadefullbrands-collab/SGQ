@@ -6,7 +6,6 @@ import './inspection-chat.css'
 type Props = {
   inspectionId:string
   detail:any
-  userId:string
   onClose:()=>void
   onChanged:()=>Promise<void> | void
 }
@@ -19,13 +18,7 @@ type ChatMessage = {
   criado_em:string
 }
 
-function severityForNc(value:string|null|undefined) {
-  if (value==='critico') return 'critica'
-  if (value==='toleravel') return 'leve'
-  return 'maior'
-}
-
-export default function InspectionChat({inspectionId,detail,userId,onClose,onChanged}:Props) {
+export default function InspectionChat({inspectionId,detail,onClose,onChanged}:Props) {
   const [messages,setMessages]=useState<ChatMessage[]>([])
   const [draft,setDraft]=useState('')
   const [loading,setLoading]=useState(true)
