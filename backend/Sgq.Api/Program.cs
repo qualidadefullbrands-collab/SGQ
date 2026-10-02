@@ -800,41 +800,35 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         var client = factory.CreateClient("supabase");
         var userId = await CurrentUserId(client, token);
 
-        var processCode = Regex.Replace(input.Codigo ?? "", "\\D", "");
-        if (!Regex.IsMatch(processCode, "^\\d{5}$"))
-            return Results.Json(Error("O Processo FST deve ter exatamente 5 números."), statusCode: 400);
-        if (string.IsNullOrWhiteSpace(input.Cliente) || input.DataInspecao == default)
-            return Results.Json(Error("Cliente e data da inspeção são obrigatórios."), statusCode: 400);
+        // Durante construção/testes, somente a IT é obrigatória para iniciar.
         if (string.IsNullOrWhiteSpace(input.ItVersionId))
             return Results.Json(Error("Selecione a IT aplicável."), statusCode: 400);
-        if (input.Itens is null || input.Itens.Count == 0)
-            return Results.Json(Error("Informe ao menos um produto."), statusCode: 400);
 
-        foreach (var item in input.Itens)
-        {
-            if (string.IsNullOrWhiteSpace(item.Sku) || string.IsNullOrWhiteSpace(item.Nome))
-                return Results.Json(Error("Todos os produtos precisam de código e descrição."), statusCode: 400);
-            if (item.Quantidade <= 0 || item.CaixasRecebidas <= 0 || item.CaixasInspecionadas <= 0)
-                return Results.Json(Error($"{item.Sku}: quantidades e caixas devem ser maiores que zero."), statusCode: 400);
+        var processCodeRaw = (input.Codigo ?? "").Trim();
+        var processCode = string.IsNullOrWhiteSpace(processCodeRaw)
+            ? $"TMP-{Guid.NewGuid().ToString("N")[..10].ToUpperInvariant()}"
+            : processCodeRaw;
+        var inspectionDate = input.DataInspecao ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var items = (input.Itens ?? [])
+            .Where(x =>
+                !string.IsNullOrWhiteSpace(x.Sku) ||
+                !string.IsNullOrWhiteSpace(x.Nome) ||
+                !string.IsNullOrWhiteSpace(x.Lote) ||
+                !string.IsNullOrWhiteSpace(x.Material) ||
+                !string.IsNullOrWhiteSpace(x.Capacidade) ||
+                x.Quantidade > 0 ||
+                (x.QuantidadePorCaixa ?? 0) > 0 ||
+                x.CaixasRecebidas > 0 ||
+                x.CaixasInspecionadas > 0 ||
+                !string.IsNullOrWhiteSpace(x.FotoPrincipalPath) ||
+                (x.DistribuicaoCaixas?.Count ?? 0) > 0)
+            .ToList();
 
-            if (item.DistribuicaoCaixas is { Count: > 0 })
-            {
-                var boxes = item.DistribuicaoCaixas.Sum(x => x.Caixas);
-                var units = item.DistribuicaoCaixas.Sum(x => x.Caixas * x.Unidades);
-                if (Math.Abs(boxes - item.CaixasRecebidas) > 0.0001m)
-                    return Results.Json(Error($"{item.Sku}: a distribuição soma {boxes} caixas e o total informado é {item.CaixasRecebidas}."), statusCode: 400);
-                if (Math.Abs(units - item.Quantidade) > 0.0001m)
-                    return Results.Json(Error($"{item.Sku}: a distribuição soma {units} unidades e a quantidade recebida é {item.Quantidade}."), statusCode: 400);
-            }
-        }
-
-        var statisticalLot = input.Itens
+        var statisticalLot = items
             .Select(x => (long)Math.Floor(x.Quantidade / Math.Max(x.UnidadesPorConjunto <= 0 ? 1m : x.UnidadesPorConjunto, 0.000001m)))
             .Where(x => x > 0)
-            .DefaultIfEmpty(0)
+            .DefaultIfEmpty(1)
             .Min();
-        if (statisticalLot <= 0)
-            return Results.Json(Error("Não foi possível calcular o lote estatístico."), statusCode: 400);
 
         var level = string.IsNullOrWhiteSpace(input.InspectionLevel) ? "I" : input.InspectionLevel;
         var plan = SamplingPlan(statisticalLot, level);
@@ -850,7 +844,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             await RestAsync(client, token, HttpMethod.Patch, "processos",
                 $"id=eq.{Uri.EscapeDataString(processId)}",
                 new {
-                    cliente = input.Cliente.Trim(),
+                    cliente = string.IsNullOrWhiteSpace(input.Cliente) ? null : input.Cliente.Trim(),
                     nota_fiscal = string.IsNullOrWhiteSpace(input.NotaFiscal) ? null : input.NotaFiscal.Trim(),
                     origem = string.IsNullOrWhiteSpace(input.Origem) ? null : input.Origem.Trim(),
                     transporte = string.IsNullOrWhiteSpace(input.Transporte) ? null : input.Transporte.Trim(),
@@ -864,13 +858,13 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             var created = await RestAsync(client, token, HttpMethod.Post, "processos", "select=id",
                 new {
                     codigo = processCode,
-                    cliente = input.Cliente.Trim(),
+                    cliente = string.IsNullOrWhiteSpace(input.Cliente) ? null : input.Cliente.Trim(),
                     nota_fiscal = string.IsNullOrWhiteSpace(input.NotaFiscal) ? null : input.NotaFiscal.Trim(),
                     origem = string.IsNullOrWhiteSpace(input.Origem) ? null : input.Origem.Trim(),
                     transporte = string.IsNullOrWhiteSpace(input.Transporte) ? null : input.Transporte.Trim(),
                     chegada_cd = input.ChegadaCd,
                     status = "em_inspecao",
-                    data_processo = input.DataInspecao,
+                    data_processo = inspectionDate,
                     criado_por = userId
                 }, "return=representation");
             var (row, found) = FirstRow(created);
@@ -882,8 +876,9 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             $"select=id&processo_id=eq.{Uri.EscapeDataString(processId)}");
         var groupCount = groupsRows is { ValueKind: JsonValueKind.Array } ? groupsRows.Value.GetArrayLength() : 0;
         var groupCode = $"G{groupCount + 1:00}";
-        var groupName = string.Join(" + ", input.Itens.Select(x => x.Nome.Trim()));
-        var isComponentSet = input.Itens.Count > 1;
+        var nonEmptyNames = items.Select(x => (x.Nome ?? "").Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+        var groupName = nonEmptyNames.Count > 0 ? string.Join(" + ", nonEmptyNames) : "Inspeção em preenchimento";
+        var isComponentSet = items.Count > 1;
 
         var createdGroup = await RestAsync(client, token, HttpMethod.Post, "grupos_inspecao", "select=id",
             new {
@@ -891,7 +886,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 codigo = groupCode,
                 nome = groupName,
                 tipo = isComponentSet ? "kit_componentes" : "individual",
-                tamanho_lote_estatistico = statisticalLot,
+                tamanho_lote_estatistico = Math.Max(1, statisticalLot),
                 status = "em_inspecao"
             }, "return=representation");
         var (groupRow, groupFound) = FirstRow(createdGroup);
@@ -899,20 +894,30 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         var groupId = groupRow!.Value.GetProperty("id").GetString()!;
 
         string? firstItemId = null;
-        foreach (var item in input.Itens)
+        var itemIndex = 0;
+        foreach (var item in items)
         {
+            itemIndex++;
+            var normalizedSku = string.IsNullOrWhiteSpace(item.Sku)
+                ? $"TMP-{Guid.NewGuid().ToString("N")[..10].ToUpperInvariant()}"
+                : item.Sku.Trim();
+            var normalizedName = string.IsNullOrWhiteSpace(item.Nome) ? "Produto em preenchimento" : item.Nome.Trim();
+
             var productRows = await RestAsync(client, token, HttpMethod.Get, "produtos",
-                $"select=id,nome,foto_principal_path&sku=eq.{Uri.EscapeDataString(item.Sku.Trim())}&limit=1");
+                $"select=id,nome,foto_principal_path&sku=eq.{Uri.EscapeDataString(normalizedSku)}&limit=1");
             var (productRow, productFound) = FirstRow(productRows);
             string productId;
 
             if (productFound)
             {
                 productId = productRow!.Value.GetProperty("id").GetString()!;
+                var existingName = productRow.Value.TryGetProperty("nome", out var en) && en.ValueKind == JsonValueKind.String
+                    ? en.GetString()
+                    : null;
                 await RestAsync(client, token, HttpMethod.Patch, "produtos",
                     $"id=eq.{Uri.EscapeDataString(productId)}",
                     new {
-                        nome = item.Nome.Trim(),
+                        nome = string.IsNullOrWhiteSpace(item.Nome) ? existingName : normalizedName,
                         foto_principal_path = string.IsNullOrWhiteSpace(item.FotoPrincipalPath)
                             ? (productRow.Value.TryGetProperty("foto_principal_path", out var fp) && fp.ValueKind != JsonValueKind.Null ? fp.GetString() : null)
                             : item.FotoPrincipalPath
@@ -922,12 +927,12 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             {
                 var productCreated = await RestAsync(client, token, HttpMethod.Post, "produtos", "select=id",
                     new {
-                        sku = item.Sku.Trim(),
-                        nome = item.Nome.Trim(),
+                        sku = normalizedSku,
+                        nome = normalizedName,
                         foto_principal_path = string.IsNullOrWhiteSpace(item.FotoPrincipalPath) ? null : item.FotoPrincipalPath
                     }, "return=representation");
                 var (pr, pf) = FirstRow(productCreated);
-                if (!pf) throw new InvalidOperationException($"Falha ao cadastrar produto {item.Sku}.");
+                if (!pf) throw new InvalidOperationException($"Falha ao cadastrar produto {normalizedSku}.");
                 productId = pr!.Value.GetProperty("id").GetString()!;
             }
 
@@ -939,14 +944,14 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     lote = string.IsNullOrWhiteSpace(item.Lote) ? null : item.Lote.Trim(),
                     material = string.IsNullOrWhiteSpace(item.Material) ? null : item.Material.Trim(),
                     capacidade = string.IsNullOrWhiteSpace(item.Capacidade) ? null : item.Capacidade.Trim(),
-                    quantidade = item.Quantidade,
-                    quantidade_por_caixa = item.QuantidadePorCaixa > 0 ? item.QuantidadePorCaixa : null,
-                    caixas_recebidas = item.CaixasRecebidas,
-                    caixas_inspecionadas = item.CaixasInspecionadas,
+                    quantidade = Math.Max(0m, item.Quantidade),
+                    quantidade_por_caixa = item.QuantidadePorCaixa is > 0 ? item.QuantidadePorCaixa : null,
+                    caixas_recebidas = item.CaixasRecebidas > 0 ? item.CaixasRecebidas : null,
+                    caixas_inspecionadas = item.CaixasInspecionadas > 0 ? item.CaixasInspecionadas : null,
                     distribuicao_caixas = item.DistribuicaoCaixas is { Count: > 0 } ? item.DistribuicaoCaixas : null
                 }, "return=representation");
             var (ir, inf) = FirstRow(itemCreated);
-            if (!inf) throw new InvalidOperationException($"Falha ao cadastrar item {item.Sku}.");
+            if (!inf) throw new InvalidOperationException($"Falha ao cadastrar item {normalizedSku}.");
             var itemId = ir!.Value.GetProperty("id").GetString()!;
             firstItemId ??= itemId;
 
@@ -954,7 +959,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 new {
                     grupo_inspecao_id = groupId,
                     processo_item_id = itemId,
-                    quantidade_componente = item.Quantidade,
+                    quantidade_componente = Math.Max(0m, item.Quantidade),
                     unidades_por_conjunto = item.UnidadesPorConjunto <= 0 ? 1m : item.UnidadesPorConjunto
                 }, "return=minimal");
         }
@@ -964,8 +969,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             "return=minimal");
 
         var inspectionNumber = $"INS-{DateTime.UtcNow.Year}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()[^7..]}";
-        var totalBoxesReceived = input.Itens.Sum(x => x.CaixasRecebidas);
-        var totalBoxesInspect = input.Itens.Sum(x => x.CaixasInspecionadas);
+        var totalBoxesReceived = items.Sum(x => x.CaixasRecebidas);
+        var totalBoxesInspect = items.Sum(x => x.CaixasInspecionadas);
 
         var createdInspection = await RestAsync(client, token, HttpMethod.Post, "inspecoes", "select=id",
             new {
@@ -987,12 +992,18 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 nqa_critico = 0.40m,
                 nqa_grave = 1.50m,
                 nqa_toleravel = 4.00m,
-                caixas_recebidas = totalBoxesReceived,
-                caixas_avaliar = totalBoxesInspect,
-                data_inspecao = input.DataInspecao,
+                caixas_recebidas = totalBoxesReceived > 0 ? totalBoxesReceived : null,
+                caixas_avaliar = totalBoxesInspect > 0 ? totalBoxesInspect : null,
+                data_inspecao = inspectionDate,
                 responsavel_id = userId,
                 iniciada_em = DateTimeOffset.UtcNow,
-                parametros_amostragem = new { fonte = "backend_dotnet", regra_caixas = "informada_por_item", versao = "2026-10" }
+                parametros_amostragem = new {
+                    fonte = "backend_dotnet",
+                    regra_caixas = "informada_por_item",
+                    versao = "2026-10",
+                    modo_teste = true,
+                    somente_it_obrigatoria = true
+                }
             }, "return=representation");
 
         var (inspectionRow, inspectionFound) = FirstRow(createdInspection);
@@ -2465,7 +2476,7 @@ public sealed class CreateInspectionRequest
     public string? Origem { get; set; }
     public string? Transporte { get; set; }
     public DateOnly? ChegadaCd { get; set; }
-    public DateOnly DataInspecao { get; set; }
+    public DateOnly? DataInspecao { get; set; }
     public string ItVersionId { get; set; } = "";
     public string InspectionLevel { get; set; } = "I";
     public List<CreateInspectionItem> Itens { get; set; } = [];
