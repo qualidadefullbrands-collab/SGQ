@@ -1300,3 +1300,8 @@ input,select,textarea{min-height:46px;padding:11px 13px;font-size:15px}
   .product-photo-button{justify-self:stretch}
   .product-photo-editor img{width:130px;height:96px}
 }
+
+.internal-note-panel{border-left:4px solid #8aa4b6}
+.internal-note-panel .section-title{align-items:flex-start}
+.internal-note-panel textarea{background:#fffdf7;border-color:#e7dcc2}
+.internal-note-panel .pill{background:#f3f5f7;color:#52616d!important;border-color:#dce3e8}
