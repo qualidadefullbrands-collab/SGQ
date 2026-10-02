@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileText, Loader2, MapPin, Mic, MicOff, Send, Sparkles, Upload, X } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { apiGet, apiPost, apiPut, supabase } from '../lib/supabase'
 import { AUDIT_DEFINITIONS, getAuditDefinition, type AuditCriterion, type AuditDefinition, type RqCode } from './catalog'
 import './auditorias.css'
 
@@ -165,16 +165,27 @@ export default function AuditoriasPage({profileName}:Props) {
   const progressDone=definition?.fixedChecklist ? uniqueAnswered : Math.max(active?.progresso_concluido ?? 0,uniqueAnswered)
   const progressPct=progressTotal ? Math.min(100,Math.round((progressDone/progressTotal)*100)) : 0
 
-  useEffect(()=>{ void Promise.all([loadExecutions(),loadTemplates()]) },[])
+  useEffect(()=>{ void loadAuditHome() },[])
   useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:'smooth'}) },[messages.length,loading])
   useEffect(()=>{
     return ()=>{ if(photoPreview) URL.revokeObjectURL(photoPreview) }
   },[photoPreview])
 
-  async function loadTemplates() {
-    const {data}=await supabase.from('auditoria_templates').select('rq_code,rq_version,arquivo_nome,storage_path,ativo').order('rq_code')
-    setTemplates((data ?? []) as TemplateRow[])
+  async function loadAuditHome() {
+    setLoadingPage(true)
+    const loaded=await apiGet<any>('/api/auditorias/bootstrap')
+    if (!loaded.error && loaded.data) {
+      setExecutions((loaded.data.executions ?? []) as AuditExecution[])
+      setTemplates((loaded.data.templates ?? []) as TemplateRow[])
+    }
+    setLoadingPage(false)
   }
+
+  async function loadTemplates() {
+    const loaded=await apiGet<any>('/api/auditorias/bootstrap')
+    if (!loaded.error && loaded.data) setTemplates((loaded.data.templates ?? []) as TemplateRow[])
+  }
+
 
   async function uploadTemplate(def:AuditDefinition,file:File|null) {
     if (!file) return
@@ -210,42 +221,29 @@ export default function AuditoriasPage({profileName}:Props) {
 
   async function loadExecutions() {
     setLoadingPage(true)
-    const {data,error}=await supabase
-      .from('auditoria_execucoes')
-      .select('*')
-      .order('criado_em',{ascending:false})
-      .limit(30)
-    if (!error) setExecutions((data ?? []) as AuditExecution[])
+    const loaded=await apiGet<any>('/api/auditorias/bootstrap')
+    if (!loaded.error && loaded.data) setExecutions((loaded.data.executions ?? []) as AuditExecution[])
     setLoadingPage(false)
   }
+
 
   async function startAudit(def:AuditDefinition) {
     setLoading(true)
     setNotice('')
     try {
       const date=new Date().toISOString().slice(0,10)
-      const {data,error}=await supabase.from('auditoria_execucoes').insert({
-        rq_code:def.code,
-        rq_version:def.version,
+      const created=await apiPost<any>('/api/auditorias/criar',{
+        rqCode:def.code,
+        rqVersion:def.version,
         titulo:def.title,
-        data_avaliacao:date,
-        mes_referencia:monthReference(date),
-        responsavel_nome:profileName || null,
-        progresso_total:def.fixedChecklist ? def.criteria.length : 0,
-        progresso_concluido:0,
-        resumo:{origem:'chat_mobile'}
-      }).select('*').single()
-      if (error) throw error
-      const execution=data as AuditExecution
-      const intro=def.code==='RQ016B'
-        ? 'Pré-avaliação iniciada. Selecione a área e informe o local atual. Registre o que encontrar por mensagem. Neste RQ não é necessário anexar fotos.'
-        : def.code==='RQ014'
-          ? 'Inspeção iniciada. Informe o equipamento e o local, por exemplo “EXT-021, corredor 3”. Depois descreva normalmente o que encontrou ou diga que está tudo certo.'
-          : def.fixedChecklist
-            ? 'Avaliação iniciada. Vá registrando o que observar por texto, voz ou foto. Eu organizo os achados e acompanho os 30 itens do modelo.'
-            : 'Inspeção iniciada. Informe o local/endereço atual e registre cada achado por texto, voz ou foto. Eu organizo as evidências no modelo do RQ.'
-      await supabase.from('auditoria_mensagens').insert({execucao_id:execution.id,autor:'assistente',texto:intro})
-      await openAudit(execution.id)
+        dataAvaliacao:date,
+        mesReferencia:monthReference(date),
+        responsavelNome:profileName || null,
+        progressoTotal:def.fixedChecklist ? def.criteria.length : 0,
+        fixedChecklist:def.fixedChecklist,
+      })
+      if (created.error || !created.data?.id) throw new Error(created.error?.message || 'Não foi possível iniciar a auditoria.')
+      await openAudit(created.data.id)
       await loadExecutions()
     } catch (e:any) {
       setNotice(e?.message || 'Não foi possível iniciar a auditoria.')
@@ -254,29 +252,24 @@ export default function AuditoriasPage({profileName}:Props) {
     }
   }
 
+
   async function openAudit(id:string) {
     setLoading(true)
     setNotice('')
     try {
-      const [ex,msg,res,ach,obj]=await Promise.all([
-        supabase.from('auditoria_execucoes').select('*').eq('id',id).single(),
-        supabase.from('auditoria_mensagens').select('*').eq('execucao_id',id).order('criado_em'),
-        supabase.from('auditoria_respostas').select('*').eq('execucao_id',id).order('criado_em'),
-        supabase.from('auditoria_achados').select('*').eq('execucao_id',id).order('criado_em'),
-        supabase.from('auditoria_objetos').select('*').eq('execucao_id',id).order('criado_em'),
-      ])
-      if (ex.error) throw ex.error
-      const messageRows=(msg.data ?? []) as AuditMessage[]
-      const withUrls=await Promise.all(messageRows.map(async(m)=>{
-        if (!m.foto_path) return m
-        const signed=await supabase.storage.from('auditoria-evidencias').createSignedUrl(m.foto_path,3600)
-        return {...m,photoUrl:signed.data?.signedUrl ?? ''}
+      const loaded=await apiGet<any>(`/api/auditorias/${id}/detalhe`)
+      if (loaded.error || !loaded.data?.execution) throw new Error(loaded.error?.message || 'Não foi possível abrir a auditoria.')
+      const data=loaded.data
+      const urls=data.photoUrls ?? {}
+      const withUrls=((data.messages ?? []) as AuditMessage[]).map((m)=>({
+        ...m,
+        photoUrl:m.foto_path ? (urls[m.foto_path] ?? '') : undefined,
       }))
-      setActive(ex.data as AuditExecution)
+      setActive(data.execution as AuditExecution)
       setMessages(withUrls)
-      setAnswers((res.data ?? []) as AuditAnswer[])
-      setFindings((ach.data ?? []) as AuditFinding[])
-      setObjects((obj.data ?? []) as AuditObject[])
+      setAnswers((data.answers ?? []) as AuditAnswer[])
+      setFindings((data.findings ?? []) as AuditFinding[])
+      setObjects((data.objects ?? []) as AuditObject[])
       setCurrentLocation('')
       setRq016bArea('Ruas')
       setShowChecklist(false)
@@ -286,6 +279,7 @@ export default function AuditoriasPage({profileName}:Props) {
       setLoading(false)
     }
   }
+
 
   async function persistProgress(nextAnswers:AuditAnswer[]) {
     if (!active || !definition) return
@@ -314,21 +308,20 @@ export default function AuditoriasPage({profileName}:Props) {
       return
     }
     setNotice('')
-    const {data,error}=await supabase.from('auditoria_respostas').upsert({
-      execucao_id:active.id,
-      item_key:criterion.key,
-      local_ref:local,
+    const saved=await apiPut<any>(`/api/auditorias/${active.id}/respostas/${encodeURIComponent(criterion.key)}`,{
       resultado:result,
+      localRef:local,
       observacao:'Registro manual do auditor',
       confianca:1,
-      atualizado_em:new Date().toISOString(),
-    },{onConflict:'execucao_id,item_key,local_ref'}).select('*').single()
-    if (error) return setNotice(error.message)
-    const row=data as AuditAnswer
+      progressoTotalEsperado:definition?.fixedChecklist ? definition.criteria.length : 0,
+    })
+    if (saved.error || !saved.data?.resposta) return setNotice(saved.error?.message || 'Falha ao salvar resposta.')
+    const row=saved.data.resposta as AuditAnswer
     const next=[...answers.filter((a)=>!(a.item_key===row.item_key && a.local_ref===row.local_ref)),row]
     setAnswers(next)
-    await persistProgress(next)
+    setActive((prev)=>prev ? {...prev,progresso_concluido:saved.data.progresso_concluido,progresso_total:saved.data.progresso_total} : prev)
   }
+
 
   function choosePhoto(file:File|null) {
     if (photoPreview) URL.revokeObjectURL(photoPreview)
@@ -555,31 +548,19 @@ export default function AuditoriasPage({profileName}:Props) {
   async function confirmFinish() {
     if (!active) return
     setLoading(true)
-    const now=new Date().toISOString()
-    const {data,error}=await supabase.from('auditoria_execucoes').update({
-      status:'concluida',
-      finalizado_em:now,
-      atualizado_em:now,
-      power_automate_status:'aguardando_geracao_documento',
-      resumo:{
-        ...(active.resumo || {}),
-        respostas:answers.length,
-        achados:findings.length,
-        objetos:objects.length,
-        observacao_integracao:'Word oficial será gerado antes do POST HTTP ao Power Automate.'
-      }
-    }).eq('id',active.id).select('*').single()
-    if (error) {
+    const finished=await apiPost<any>(`/api/auditorias/${active.id}/concluir`,{})
+    if (finished.error || !finished.data) {
       setLoading(false)
-      return setNotice(error.message)
+      return setNotice(finished.error?.message || 'Não foi possível concluir a auditoria.')
     }
-    const finished=data as AuditExecution
-    setActive(finished)
+    const execution=finished.data as AuditExecution
+    setActive(execution)
     setShowFinish(false)
     setLoading(false)
     await loadExecutions()
-    await generateWord(finished,true)
+    await generateWord(execution,true)
   }
+
 
   function startVoice() {
     const Ctor=(window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
