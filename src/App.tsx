@@ -670,26 +670,25 @@ export default function App() {
     setError('')
     setMessage('')
 
-    if (!/^\d{5}$/.test(inspection.codigo.trim())) {
-      return setError('O Processo FST deve ter exatamente 5 números.')
-    }
-    if (!inspection.cliente.trim() || !inspection.dataInspecao) {
-      return setError('Preencha Cliente e Data da inspeção.')
-    }
+    // Durante construção/testes, a única informação obrigatória para avançar é a IT.
     if (!inspection.itVersionId) return setError('Selecione a IT aplicável.')
-    if (skuRows.some((r) => !r.sku.trim() || r.omieStatus !== 'found' || !r.nome.trim() || Number(r.quantidade) <= 0 || Number(r.caixasRecebidas) <= 0 || Number(r.caixasInspecionadas) <= 0)) {
-      return setError('Em cada produto, confirme o Código no OMIE e informe Quantidade recebida, Caixas recebidas e Caixas inspecionadas.')
-    }
 
     const itens:any[]=[]
     for (const row of skuRows) {
-      const dist=parseBoxDistribution(row.distribuicaoCaixas)
-      if (!dist.valid) return setError(`${row.sku}: ${dist.error}`)
+      const hasAnyData=Boolean(
+        row.sku.trim() || row.nome.trim() || row.lote.trim() || row.material.trim() ||
+        row.capacidade.trim() || row.quantidade || row.quantidadePorCaixa ||
+        row.caixasRecebidas || row.caixasInspecionadas || row.distribuicaoCaixas.trim() ||
+        row.fotoFile || row.fotoPrincipalPath
+      )
+      if (!hasAnyData) continue
 
+      const dist=parseBoxDistribution(row.distribuicaoCaixas)
       let fotoPrincipalPath=row.fotoPrincipalPath || ''
       if (row.fotoFile) {
         const safe=row.fotoFile.name.replace(/[^a-zA-Z0-9._-]/g,'_')
-        const photoPath=`${row.sku.trim()}/${Date.now()}-${safe}`
+        const folder=row.sku.trim() || 'temporario'
+        const photoPath=`${folder}/${Date.now()}-${safe}`
         const upload=await supabase.storage.from('produto-fotos').upload(photoPath,row.fotoFile,{contentType:row.fotoFile.type||undefined})
         if (upload.error) return setError('Falha ao salvar foto principal do produto: '+upload.error.message)
         fotoPrincipalPath=photoPath
@@ -701,24 +700,24 @@ export default function App() {
         lote:row.lote.trim() || null,
         material:row.material.trim() || null,
         capacidade:row.capacidade.trim() || null,
-        quantidade:Number(row.quantidade),
+        quantidade:Number(row.quantidade) || 0,
         quantidadePorCaixa:Number(row.quantidadePorCaixa) || null,
-        caixasRecebidas:Number(row.caixasRecebidas),
-        caixasInspecionadas:Number(row.caixasInspecionadas),
-        unidadesPorConjunto:Number(row.unidadesPorConjunto || 1),
-        distribuicaoCaixas:dist.groups.length ? dist.groups : null,
+        caixasRecebidas:Number(row.caixasRecebidas) || 0,
+        caixasInspecionadas:Number(row.caixasInspecionadas) || 0,
+        unidadesPorConjunto:Number(row.unidadesPorConjunto || 1) || 1,
+        distribuicaoCaixas:dist.valid && dist.groups.length ? dist.groups : null,
         fotoPrincipalPath:fotoPrincipalPath || null,
       })
     }
 
     const created=await apiPost<any>('/api/inspecoes/criar',{
       codigo:inspection.codigo.trim(),
-      cliente:inspection.cliente.trim(),
+      cliente:inspection.cliente.trim() || null,
       notaFiscal:inspection.notaFiscal.trim() || null,
       origem:inspection.origem.trim() || null,
       transporte:inspection.transporte.trim() || null,
       chegadaCd:inspection.chegadaCd || null,
-      dataInspecao:inspection.dataInspecao,
+      dataInspecao:inspection.dataInspecao || null,
       itVersionId:inspection.itVersionId,
       inspectionLevel:inspection.inspectionLevel,
       itens,
@@ -728,7 +727,7 @@ export default function App() {
       return setError(created.error?.message || 'Falha ao criar inspeção.')
     }
 
-    setMessage(`Inspeção ${created.data.numero} iniciada pelo backend .NET.`)
+    setMessage(`Inspeção ${created.data.numero} iniciada.`)
     resetNewInspection()
     await loadApp()
     await openInspection(created.data.id)
