@@ -2185,6 +2185,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
+              <button className="secondary" type="button" onClick={()=>setInspectionChatOpen(true)}>
+                <MessageCircle size={16}/> Modo chat
+              </button>
               {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
@@ -2543,6 +2546,21 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </section>
           )}
         </section>
+      )}
+
+      {inspectionChatOpen && tab==='execucao' && detail && userId && (
+        <InspectionChat
+          inspectionId={detail.id}
+          detail={detail}
+          userId={userId}
+          onClose={()=>{
+            setInspectionChatOpen(false)
+            if (selectedInspectionId) void openInspection(selectedInspectionId)
+          }}
+          onChanged={async()=>{
+            if (selectedInspectionId) await openInspection(selectedInspectionId)
+          }}
+        />
       )}
 
       {assistantOpen && tab==='execucao' && detail && (
