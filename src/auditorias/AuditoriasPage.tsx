@@ -618,6 +618,27 @@ export default function AuditoriasPage({profileName}:Props) {
 
         {notice && <div className="audit-notice">{notice}<button onClick={()=>setNotice('')}><X size={15}/></button></div>}
 
+        <div className="audit-template-panel">
+          <div>
+            <span className="eyebrow">MODELOS OFICIAIS</span>
+            <strong>{readyCount}/4 modelos disponíveis para geração do Word</strong>
+            <small>O sistema preenche uma cópia do arquivo mestre e preserva o original.</small>
+          </div>
+          <div className="audit-template-list">
+            {AUDIT_DEFINITIONS.map((def)=>{
+              const ready=Boolean(templates.find((x)=>x.rq_code===def.code)?.storage_path)
+              return (
+                <label className={'audit-template-chip '+(ready?'ready':'missing')} key={def.code}>
+                  {templateUploading===def.code ? <Loader2 className="spin" size={15}/> : ready ? <Check size={15}/> : <Upload size={15}/>}
+                  <span>{def.displayCode}</span>
+                  <small>{ready?'Modelo carregado':'Enviar .docx'}</small>
+                  <input hidden type="file" accept=".docx" onChange={(e)=>void uploadTemplate(def,e.target.files?.[0] ?? null)}/>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+
         <div className="audit-grid">
           {AUDIT_DEFINITIONS.map((def)=>(
             <button className="audit-card" key={def.code} onClick={()=>startAudit(def)} disabled={loading}>
