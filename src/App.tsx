@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Boxes, Camera, CheckCircle2, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, MessageCircle, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { supabase } from './lib/supabase'
+import AuditoriasPage from './auditorias/AuditoriasPage'
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
 type ItVersion = {
@@ -248,7 +249,7 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque'>('painel')
+  const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias'>('painel')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [login, setLogin] = useState({ email: '', password: '' })
@@ -1305,7 +1306,9 @@ export default function App() {
     if (pendingTests.length) steps.push(`Testes: ${pendingTests.length} teste(s) ainda estão pendentes.`)
     if (Number(plan.re ?? 0)>0 && Number(plan.nao_conformes ?? 0)>=Number(plan.re)) steps.push('Atenção: o limite de rejeição registrado no plano já foi atingido.')
     if (!steps.length) steps.push('Os registros principais estão preenchidos. Revise evidências, conclusão e retenção antes do encerramento.')
-    return (question ? `Pergunta: ${question}\n\n` : '') + steps.join('\n')
+    return (question ? `Pergunta: ${question}
+
+` : '') + steps.join('\n')
   }
 
   async function runInspectionAssistant(mode:'analisar'|'pergunta') {
@@ -1861,6 +1864,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <nav>
           <button className={tab==='painel'?'active':''} onClick={()=>setTab('painel')}>Painel</button>
           <button className={tab==='inspecoes'?'active':''} onClick={()=>setTab('inspecoes')}>Inspeções</button>
+          <button className={tab==='auditorias'?'active':''} onClick={()=>setTab('auditorias')}>Auditorias</button>
           <button className={tab==='nova'?'active':''} onClick={()=>setTab('nova')}>Nova inspeção</button>
           <button className={tab==='its'?'active':''} onClick={()=>setTab('its')}>ITs</button>
           <button className={tab==='estoque'?'active':''} onClick={()=>setTab('estoque')}>Estoque</button>
@@ -1905,6 +1909,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
         </section>
       )}
+
+      {tab==='auditorias' && <AuditoriasPage profileName={profile.nome}/>}
 
       {tab==='inspecoes' && (
         <section className="workspace">
