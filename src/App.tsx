@@ -596,50 +596,34 @@ export default function App() {
   async function saveProcessEdit(e: React.FormEvent) {
     e.preventDefault()
     if (!editingProcess) return
-    const { error } = await supabase.from('processos').update({
-      cliente: editingProcess.cliente,
-      nota_fiscal: editingProcess.nota_fiscal,
-      origem: editingProcess.origem,
-      transporte: editingProcess.transporte,
-      chegada_cd: editingProcess.chegada_cd,
-      atualizado_em: new Date().toISOString(),
-    }).eq('id', editingProcess.id)
-    if (error) return setError(error.message)
+    const saved=await apiPut<any>(`/api/processos/${editingProcess.id}`,{
+      cliente:editingProcess.cliente,
+      notaFiscal:editingProcess.nota_fiscal,
+      origem:editingProcess.origem,
+      transporte:editingProcess.transporte,
+      chegadaCd:editingProcess.chegada_cd,
+    })
+    if (saved.error) return setError(saved.error.message)
     setEditingProcess(null)
     setMessage('Processo atualizado.')
     await loadApp()
   }
 
   async function deleteProcess(p: ProcessRow) {
-    if (!canDelete || !userId) return
+    if (!canDelete) return
     if (!window.confirm(`Excluir o processo ${p.codigo} da visão operacional? O histórico será preservado para auditoria.`)) return
-    const { error } = await supabase.from('processos').update({
-      excluido_em: new Date().toISOString(),
-      excluido_por: userId,
-      status: 'cancelado',
-    }).eq('id', p.id)
-    if (error) return setError(error.message)
+    const deleted=await apiPost<any>(`/api/processos/${p.id}/excluir`,{})
+    if (deleted.error) return setError(deleted.error.message)
     setMessage('Processo removido da visão operacional.')
     await loadApp()
   }
 
   async function deleteInspection(i: InspectionRow | { id:string; numero?:string }) {
-    if (!canDelete || !userId) return
+    if (!canDelete) return
     const label = (i as any).numero ? ` ${(i as any).numero}` : ''
     if (!window.confirm(`Excluir a inspeção${label}? Ela sairá da operação, mas o registro de auditoria será preservado.`)) return
-    const { error } = await supabase.from('inspecoes').update({
-      excluido_em: new Date().toISOString(),
-      excluido_por: userId,
-      status: 'cancelada',
-    }).eq('id', i.id)
-    if (error) return setError(error.message)
-    await supabase.from('audit_log').insert({
-      usuario_id: userId,
-      entidade: 'inspecoes',
-      entidade_id: i.id,
-      acao: 'exclusao_logica',
-      dados: { numero: (i as any).numero ?? null },
-    })
+    const deleted=await apiPost<any>(`/api/inspecoes/${i.id}/excluir`,{numero:(i as any).numero ?? null})
+    if (deleted.error) return setError(deleted.error.message)
     if (selectedInspectionId === i.id) {
       setSelectedInspectionId(null)
       setDetail(null)
