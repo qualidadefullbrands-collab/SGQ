@@ -3,6 +3,7 @@ import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3,
 import QRCode from 'qrcode'
 import { supabase } from './lib/supabase'
 import AuditoriasPage from './auditorias/AuditoriasPage'
+import InspectionChat from './full-inspection/InspectionChat'
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
 type ItVersion = {
@@ -272,10 +273,11 @@ export default function App() {
   }>>({})
   const [retentionReason, setRetentionReason] = useState('')
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
-  const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string}>>([])
+  const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string;productId:string}>>([])
   const [pendingModal, setPendingModal] = useState<string[]>([])
   const [aiLoading, setAiLoading] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
+  const [inspectionChatOpen, setInspectionChatOpen] = useState(false)
   const [assistantLoading, setAssistantLoading] = useState(false)
   const [assistantText, setAssistantText] = useState('')
   const [assistantQuestion, setAssistantQuestion] = useState('')
@@ -1174,6 +1176,7 @@ export default function App() {
       file,
       url: URL.createObjectURL(file),
       legenda: '',
+      productId: '',
     }))
     setPendingPhotos((old)=>[...old,...next])
   }
