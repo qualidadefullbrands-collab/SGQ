@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, FileText, Loader2, MapPin, MessageCircle, Mic, MicOff, Plus, Send, Sparkles, X } from 'lucide-react'
+import { ArrowLeft, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileText, Loader2, MapPin, Mic, MicOff, Send, Sparkles, Upload, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { AUDIT_DEFINITIONS, getAuditDefinition, type AuditCriterion, type AuditDefinition, type RqCode } from './catalog'
 import './auditorias.css'
@@ -17,6 +17,10 @@ type AuditExecution = {
   progresso_concluido:number
   resumo:any
   power_automate_status:string
+  power_automate_resposta?:any
+  documento_storage_path?:string|null
+  documento_nome?:string|null
+  documento_gerado_em?:string|null
   finalizado_em:string|null
   criado_em:string
 }
@@ -53,9 +57,31 @@ type AuditFinding = {
   foto_path:string|null
 }
 
+type AuditObject = {
+  id:string
+  objeto_tipo:string
+  chave:string
+  identificacao:string|null
+  local_ref:string|null
+  dados:any
+  criterios_nc:string[]
+  status:string|null
+  observacao:string|null
+}
+
+type TemplateRow = {
+  rq_code:RqCode
+  rq_version:string
+  arquivo_nome:string
+  storage_path:string|null
+  ativo:boolean
+}
+
 type Props = {
   profileName?: string | null
 }
+
+const DOCS_URL=(import.meta.env.VITE_AUDIT_DOCS_URL || 'https://app-sgq-docs.onrender.com').replace(/\/$/,'')
 
 function monthReference(date:string) {
   if (!date) return ''
