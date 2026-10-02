@@ -640,17 +640,21 @@ export default function AuditoriasPage({profileName}:Props) {
         </div>
 
         <div className="audit-grid">
-          {AUDIT_DEFINITIONS.map((def)=>(
-            <button className="audit-card" key={def.code} onClick={()=>startAudit(def)} disabled={loading}>
-              <div className="audit-card-head">
-                <span className="audit-code">{def.displayCode}</span>
-                <ChevronRight size={20}/>
-              </div>
-              <strong>{def.title}</strong>
-              <span>{def.description}</span>
-              <small>Versão {def.version} · {def.requiresPhoto?'Foto disponível':'Sem foto no modelo'}</small>
-            </button>
-          ))}
+          {AUDIT_DEFINITIONS.map((def)=>{
+            const ready=Boolean(templates.find((x)=>x.rq_code===def.code)?.storage_path)
+            return (
+              <article className="audit-card" key={def.code}>
+                <div className="audit-card-head">
+                  <span className="audit-code">{def.displayCode}</span>
+                  <span className={'audit-model-pill '+(ready?'ready':'')}>{ready?'Word pronto':'Modelo pendente'}</span>
+                </div>
+                <strong>{def.title}</strong>
+                <span>{def.description}</span>
+                <small>Versão {def.version} · {def.requiresPhoto?'Foto disponível':'Sem foto no modelo'}</small>
+                <button className="audit-start-button" onClick={()=>startAudit(def)} disabled={loading}>Iniciar inspeção <ChevronRight size={18}/></button>
+              </article>
+            )
+          })}
         </div>
 
         <div className="audit-history">
@@ -662,7 +666,7 @@ export default function AuditoriasPage({profileName}:Props) {
             <button className="audit-history-row" key={x.id} onClick={()=>openAudit(x.id)}>
               <div>
                 <strong>{x.rq_code.replace('RQ','RQ ')} · {x.titulo}</strong>
-                <span>{formatDate(x.data_avaliacao)} · {x.responsavel_nome || 'Responsável não informado'}</span>
+                <span>{formatDate(x.data_avaliacao)} · {x.responsavel_nome || 'Responsável não informado'}{x.documento_gerado_em?' · Word gerado':''}</span>
               </div>
               <span className={'audit-status '+x.status}>{statusLabel(x.status)}</span>
             </button>
