@@ -2086,7 +2086,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <InspectionChat
           inspectionId={detail.id}
           detail={detail}
-          userId={userId}
           onClose={()=>{
             setInspectionChatOpen(false)
             if (selectedInspectionId) void openInspection(selectedInspectionId)
