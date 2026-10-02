@@ -1685,27 +1685,35 @@ export default function App() {
     return `${window.location.origin}/?amostra=${sample.qr_token}`
   }
 
-  function downloadZpl(sample: Sample) {
-    const group = groups.find((g) => g.id === sample.grupo_inspecao_id)
+  async function downloadZpl(sample: Sample) {
     const url = sampleUrl(sample)
+    const photoUrl=selectedSampleProductPhotoUrl || selectedSamplePhotoUrl
+    const graphic=await imageUrlToGfa(photoUrl)
+    const process=zplText(formatFst(sample.processo_referencia),26)
+    const sku=zplText(sample.sku || 'SEM CÓDIGO',28)
+    const product=zplText(sample.descricao || 'Produto sem descrição',48)
+    const client=zplText(sample.cliente_referencia || '—',42)
+    const date=zplText(formatDateBR(sample.data_inspecao_referencia || sample.data_chegada_referencia),18)
+    const lot=zplText(sample.lote || '—',25)
     const zpl = `^XA
 ^PW800
 ^LL400
 ^CI28
-^FO35,28^A0N,34,34^FDAMOSTRA RETIDA - SGQ^FS
-^FO35,78^A0N,30,30^FD${sample.codigo}^FS
-^FO35,123^A0N,24,24^FD${(sample.descricao || group?.nome || '').slice(0,48)}^FS
-^FO35,160^A0N,22,22^FDLote: ${sample.lote || '-'}^FS
-^FO35,196^A0N,22,22^FDQtd: ${sample.saldo} ${sample.unidade_controle}^FS
-^FO35,240^A0N,30,30^FDENDERECO: ${sample.endereco || '-'}^FS
-^FO575,88^BQN,2,6^FDLA,${url}^FS
-^FO35,340^A0N,18,18^FDQR abre a ficha da amostra^FS
+^FO30,24^A0N,38,38^FD${process}^FS
+^FO30,70^A0N,31,31^FDCÓD: ${sku}^FS
+^FO30,111^A0N,25,25^FD${product}^FS
+^FO30,158^A0N,23,23^FDCLIENTE: ${client}^FS
+^FO30,197^A0N,23,23^FDDATA: ${date}^FS
+^FO30,235^A0N,23,23^FDLOTE: ${lot}^FS
+${graphic ? '^FO575,24'+graphic+'^FS' : ''}
+^FO610,220^BQN,2,4^FDLA,${url}^FS
+^FO30,325^A0N,18,18^FDQR: rastreabilidade da amostra no SGQ^FS
 ^XZ`
     const blob = new Blob([zpl], { type: 'text/plain;charset=utf-8' })
     const href = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = href
-    a.download = `${sample.codigo}.zpl`
+    a.download = `${sample.sku || 'produto'}-${String(sample.processo_referencia || 'processo').replace(/[^a-zA-Z0-9_-]/g,'_')}.zpl`
     a.click()
     URL.revokeObjectURL(href)
   }
@@ -2631,7 +2639,8 @@ export default function App() {
                 {(selectedSamplePhotoUrl || selectedSampleReport || selectedSample.inspecao_id) && (
                   <div className="stock-detail-section stock-origin-section">
                     <h3>Origem da retenção</h3>
-                    {selectedSamplePhotoUrl && <img className="stock-registration-photo" src={selectedSamplePhotoUrl} alt="Foto de cadastro da amostra"/>}
+                    {selectedSampleProductPhotoUrl && <img className="stock-registration-photo" src={selectedSampleProductPhotoUrl} alt="Foto principal do produto"/>}
+                    {!selectedSampleProductPhotoUrl && selectedSamplePhotoUrl && <img className="stock-registration-photo" src={selectedSamplePhotoUrl} alt="Foto de cadastro da amostra"/>}
                     <div className="stock-origin-actions">
                       {selectedSampleReport?.url && <a className="secondary stock-link-button" href={selectedSampleReport.url} target="_blank" rel="noreferrer"><FileText size={15}/> Abrir laudo</a>}
                       {selectedSampleReport && !selectedSampleReport.url && <button className="secondary" type="button" onClick={()=>selectedSample.inspecao_id && openInspection(selectedSample.inspecao_id)}><FileText size={15}/> {selectedSampleReport.numero}</button>}
@@ -2681,7 +2690,7 @@ export default function App() {
                     <p>QR para abrir este registro no SGQ.</p>
                   </div>
                   {qrDataUrl && <img className="qr" src={qrDataUrl} alt="QR"/>}
-                  <button className="secondary wide" onClick={()=>downloadZpl(selectedSample)}><QrCode size={16}/> Gerar etiqueta Zebra 100×50</button>
+                  <button className="secondary wide" onClick={()=>void downloadZpl(selectedSample)}><QrCode size={16}/> Gerar etiqueta Zebra 100×50</button>
                 </div>
 
                 <div className="stock-detail-section stock-move">
