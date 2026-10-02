@@ -552,13 +552,12 @@ export default function App() {
     if (!code) return
     setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,omieStatus:'loading',omieMessage:'Consultando cadastro do OMIE…'}:r))
 
-    const { data, error } = await supabase.functions.invoke('omie-produto', { body: { codigo: code } })
-    if (error) {
-      const msg = String((error as any)?.context?.body ?? error.message ?? 'Falha de comunicação com a integração.')
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'error',omieMessage:msg}:r))
+    const result=await apiPost<any>('/api/produtos/consultar',{codigo:code})
+    if (result.error) {
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'error',omieMessage:result.error.message || 'Falha ao consultar o OMIE.'}:r))
       return
     }
-
+    const data=result.data
     if (data?.error === 'omie_not_configured') {
       setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_configured',omieMessage:String(data?.message ?? 'Integração OMIE não configurada.')}:r))
       return
@@ -571,8 +570,7 @@ export default function App() {
       let prefix='Falha ao consultar o OMIE'
       if (data.error==='auth_error') prefix='Credenciais do OMIE recusadas'
       if (data.error==='rate_limit') prefix='Limite de consultas do OMIE atingido'
-      const msg=String(data?.message ?? prefix)
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'error',omieMessage:prefix+': '+msg}:r))
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'error',omieMessage:prefix+': '+String(data?.message ?? prefix)}:r))
       return
     }
     if (!data?.found || !data?.descricao) {
@@ -583,40 +581,13 @@ export default function App() {
     setSkuRows((rows)=>rows.map((r,i)=>i===index?{
       ...r,
       nome:String(data.descricao),
+      fotoPrincipalPath:String(data.fotoPrincipalPath ?? ''),
+      fotoPreview:String(data.fotoPreview ?? ''),
       omieStatus:'found',
-      omieMessage:'Produto confirmado no OMIE.',
+      omieMessage:String(data.message ?? 'Produto confirmado no OMIE.'),
     }:r))
 
-    const local = await supabase.from('produtos').select('id,foto_principal_path').eq('sku', code).maybeSingle()
-    let productId = local.data?.id
-    let fotoPrincipalPath=String(local.data?.foto_principal_path ?? '')
-    if (!productId) {
-      const created = await supabase.from('produtos').insert({ sku: code, nome: String(data.descricao) }).select('id,foto_principal_path').single()
-      productId = created.data?.id
-      fotoPrincipalPath=String(created.data?.foto_principal_path ?? '')
-    } else {
-      await supabase.from('produtos').update({ nome: String(data.descricao) }).eq('id', productId)
-    }
-
-    let fotoPreview=''
-    if (fotoPrincipalPath) {
-      const signed=await supabase.storage.from('produto-fotos').createSignedUrl(fotoPrincipalPath,3600)
-      fotoPreview=signed.data?.signedUrl ?? ''
-    }
-    setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,fotoPrincipalPath,fotoPreview}:r))
-
-    if (!productId) return
-    const items = await supabase.from('processo_itens').select('id').eq('produto_id', productId)
-    const ids = (items.data ?? []).map((x:any)=>x.id)
-    if (!ids.length) return
-    const links = await supabase.from('grupo_inspecao_itens').select('grupo_inspecao_id').in('processo_item_id', ids)
-    const gids = [...new Set((links.data ?? []).map((x:any)=>x.grupo_inspecao_id))] as string[]
-    if (!gids.length) return
-    const oldIns = await supabase.from('inspecoes').select('id').in('grupo_inspecao_id', gids).is('excluido_em', null)
-    const inspIds = (oldIns.data ?? []).map((x:any)=>x.id)
-    if (!inspIds.length) return
-    const nc = await supabase.from('inspecao_nao_conformidades').select('id').in('inspecao_id', inspIds).limit(1)
-    if ((nc.data ?? []).length) {
+    if (data.hasNcHistory) {
       setInspection((x)=>({...x,inspectionLevel:'II'}))
       setMessage('Produto localizado no OMIE. Há histórico de NC; Nível II foi sugerido.')
     }
