@@ -1292,7 +1292,7 @@ export default function App() {
   }
 
   function localAssistantText(question='') {
-    const context=buildInspectionAssistantContext()
+    const context:any=buildInspectionAssistantContext() ?? {}
     const plan:any=context.plano ?? {}
     const pendingChecks=(context.verificacoes ?? []).filter((x:any)=>x.resultado==='pendente')
     const pendingDims=(context.dimensionais ?? []).filter((x:any)=>!x.nao_aplicavel && Number(x.resumo?.total ?? 0)<10)
