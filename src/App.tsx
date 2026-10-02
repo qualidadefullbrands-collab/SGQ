@@ -1411,6 +1411,15 @@ export default function App() {
     return true
   }
 
+  async function structureCurrentInspectionIt() {
+    if (!detail?.it_versao_id || !selectedInspectionId) return
+    const inspectionId=selectedInspectionId
+    const ok=await structureItVersion(detail.it_versao_id,false)
+    if (!ok) return
+    await openInspection(inspectionId)
+    setMessage('IT estruturada e carregada nesta inspeção.')
+  }
+
   async function reviewItVersion(it:ItVersion) {
     setItBusyId(it.id)
     const [checks,dims,tests,version]=await Promise.all([
@@ -1979,7 +1988,22 @@ export default function App() {
                   </div>
                 )
               })}
-              {!detail.checklist?.length && <div className="empty">Esta versão da IT ainda não teve o checklist estruturado.</div>}
+              {!detail.checklist?.length && (
+                <div className="empty">
+                  <strong>Checklist ainda não carregado para esta inspeção.</strong>
+                  <span>A IT pode ser estruturada agora sem recriar a inspeção nem perder os dados já registrados.</span>
+                  {detail.it_versao_id && detail.status!=='concluida' && (
+                    <button
+                      type="button"
+                      className="secondary small"
+                      disabled={itBusyId===detail.it_versao_id}
+                      onClick={()=>void structureCurrentInspectionIt()}
+                    >
+                      {itBusyId===detail.it_versao_id?'Estruturando IT…':'Estruturar IT agora'}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </section>
 
