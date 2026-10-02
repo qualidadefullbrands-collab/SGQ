@@ -202,14 +202,12 @@ export default function AuditoriasPage({profileName}:Props) {
         contentType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       })
       if (up.error) throw up.error
-      const db=await supabase.from('auditoria_templates').update({
-        storage_path:path,
-        arquivo_nome:file.name,
-        rq_version:def.version,
-        ativo:true,
-        atualizado_em:new Date().toISOString()
-      }).eq('rq_code',def.code)
-      if (db.error) throw db.error
+      const saved=await apiPut<any>(`/api/auditorias/templates/${def.code}`,{
+        storagePath:path,
+        arquivoNome:file.name,
+        rqVersion:def.version,
+      })
+      if (saved.error) throw new Error(saved.error.message)
       await loadTemplates()
       setNotice(def.displayCode+': modelo oficial atualizado com sucesso.')
     } catch (e:any) {
@@ -218,6 +216,7 @@ export default function AuditoriasPage({profileName}:Props) {
       setTemplateUploading(null)
     }
   }
+
 
   async function loadExecutions() {
     setLoadingPage(true)
@@ -394,7 +393,7 @@ export default function AuditoriasPage({profileName}:Props) {
         let msg='Não foi possível gerar o Word oficial.'
         try {
           const body=await response.json()
-          msg=body?.detail || msg
+          msg=body?.detail || body?.error?.message || msg
         } catch {}
         throw new Error(msg)
       }
@@ -408,11 +407,11 @@ export default function AuditoriasPage({profileName}:Props) {
         a.click()
         setTimeout(()=>URL.revokeObjectURL(href),1500)
       }
-      const fresh=await supabase.from('auditoria_execucoes').select('*').eq('id',execution.id).single()
-      if (fresh.data) setActive(fresh.data as AuditExecution)
-      const integration=await supabase.functions.invoke('sgq-auditoria-integracao',{body:{executionId:execution.id}})
-      if (integration.data?.configured && integration.data?.sent) setNotice('Word oficial gerado e enviado para o Power Automate.')
+      const integration=response.headers.get('X-SGQ-Integration-Status')
+      if (integration==='sent') setNotice('Word oficial gerado e enviado para o Power Automate.')
+      else if (integration==='error') setNotice('Word oficial gerado. O envio ao Power Automate apresentou erro e pode ser reprocessado.')
       else setNotice('Word oficial gerado. A integração HTTP do Power Automate ainda não está configurada.')
+      await openAudit(execution.id)
       await loadExecutions()
     } catch (e:any) {
       setNotice(e?.message || 'Não foi possível gerar o Word oficial.')
@@ -421,6 +420,7 @@ export default function AuditoriasPage({profileName}:Props) {
     }
   }
 
+
   async function downloadExisting() {
     if (!active) return
     if (!active.documento_storage_path) {
@@ -428,14 +428,15 @@ export default function AuditoriasPage({profileName}:Props) {
       return
     }
     setDocumentLoading(true)
-    const signed=await supabase.storage.from('auditoria-relatorios').createSignedUrl(active.documento_storage_path,300)
+    const document=await apiGet<any>(`/api/auditorias/${active.id}/documento`)
     setDocumentLoading(false)
-    if (signed.error || !signed.data?.signedUrl) {
+    if (document.error || !document.data?.url) {
       setNotice('Não foi possível abrir o Word armazenado.')
       return
     }
-    window.open(signed.data.signedUrl,'_blank','noopener,noreferrer')
+    window.open(document.data.url,'_blank','noopener,noreferrer')
   }
+
 
   async function confirmFinish() {
     if (!active) return
