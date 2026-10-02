@@ -934,8 +934,6 @@ export default function App() {
     if (!detail || !selectedInspectionId || !userId) return
     if (!conforme) {
       if (!nc?.checklistId) return setError('Selecione o item da IT relacionado à não conformidade.')
-      if (!nc?.photoFile) return setError('Toda não conformidade deve ter uma foto específica.')
-      if (!nc?.photoLegenda.trim()) return setError('Informe a legenda da foto da não conformidade.')
       if (!nc?.description.trim()) return setError('Descreva a não conformidade.')
     }
 
@@ -958,24 +956,6 @@ export default function App() {
         tipo: 'amostragem',
       }).select('id').single()
       if (created.error || !created.data) return setError(created.error?.message ?? 'Falha ao registrar NC.')
-
-      const safe = nc.photoFile!.name.replace(/[^a-zA-Z0-9._-]/g,'_')
-      const path = `${selectedInspectionId}/nc/${created.data.id}-${Date.now()}-${safe}`
-      const up = await supabase.storage.from('inspecao-fotos').upload(path,nc.photoFile!,{contentType:nc.photoFile!.type||undefined})
-      if (up.error) return setError(up.error.message)
-
-      const photo = await supabase.from('inspecao_fotos').insert({
-        inspecao_id:selectedInspectionId,
-        storage_path:path,
-        legenda:nc.photoLegenda.trim(),
-        nc_id:created.data.id,
-      })
-      if (photo.error) return setError(photo.error.message)
-
-      await supabase.from('inspecao_nao_conformidades').update({
-        foto_storage_path:path,
-        foto_legenda:nc.photoLegenda.trim(),
-      }).eq('id',created.data.id)
 
       await supabase.from('inspecao_checklist_resultados').upsert({
         inspecao_id:selectedInspectionId,
@@ -2920,17 +2900,12 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
             <label>Descrição<textarea required rows={4} value={ncDraft.description} onChange={(e)=>setNcDraft({...ncDraft,description:e.target.value})}/></label>
 
-            <label>Foto específica da NC
-              <input required type="file" accept="image/*" onChange={(e)=>{
-                const file=e.target.files?.[0] ?? null
-                if (ncDraft.photoPreview) URL.revokeObjectURL(ncDraft.photoPreview)
-                setNcDraft({...ncDraft,photoFile:file,photoPreview:file?URL.createObjectURL(file):''})
-              }}/>
-            </label>
-            {ncDraft.photoPreview && <img className="nc-preview" src={ncDraft.photoPreview} alt="Prévia da NC"/>}
-            <label>Legenda da foto<input required value={ncDraft.photoLegenda} onChange={(e)=>setNcDraft({...ncDraft,photoLegenda:e.target.value})} placeholder="Ex.: Trinca próxima ao gargalo"/></label>
+            <div className="nc-photo-deferred">
+              <Camera size={18}/>
+              <span>A foto não é cadastrada aqui. As evidências serão adicionadas juntas na etapa final da inspeção.</span>
+            </div>
 
-            <button className="danger wide" type="submit">Registrar NC e foto</button>
+            <button className="danger wide" type="submit">Registrar NC</button>
           </form>
         </div>
       )}
