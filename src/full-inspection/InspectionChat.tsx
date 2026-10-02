@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, CheckCircle2, ClipboardCheck, Loader2, Mic, MicOff, Send, Sparkles } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { apiGet, apiPost } from '../lib/supabase'
 import './inspection-chat.css'
 
 type Props = {
@@ -55,22 +55,13 @@ export default function InspectionChat({inspectionId,detail,userId,onClose,onCha
 
   async function loadMessages(){
     setLoading(true)
-    const q=await supabase.from('inspecao_chat_mensagens').select('*').eq('inspecao_id',inspectionId).order('criado_em')
+    const q=await apiGet<ChatMessage[]>(`/api/inspecoes/${inspectionId}/chat`)
     if(q.error){
       setNotice(q.error.message)
       setLoading(false)
       return
     }
-    let rows=(q.data ?? []) as ChatMessage[]
-    if(!rows.length){
-      const products=(detail?.items ?? []).map((x:any)=>x.processo_itens?.produtos?.sku).filter(Boolean).join(', ')
-      const intro='Modo chat iniciado. Você pode registrar unidades, verificações, testes e medições em linguagem natural. Fotos ficam para a etapa final da inspeção.'+(products?' Produtos: '+products+'.':'')
-      const ins=await supabase.from('inspecao_chat_mensagens').insert({
-        inspecao_id:inspectionId,autor:'assistente',texto:intro,metadata:{tipo:'intro'}
-      }).select('*').single()
-      if(ins.data) rows=[ins.data as ChatMessage]
-    }
-    setMessages(rows)
+    setMessages((q.data ?? []) as ChatMessage[])
     setLoading(false)
   }
 
@@ -116,101 +107,6 @@ export default function InspectionChat({inspectionId,detail,userId,onClose,onCha
     }
   }
 
-  async function applyChecklistUpdates(items:any[]){
-    const valid=new Set((detail?.checklist ?? []).map((x:any)=>x.id))
-    for(const item of items ?? []){
-      if(!valid.has(item.checklistId)) continue
-      await supabase.from('inspecao_checklist_resultados').upsert({
-        inspecao_id:inspectionId,
-        checklist_id:item.checklistId,
-        resultado:item.result,
-        observacao:item.observation || null,
-        severidade_confirmada:item.result==='nao_conforme' ? (item.severity || 'grave') : null,
-        registrado_por:userId,
-        registrado_em:new Date().toISOString(),
-      },{onConflict:'inspecao_id,checklist_id'})
-    }
-  }
-
-  async function applySampleResults(items:any[]){
-    if(!(items ?? []).length) return
-    const allowedChecks=new Set((detail?.checklist ?? []).map((x:any)=>x.id))
-    const allowedItems=new Set((detail?.items ?? []).map((x:any)=>x.processo_itens?.id).filter(Boolean))
-    const current=await supabase.from('inspecao_registros').select('sequencia,conforme').eq('inspecao_id',inspectionId).order('sequencia')
-    let seq=Math.max(0,...(current.data ?? []).map((x:any)=>Number(x.sequencia||0)))
-    for(const item of items){
-      if(Number(detail?.tamanho_amostra ?? 0)>0 && seq>=Number(detail.tamanho_amostra)) break
-      const conforme=Boolean(item.conforme)
-      if(!conforme && (!allowedChecks.has(item.checklistId) || !String(item.description||'').trim())) continue
-      seq+=1
-      const reg=await supabase.from('inspecao_registros').insert({
-        inspecao_id:inspectionId,sequencia:seq,conforme,
-        observacao:conforme?'Registrado pelo modo chat':String(item.description||'').trim(),
-      }).select('id').single()
-      if(reg.error || !reg.data) continue
-      if(!conforme){
-        const processoItemId=allowedItems.has(item.processoItemId)?item.processoItemId:null
-        await supabase.from('inspecao_nao_conformidades').insert({
-          inspecao_id:inspectionId,
-          inspecao_registro_id:reg.data.id,
-          processo_item_id:processoItemId,
-          checklist_id:item.checklistId,
-          descricao:String(item.description||'').trim(),
-          severidade:severityForNc(item.severity),
-          tipo:'amostragem_chat',
-        })
-        await supabase.from('inspecao_checklist_resultados').upsert({
-          inspecao_id:inspectionId,checklist_id:item.checklistId,resultado:'nao_conforme',
-          severidade_confirmada:item.severity || 'grave',observacao:String(item.description||'').trim(),
-          registrado_por:userId,registrado_em:new Date().toISOString(),
-        },{onConflict:'inspecao_id,checklist_id'})
-      }
-    }
-    const rows=await supabase.from('inspecao_registros').select('conforme').eq('inspecao_id',inspectionId)
-    if(!rows.error){
-      const total=(rows.data ?? []).length
-      const nc=(rows.data ?? []).filter((x:any)=>x.conforme===false).length
-      await supabase.from('inspecoes').update({
-        total_inspecionado:total,total_conforme:total-nc,total_nao_conforme:nc,
-      }).eq('id',inspectionId)
-    }
-  }
-
-  async function applyTestUpdates(items:any[]){
-    const valid=new Set((detail?.tests ?? []).map((x:any)=>x.id))
-    for(const item of items ?? []){
-      if(!valid.has(item.testId)) continue
-      await supabase.from('inspecao_testes_resultados').upsert({
-        inspecao_id:inspectionId,teste_id:item.testId,resultado:item.result,
-        registrado_por:userId,registrado_em:new Date().toISOString(),
-      },{onConflict:'inspecao_id,teste_id'})
-    }
-  }
-
-  async function applyDimensionMeasurements(items:any[]){
-    const validParams=new Map<string,any>((detail?.params ?? []).map((x:any)=>[String(x.id),x]))
-    const validProcessItems=new Set((detail?.items ?? []).map((x:any)=>x.processo_itens?.id).filter(Boolean))
-    const existing=[...(detail?.dimResults ?? [])]
-    for(const item of items ?? []){
-      if(!validParams.has(item.parametroId) || !validProcessItems.has(item.processoItemId)) continue
-      const cfg=(detail?.dimConfigs ?? []).find((x:any)=>x.processo_item_id===item.processoItemId && x.parametro_id===item.parametroId)
-      if(cfg?.nao_aplicavel) continue
-      const used=existing.filter((x:any)=>x.processo_item_id===item.processoItemId && x.parametro_id===item.parametroId).map((x:any)=>Number(x.sequencia_amostra))
-      const seq=Array.from({length:10},(_,i)=>i+1).find((n)=>!used.includes(n))
-      if(!seq) continue
-      const value=Number(item.value)
-      if(!Number.isFinite(value)) continue
-      const min=cfg?.minimo_aceitavel==null?null:Number(cfg.minimo_aceitavel)
-      const max=cfg?.maximo_aceitavel==null?null:Number(cfg.maximo_aceitavel)
-      const conforme=min==null&&max==null?null:(min==null||value>=min)&&(max==null||value<=max)
-      const up=await supabase.from('inspecao_dimensionais').upsert({
-        inspecao_id:inspectionId,processo_item_id:item.processoItemId,parametro_id:item.parametroId,
-        sequencia_amostra:seq,valor:value,unidade:cfg?.unidade || item.unit || validParams.get(item.parametroId)?.unidade || null,conforme,
-      },{onConflict:'inspecao_id,processo_item_id,parametro_id,sequencia_amostra'}).select('*').single()
-      if(up.data) existing.push(up.data)
-    }
-  }
-
   async function send(){
     const text=draft.trim()
     if(!text || sending || detail?.status==='concluida') return
@@ -218,41 +114,21 @@ export default function InspectionChat({inspectionId,detail,userId,onClose,onCha
     setSending(true)
     setNotice('')
     try{
-      const mine=await supabase.from('inspecao_chat_mensagens').insert({
-        inspecao_id:inspectionId,autor:'inspetor',texto:text,metadata:{}
-      }).select('*').single()
-      if(mine.error || !mine.data) throw mine.error || new Error('Falha ao salvar mensagem.')
-      setMessages((x)=>[...x,mine.data as ChatMessage])
-
-      const {data,error}=await supabase.functions.invoke('sgq-inspecao-chat',{
-        body:{message:text,context:buildContext()}
+      const result=await apiPost<any>(`/api/inspecoes/${inspectionId}/chat`,{
+        message:text,
+        context:buildContext(),
       })
-      const parsed=error ? {
-        reply:'Mensagem registrada. A IA não respondeu agora; os dados podem ser preenchidos pelo modo tradicional.',
-        finishRequested:false,checklistUpdates:[],sampleResults:[],testUpdates:[],dimensionMeasurements:[],degraded:true
-      } : data
+      if(result.error) throw new Error(result.error.message || 'Falha ao processar mensagem.')
 
-      await applyChecklistUpdates(parsed?.checklistUpdates ?? [])
-      await applySampleResults(parsed?.sampleResults ?? [])
-      await applyTestUpdates(parsed?.testUpdates ?? [])
-      await applyDimensionMeasurements(parsed?.dimensionMeasurements ?? [])
+      const mine=result.data?.inspectorMessage
+      const answer=result.data?.assistantMessage
+      if(mine) setMessages((x)=>[...x,mine as ChatMessage])
+      if(answer) setMessages((x)=>[...x,answer as ChatMessage])
 
-      const answer=await supabase.from('inspecao_chat_mensagens').insert({
-        inspecao_id:inspectionId,
-        autor:'assistente',
-        texto:String(parsed?.reply || 'Registro interpretado.'),
-        metadata:{
-          checklistUpdates:parsed?.checklistUpdates ?? [],
-          sampleResults:parsed?.sampleResults ?? [],
-          testUpdates:parsed?.testUpdates ?? [],
-          dimensionMeasurements:parsed?.dimensionMeasurements ?? [],
-          finishRequested:Boolean(parsed?.finishRequested),
-          degraded:Boolean(parsed?.degraded),
-        }
-      }).select('*').single()
-      if(answer.data) setMessages((x)=>[...x,answer.data as ChatMessage])
       await onChanged()
-      if(parsed?.finishRequested) setNotice('Para concluir, feche o chat e use a etapa final. As fotos são adicionadas lá, antes do resultado.')
+      if(result.data?.finishRequested) {
+        setNotice('Para concluir, feche o chat e use a etapa final. As fotos são adicionadas lá, antes do resultado.')
+      }
     }catch(e:any){
       setNotice(e?.message || 'Não foi possível registrar a mensagem.')
     }finally{
