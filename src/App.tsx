@@ -2115,22 +2115,13 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                           <input value={row.distribuicaoCaixas} placeholder="Ex.: 44x136 + 1x49 + 1x60" onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,distribuicaoCaixas:e.target.value}:r))}/>
                           {row.distribuicaoCaixas && (()=>{const d=parseBoxDistribution(row.distribuicaoCaixas); const mismatch=d.valid && (d.boxes!==Number(row.caixasRecebidas) || Math.abs(d.units-Number(row.quantidade))>0.0001); return <small className={'field-status '+(!d.valid||mismatch?'bad':'ok')}>{!d.valid?d.error:`${d.boxes} caixa(s) · ${d.units.toLocaleString('pt-BR')} unidades${mismatch?' — confira com os totais informados.':' — conferência fechada.'}`}</small>})()}
                         </label>
-                        <div className="span-2 product-photo-editor">
+                        <div className="span-2 product-photo-editor product-photo-later">
                           <div>
-                            <strong>Foto principal do produto</strong>
-                            <small>Fica vinculada ao código e reaparece automaticamente nas próximas inspeções.</small>
+                            <strong>Identificação visual do produto</strong>
+                            <small>{row.fotoPreview?'Este produto já possui uma foto principal cadastrada.':'A foto não precisa ser cadastrada agora. No final da inspeção, você poderá usar uma das fotos da inspeção como ID do produto.'}</small>
                           </div>
                           {row.fotoPreview && <img src={row.fotoPreview} alt={'Foto principal de '+(row.nome||row.sku)}/>}
-                          <label className="secondary product-photo-button">
-                            <Camera size={16}/> {row.fotoPreview?'Trocar foto':'Cadastrar foto'}
-                            <input type="file" accept="image/*" onChange={(e)=>{
-                              const file=e.target.files?.[0] ?? null
-                              if (!file) return
-                              const preview=URL.createObjectURL(file)
-                              if (row.fotoPreview?.startsWith('blob:')) URL.revokeObjectURL(row.fotoPreview)
-                              setSkuRows(skuRows.map((r,j)=>j===i?{...r,fotoFile:file,fotoPreview:preview}:r))
-                            }}/>
-                          </label>
+                          {!row.fotoPreview && <span className="pill">Foto no final</span>}
                         </div>
                         {isComponentSet && <label>Unidades por conjunto<input type="number" min="0.01" step="0.01" value={row.unidadesPorConjunto} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPorConjunto:e.target.value}:r))}/></label>}
                       </div>
