@@ -206,4 +206,8 @@ export async function apiGet<T=any>(path:string):Promise<{data:T|null;error:any;
   return apiRequest(path,{method:'GET'}) as any
 }
 
+export async function apiPut<T=any>(path:string, body:any):Promise<{data:T|null;error:any;count?:number|null}> {
+  return apiRequest(path,{method:'PUT',body:JSON.stringify(body)}) as any
+}
+
 export { apiUrl }
