@@ -13,20 +13,6 @@ export const authClient = createClient(
   supabasePublishableKey || 'placeholder',
 )
 
-type Filter = { type:'eq'|'is'|'in'; column:string; value:any }
-type QueryState = {
-  table:string
-  operation:'select'|'insert'|'update'|'upsert'|'delete'
-  select?:string
-  filters:Filter[]
-  order?:{column:string;ascending:boolean}
-  limit?:number
-  head?:boolean
-  count?:string
-  onConflict?:string
-  body?:any
-}
-
 async function accessToken() {
   const { data } = await authClient.auth.getSession()
   return data.session?.access_token || ''
@@ -54,118 +40,8 @@ async function apiRequest(path:string, init:RequestInit={}) {
   }
 }
 
-class ApiQueryBuilder implements PromiseLike<any> {
-  private state:QueryState
-
-  constructor(table:string) {
-    this.state={table,operation:'select',filters:[]}
-  }
-
-  select(columns='*', options?:{count?:string;head?:boolean}) {
-    this.state.select=columns
-    if (options?.count) this.state.count=options.count
-    if (options?.head) this.state.head=true
-    return this
-  }
-
-  insert(body:any) {
-    this.state.operation='insert'
-    this.state.body=body
-    return this
-  }
-
-  update(body:any) {
-    this.state.operation='update'
-    this.state.body=body
-    return this
-  }
-
-  upsert(body:any, options?:{onConflict?:string}) {
-    this.state.operation='upsert'
-    this.state.body=body
-    if (options?.onConflict) this.state.onConflict=options.onConflict
-    return this
-  }
-
-  delete() {
-    this.state.operation='delete'
-    return this
-  }
-
-  eq(column:string,value:any) {
-    this.state.filters.push({type:'eq',column,value})
-    return this
-  }
-
-  is(column:string,value:any) {
-    this.state.filters.push({type:'is',column,value})
-    return this
-  }
-
-  in(column:string,value:any[]) {
-    this.state.filters.push({type:'in',column,value})
-    return this
-  }
-
-  order(column:string, options?:{ascending?:boolean}) {
-    this.state.order={column,ascending:options?.ascending !== false}
-    return this
-  }
-
-  limit(value:number) {
-    this.state.limit=value
-    return this
-  }
-
-  private async execute() {
-    return apiRequest('/api/data/query',{
-      method:'POST',
-      body:JSON.stringify(this.state),
-    })
-  }
-
-  async single() {
-    const result=await this.execute()
-    if (result.error) return result
-    const rows=Array.isArray(result.data)?result.data:[]
-    if (rows.length !== 1) {
-      return {data:null,error:{message:rows.length===0?'Registro não encontrado.':'Mais de um registro encontrado.',details:''},count:result.count}
-    }
-    return {...result,data:rows[0]}
-  }
-
-  async maybeSingle() {
-    const result=await this.execute()
-    if (result.error) return result
-    const rows=Array.isArray(result.data)?result.data:[]
-    if (rows.length > 1) {
-      return {data:null,error:{message:'Mais de um registro encontrado.',details:''},count:result.count}
-    }
-    return {...result,data:rows[0] ?? null}
-  }
-
-  then<TResult1 = any, TResult2 = never>(
-    onfulfilled?: ((value:any)=>TResult1|PromiseLike<TResult1>)|null,
-    onrejected?: ((reason:any)=>TResult2|PromiseLike<TResult2>)|null,
-  ):PromiseLike<TResult1|TResult2> {
-    return this.execute().then(onfulfilled as any,onrejected as any)
-  }
-}
-
 function storageBucket(bucket:string) {
   return {
-    async createSignedUrl(path:string,expiresIn:number) {
-      return apiRequest('/api/storage/'+encodeURIComponent(bucket)+'/signed-url',{
-        method:'POST',
-        body:JSON.stringify({path,expiresIn}),
-      })
-    },
-    async createSignedUrls(paths:string[],expiresIn:number) {
-      return apiRequest('/api/storage/'+encodeURIComponent(bucket)+'/signed-urls',{
-        method:'POST',
-        body:JSON.stringify({paths,expiresIn}),
-      })
-    },
     async upload(path:string,file:Blob,options?:{contentType?:string;upsert?:boolean}) {
       const form=new FormData()
       const filename=file instanceof File ? file.name : 'upload.bin'
@@ -180,20 +56,9 @@ function storageBucket(bucket:string) {
 
 export const supabase = {
   auth: authClient.auth,
-  from(table:string) {
-    return new ApiQueryBuilder(table)
-  },
   storage: {
     from(bucket:string) {
       return storageBucket(bucket)
-    },
-  },
-  functions: {
-    async invoke(name:string,options?:{body?:any}) {
-      return apiRequest('/api/functions/'+encodeURIComponent(name),{
-        method:'POST',
-        body:JSON.stringify(options?.body ?? {}),
-      })
     },
   },
 }
