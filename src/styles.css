@@ -1229,3 +1229,18 @@ textarea:focus {
     overflow:visible!important;
   }
 }
+
+
+/* IT dynamic review */
+.it-row{gap:16px}
+.it-review-modal{width:min(860px,calc(100vw - 32px));max-height:90vh;overflow:auto}
+.it-review-modal>p{margin-top:-6px}
+.it-review-section{margin-top:18px;padding-top:14px;border-top:1px solid #e6ecef}
+.it-review-section h3{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 10px;color:#344054;font-size:13px}
+.it-review-section h3 span{display:inline-flex;min-width:26px;height:26px;align-items:center;justify-content:center;border-radius:999px;background:#eef5f8;color:#1769aa;font-size:10px}
+.it-review-row{display:grid;grid-template-columns:30px 1fr;gap:10px;padding:10px 0;border-top:1px solid #edf1f3}
+.it-review-row:first-of-type{border-top:0}
+.it-review-row>b{display:grid;place-items:center;width:26px;height:26px;border-radius:7px;background:#f1f5f8;color:#667085;font-size:10px}
+.it-review-row strong,.it-review-row span{display:block}
+.it-review-row strong{color:#263746;font-size:12px}
+.it-review-row span{margin-top:3px;color:#667085;font-size:10px;line-height:1.45}
