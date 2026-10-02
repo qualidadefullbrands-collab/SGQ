@@ -490,7 +490,66 @@ export default function AuditoriasPage({profileName}:Props) {
         return
       }
     }
+    if (definition.code==='RQ014' && objects.length===0) {
+      setNotice('Ainda não identifiquei nenhum extintor ou hidrante. Informe pelo menos a identificação/local do equipamento antes de concluir.')
+      return
+    }
     setShowFinish(true)
+  }
+
+  async function generateWord(execution:AuditExecution,download=true) {
+    setDocumentLoading(true)
+    setNotice('')
+    try {
+      const session=await supabase.auth.getSession()
+      const token=session.data.session?.access_token
+      if (!token) throw new Error('Sua sessão expirou. Entre novamente.')
+      const response=await fetch(DOCS_URL+'/generate/'+execution.id,{headers:{Authorization:'Bearer '+token}})
+      if (!response.ok) {
+        let msg='Não foi possível gerar o Word oficial.'
+        try {
+          const body=await response.json()
+          msg=body?.detail || msg
+        } catch {}
+        throw new Error(msg)
+      }
+      const blob=await response.blob()
+      const filename=response.headers.get('X-SGQ-File-Name') || execution.documento_nome || execution.rq_code+'.docx'
+      if (download) {
+        const href=URL.createObjectURL(blob)
+        const a=document.createElement('a')
+        a.href=href
+        a.download=filename
+        a.click()
+        setTimeout(()=>URL.revokeObjectURL(href),1500)
+      }
+      const fresh=await supabase.from('auditoria_execucoes').select('*').eq('id',execution.id).single()
+      if (fresh.data) setActive(fresh.data as AuditExecution)
+      const integration=await supabase.functions.invoke('sgq-auditoria-integracao',{body:{executionId:execution.id}})
+      if (integration.data?.configured && integration.data?.sent) setNotice('Word oficial gerado e enviado para o Power Automate.')
+      else setNotice('Word oficial gerado. A integração HTTP do Power Automate ainda não está configurada.')
+      await loadExecutions()
+    } catch (e:any) {
+      setNotice(e?.message || 'Não foi possível gerar o Word oficial.')
+    } finally {
+      setDocumentLoading(false)
+    }
+  }
+
+  async function downloadExisting() {
+    if (!active) return
+    if (!active.documento_storage_path) {
+      await generateWord(active,true)
+      return
+    }
+    setDocumentLoading(true)
+    const signed=await supabase.storage.from('auditoria-relatorios').createSignedUrl(active.documento_storage_path,300)
+    setDocumentLoading(false)
+    if (signed.error || !signed.data?.signedUrl) {
+      setNotice('Não foi possível abrir o Word armazenado.')
+      return
+    }
+    window.open(signed.data.signedUrl,'_blank','noopener,noreferrer')
   }
 
   async function confirmFinish() {
@@ -506,15 +565,20 @@ export default function AuditoriasPage({profileName}:Props) {
         ...(active.resumo || {}),
         respostas:answers.length,
         achados:findings.length,
-        observacao_integracao:'Estrutura preparada para POST HTTP via Power Automate após a geração do DOCX oficial.'
+        objetos:objects.length,
+        observacao_integracao:'Word oficial será gerado antes do POST HTTP ao Power Automate.'
       }
     }).eq('id',active.id).select('*').single()
-    setLoading(false)
-    if (error) return setNotice(error.message)
-    setActive(data as AuditExecution)
+    if (error) {
+      setLoading(false)
+      return setNotice(error.message)
+    }
+    const finished=data as AuditExecution
+    setActive(finished)
     setShowFinish(false)
-    setNotice('Inspeção concluída. O registro ficou preparado para a etapa de geração do Word oficial e envio HTTP ao Power Automate.')
+    setLoading(false)
     await loadExecutions()
+    await generateWord(finished,true)
   }
 
   function startVoice() {
