@@ -168,6 +168,120 @@ app.MapGet("/api/me", async (HttpRequest request, IHttpClientFactory factory) =>
     catch (UnauthorizedAccessException e) { return Results.Json(Error(e.Message), statusCode: 401); }
 });
 
+app.MapPost("/api/produtos/consultar", async (ProductLookupRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var code=(input.Codigo??"").Trim();
+        if(string.IsNullOrWhiteSpace(code)) return Results.Json(Error("Código do produto obrigatório."),statusCode:400);
+        var client=factory.CreateClient("supabase");
+
+        var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/omie-produto");
+        ApplyAuth(fn,token);
+        fn.Content=JsonContent.Create(new {codigo=code});
+        var fnRes=await client.SendAsync(fn);
+        var raw=await fnRes.Content.ReadAsStringAsync();
+        JsonElement omie;
+        try{using var doc=JsonDocument.Parse(raw);omie=doc.RootElement.Clone();}
+        catch{return Results.Json(Error("Resposta inválida da integração OMIE.",raw),statusCode:502);}
+
+        if(!fnRes.IsSuccessStatusCode)
+            return Results.Ok(new {data=new {found=false,error="integration_error",message=raw},error=(object?)null});
+
+        if(omie.TryGetProperty("error",out var omieError)&&omieError.ValueKind==JsonValueKind.String)
+        {
+            var err=omieError.GetString();
+            var msg=omie.TryGetProperty("message",out var me)&&me.ValueKind==JsonValueKind.String?me.GetString():"Falha ao consultar o OMIE.";
+            return Results.Ok(new {data=new {found=false,error=err,message=msg},error=(object?)null});
+        }
+
+        var found=omie.TryGetProperty("found",out var fd)&&fd.ValueKind==JsonValueKind.True;
+        var descricao=omie.TryGetProperty("descricao",out var de)&&de.ValueKind==JsonValueKind.String?de.GetString():null;
+        if(!found||string.IsNullOrWhiteSpace(descricao))
+            return Results.Ok(new {data=new {found=false,error="not_found",message="Código não localizado no cadastro de produtos do OMIE."},error=(object?)null});
+
+        var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
+            $"select=id,foto_principal_path&sku=eq.{Uri.EscapeDataString(code)}&limit=1");
+        var (product,pf)=FirstRow(productRows);
+        string productId;
+        string? photoPath=null;
+        if(pf)
+        {
+            productId=product!.Value.GetProperty("id").GetString()!;
+            if(product.Value.TryGetProperty("foto_principal_path",out var fp)&&fp.ValueKind==JsonValueKind.String) photoPath=fp.GetString();
+            await RestAsync(client,token,HttpMethod.Patch,"produtos",$"id=eq.{Uri.EscapeDataString(productId)}",new {nome=descricao},"return=minimal");
+        }
+        else
+        {
+            var created=await RestAsync(client,token,HttpMethod.Post,"produtos","select=id,foto_principal_path",
+                new {sku=code,nome=descricao},"return=representation");
+            var (pr,createdFound)=FirstRow(created);
+            if(!createdFound) throw new InvalidOperationException("Falha ao cadastrar produto local.");
+            productId=pr!.Value.GetProperty("id").GetString()!;
+            if(pr.Value.TryGetProperty("foto_principal_path",out var fp)&&fp.ValueKind==JsonValueKind.String) photoPath=fp.GetString();
+        }
+
+        string? photoUrl=null;
+        if(!string.IsNullOrWhiteSpace(photoPath))
+        {
+            var sign=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/storage/v1/object/sign/produto-fotos/{EncodedPath(photoPath)}");
+            ApplyAuth(sign,token);
+            sign.Content=JsonContent.Create(new {expiresIn=3600});
+            var signRes=await client.SendAsync(sign);
+            if(signRes.IsSuccessStatusCode)
+            {
+                var signRaw=await signRes.Content.ReadAsStringAsync();
+                using var signDoc=JsonDocument.Parse(signRaw);
+                var root=signDoc.RootElement;
+                photoUrl=root.TryGetProperty("signedURL",out var su)?su.GetString():
+                    root.TryGetProperty("signedUrl",out var sl)?sl.GetString():null;
+                if(!string.IsNullOrWhiteSpace(photoUrl)&&photoUrl.StartsWith("/")) photoUrl=supabaseUrl+"/storage/v1"+photoUrl;
+            }
+        }
+
+        var hasNc=false;
+        var itemRows=await RestAsync(client,token,HttpMethod.Get,"processo_itens",$"select=id&produto_id=eq.{Uri.EscapeDataString(productId)}");
+        var itemIds=itemRows is {ValueKind:JsonValueKind.Array}
+            ? itemRows.Value.EnumerateArray().Select(x=>x.GetProperty("id").GetString()).Where(x=>!string.IsNullOrWhiteSpace(x)).ToList()
+            : [];
+        if(itemIds.Count>0)
+        {
+            var inItems=string.Join(",",itemIds);
+            var linkRows=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",$"select=grupo_inspecao_id&processo_item_id=in.({inItems})");
+            var groupIds=linkRows is {ValueKind:JsonValueKind.Array}
+                ? linkRows.Value.EnumerateArray().Select(x=>x.GetProperty("grupo_inspecao_id").GetString()).Where(x=>!string.IsNullOrWhiteSpace(x)).Distinct().ToList()
+                : [];
+            if(groupIds.Count>0)
+            {
+                var inGroups=string.Join(",",groupIds);
+                var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",$"select=id&grupo_inspecao_id=in.({inGroups})&excluido_em=is.null");
+                var insIds=insRows is {ValueKind:JsonValueKind.Array}
+                    ? insRows.Value.EnumerateArray().Select(x=>x.GetProperty("id").GetString()).Where(x=>!string.IsNullOrWhiteSpace(x)).ToList()
+                    : [];
+                if(insIds.Count>0)
+                {
+                    var inIns=string.Join(",",insIds);
+                    var ncRows=await RestAsync(client,token,HttpMethod.Get,"inspecao_nao_conformidades",$"select=id&inspecao_id=in.({inIns})&limit=1");
+                    hasNc=ncRows is {ValueKind:JsonValueKind.Array}&&ncRows.Value.GetArrayLength()>0;
+                }
+            }
+        }
+
+        return Results.Ok(new {data=new {
+            found=true,
+            descricao,
+            productId,
+            fotoPrincipalPath=photoPath,
+            fotoPreview=photoUrl,
+            hasNcHistory=hasNc,
+            message=hasNc?"Produto confirmado no OMIE. Há histórico de NC; Nível II é recomendado.":"Produto confirmado no OMIE."
+        },error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao consultar produto.",e.Message),statusCode:500);}
+});
+
 app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRequest request, IHttpClientFactory factory) =>
 {
     try
@@ -1173,6 +1287,10 @@ app.MapGet("/api/auditorias/generate/{executionId}", async (string executionId, 
 
 app.Run();
 
+public sealed class ProductLookupRequest
+{
+    public string Codigo { get; set; } = "";
+}
 public sealed class RetentionRequest
 {
     public string? MotivoSemRetencao { get; set; }
