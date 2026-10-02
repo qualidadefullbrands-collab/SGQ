@@ -1073,19 +1073,18 @@ export default function App() {
   }
 
   async function runInspectionAssistant(mode:'analisar'|'pergunta') {
-    if (!detail) return
+    if (!detail || !selectedInspectionId) return
     if (mode==='pergunta' && !assistantQuestion.trim()) return
     setAssistantLoading(true)
     setError('')
-    const {data,error}=await supabase.functions.invoke('sgq-assistente',{
-      body:{
-        mode,
-        question:mode==='pergunta'?assistantQuestion.trim():'',
-        context:buildInspectionAssistantContext(),
-      }
+    const result=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/assistente`,{
+      mode,
+      question:mode==='pergunta'?assistantQuestion.trim():'',
+      context:buildInspectionAssistantContext(),
     })
     setAssistantLoading(false)
-    if (error || data?.error || !(data?.answer ?? data?.text)) {
+    const data=result.data
+    if (result.error || data?.error || !(data?.answer ?? data?.text)) {
       setAssistantText(localAssistantText(mode==='pergunta'?assistantQuestion.trim():''))
       if (mode==='pergunta') setAssistantQuestion('')
       return
@@ -1094,8 +1093,9 @@ export default function App() {
     if (mode==='pergunta') setAssistantQuestion('')
   }
 
+
   async function generateConclusionWithAI() {
-    if (!detail) return
+    if (!detail || !selectedInspectionId) return
     setAiLoading(true)
     setError('')
     const payload={
@@ -1128,10 +1128,11 @@ export default function App() {
         return {teste:t.nome,resultado:r?.resultado??'pendente'}
       }),
     }
-    const {data,error}=await supabase.functions.invoke('sgq-conclusao',{body:payload})
+    const result=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/conclusao-assistida`,{payload})
     setAiLoading(false)
-    if (error) {
-      const msg=String((error as any)?.context?.body ?? error.message ?? '')
+    const data=result.data
+    if (result.error) {
+      const msg=String(result.error?.details ?? result.error?.message ?? '')
       if (msg.includes('ai_not_configured')) return setError('A geração por IA está pronta, mas a chave GEMINI_API_KEY ainda não foi configurada neste SGQ.')
       return setError('Não foi possível gerar a conclusão com IA.')
     }
@@ -1141,6 +1142,7 @@ export default function App() {
     if (data?.error) return setError('Não foi possível gerar a conclusão com IA.')
     if (data?.text) setFinalObservation(String(data.text))
   }
+
 
   async function finishInspection(result: 'aprovado' | 'reprovado') {
     if (!detail || !selectedInspectionId) return
@@ -1226,10 +1228,11 @@ export default function App() {
   async function structureItVersion(itVersionId:string, openReview=true) {
     setItBusyId(itVersionId)
     setError('')
-    const {data,error}=await supabase.functions.invoke('estruturar-it',{body:{it_versao_id:itVersionId}})
+    const result=await apiPost<any>(`/api/its/${itVersionId}/estruturar`,{})
     setItBusyId(null)
-    if (error || data?.error) {
-      const msg=String(data?.message ?? error?.message ?? 'Falha na estruturação automática.')
+    const data=result.data
+    if (result.error || data?.error) {
+      const msg=String(data?.message ?? result.error?.message ?? 'Falha na estruturação automática.')
       setError('Não foi possível estruturar a IT: '+msg)
       await loadApp()
       return false
@@ -1243,6 +1246,7 @@ export default function App() {
     return true
   }
 
+
   async function structureCurrentInspectionIt() {
     if (!detail?.it_versao_id || !selectedInspectionId) return
     const inspectionId=selectedInspectionId
@@ -1254,23 +1258,22 @@ export default function App() {
 
   async function reviewItVersion(it:ItVersion) {
     setItBusyId(it.id)
-    const [checks,dims,tests,version]=await Promise.all([
-      supabase.from('it_checklist').select('*').eq('it_versao_id',it.id).eq('ativo',true).order('ordem'),
-      supabase.from('it_parametros_dimensionais').select('*').eq('it_versao_id',it.id).eq('ativo',true).order('ordem'),
-      supabase.from('it_testes_especiais').select('*').eq('it_versao_id',it.id).eq('ativo',true).order('ordem'),
-      supabase.from('it_versoes').select('extracao_ia').eq('id',it.id).single(),
-    ])
+    const loaded=await apiGet<any>(`/api/its/${it.id}/revisao`)
     setItBusyId(null)
+    if (loaded.error || !loaded.data) {
+      setError(loaded.error?.message || 'Não foi possível carregar a revisão da IT.')
+      return
+    }
+    const extraction=loaded.data.extracao_ia
     setItReview({
       it,
-      checklist:checks.data ?? [],
-      dimensionais:dims.data ?? [],
-      testes:tests.data ?? [],
-      avisos:Array.isArray((version.data as any)?.extracao_ia?.avisos_revisao)
-        ? (version.data as any).extracao_ia.avisos_revisao
-        : [],
+      checklist:loaded.data.checklist ?? [],
+      dimensionais:loaded.data.dimensionais ?? [],
+      testes:loaded.data.testes ?? [],
+      avisos:Array.isArray(extraction?.avisos_revisao) ? extraction.avisos_revisao : [],
     })
   }
+
 
   async function publishItVersion(it:ItVersion) {
     if (!window.confirm(`Publicar ${it.instrucoes_trabalho?.codigo ?? 'IT'} versão ${it.versao}? Esta estrutura passará a ser usada nas novas inspeções.`)) return
