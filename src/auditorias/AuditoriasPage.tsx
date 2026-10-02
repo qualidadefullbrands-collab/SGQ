@@ -134,10 +134,12 @@ function statusLabel(value:string) {
 
 export default function AuditoriasPage({profileName}:Props) {
   const [executions,setExecutions]=useState<AuditExecution[]>([])
+  const [templates,setTemplates]=useState<TemplateRow[]>([])
   const [active,setActive]=useState<AuditExecution|null>(null)
   const [messages,setMessages]=useState<AuditMessage[]>([])
   const [answers,setAnswers]=useState<AuditAnswer[]>([])
   const [findings,setFindings]=useState<AuditFinding[]>([])
+  const [objects,setObjects]=useState<AuditObject[]>([])
   const [draft,setDraft]=useState('')
   const [currentLocation,setCurrentLocation]=useState('')
   const [rq016bArea,setRq016bArea]=useState('Ruas')
@@ -145,6 +147,8 @@ export default function AuditoriasPage({profileName}:Props) {
   const [photoPreview,setPhotoPreview]=useState('')
   const [loading,setLoading]=useState(false)
   const [loadingPage,setLoadingPage]=useState(true)
+  const [documentLoading,setDocumentLoading]=useState(false)
+  const [templateUploading,setTemplateUploading]=useState<RqCode|null>(null)
   const [listening,setListening]=useState(false)
   const [showChecklist,setShowChecklist]=useState(false)
   const [showFinish,setShowFinish]=useState(false)
@@ -161,11 +165,48 @@ export default function AuditoriasPage({profileName}:Props) {
   const progressDone=definition?.fixedChecklist ? uniqueAnswered : Math.max(active?.progresso_concluido ?? 0,uniqueAnswered)
   const progressPct=progressTotal ? Math.min(100,Math.round((progressDone/progressTotal)*100)) : 0
 
-  useEffect(()=>{ void loadExecutions() },[])
+  useEffect(()=>{ void Promise.all([loadExecutions(),loadTemplates()]) },[])
   useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:'smooth'}) },[messages.length,loading])
   useEffect(()=>{
     return ()=>{ if(photoPreview) URL.revokeObjectURL(photoPreview) }
   },[photoPreview])
+
+  async function loadTemplates() {
+    const {data}=await supabase.from('auditoria_templates').select('rq_code,rq_version,arquivo_nome,storage_path,ativo').order('rq_code')
+    setTemplates((data ?? []) as TemplateRow[])
+  }
+
+  async function uploadTemplate(def:AuditDefinition,file:File|null) {
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.docx')) {
+      setNotice('O modelo precisa ser um arquivo .docx.')
+      return
+    }
+    setTemplateUploading(def.code)
+    setNotice('')
+    try {
+      const path=def.code+'.docx'
+      const up=await supabase.storage.from('auditoria-modelos').upload(path,file,{
+        upsert:true,
+        contentType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      })
+      if (up.error) throw up.error
+      const db=await supabase.from('auditoria_templates').update({
+        storage_path:path,
+        arquivo_nome:file.name,
+        rq_version:def.version,
+        ativo:true,
+        atualizado_em:new Date().toISOString()
+      }).eq('rq_code',def.code)
+      if (db.error) throw db.error
+      await loadTemplates()
+      setNotice(def.displayCode+': modelo oficial atualizado com sucesso.')
+    } catch (e:any) {
+      setNotice(e?.message || 'Não foi possível enviar o modelo oficial.')
+    } finally {
+      setTemplateUploading(null)
+    }
+  }
 
   async function loadExecutions() {
     setLoadingPage(true)
