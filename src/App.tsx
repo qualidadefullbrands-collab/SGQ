@@ -1194,9 +1194,12 @@ export default function App() {
     if (pendingPhotos.some((p)=>!p.legenda.trim())) {
       return setError('Todas as fotos precisam de legenda antes de enviar.')
     }
+    const validProductIds=new Set((detail?.items ?? []).map((x:any)=>x.processo_itens?.produto_id).filter(Boolean))
+    const productPhotosUpdated:string[]=[]
     for (const p of pendingPhotos) {
       const safe = p.file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-      const path = `${selectedInspectionId}/gerais/${Date.now()}-${safe}`
+      const stamp=Date.now()
+      const path = `${selectedInspectionId}/gerais/${stamp}-${safe}`
       const up = await supabase.storage.from('inspecao-fotos').upload(path,p.file,{contentType:p.file.type||undefined})
       if (up.error) return setError(up.error.message)
       const row = await supabase.from('inspecao_fotos').insert({
@@ -1205,9 +1208,26 @@ export default function App() {
         legenda:p.legenda.trim(),
       })
       if (row.error) return setError(row.error.message)
+
+      if (p.productId && validProductIds.has(p.productId)) {
+        const productPath=`${p.productId}/${stamp}-${safe}`
+        const productUpload=await supabase.storage.from('produto-fotos').upload(productPath,p.file,{contentType:p.file.type||undefined})
+        if (productUpload.error) return setError('A foto da inspeção foi salva, mas não foi possível defini-la como identificação do produto: '+productUpload.error.message)
+        const productUpdate=await supabase.from('produtos').update({
+          foto_principal_path:productPath,
+          atualizado_em:new Date().toISOString(),
+        }).eq('id',p.productId)
+        if (productUpdate.error) return setError(productUpdate.error.message)
+        productPhotosUpdated.push(p.productId)
+      }
     }
     pendingPhotos.forEach((p)=>URL.revokeObjectURL(p.url))
     setPendingPhotos([])
+    if (productPhotosUpdated.length) {
+      setMessage('Fotos enviadas. A imagem selecionada também foi definida como identificação principal do produto.')
+    } else {
+      setMessage('Fotos da inspeção enviadas.')
+    }
     await openInspection(selectedInspectionId)
   }
 
