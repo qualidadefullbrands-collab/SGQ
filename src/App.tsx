@@ -435,28 +435,19 @@ export default function App() {
     })
 
     void (async()=>{
-      if (selectedSample.foto_cadastro_path) {
-        const signed=await supabase.storage.from('amostra-cadastro').createSignedUrl(selectedSample.foto_cadastro_path,3600)
-        if (active) setSelectedSamplePhotoUrl(signed.data?.signedUrl ?? '')
-      } else if (active) setSelectedSamplePhotoUrl('')
-
-      if (selectedSample.produto_foto_principal_path) {
-        const signed=await supabase.storage.from('produto-fotos').createSignedUrl(selectedSample.produto_foto_principal_path,3600)
-        if (active) setSelectedSampleProductPhotoUrl(signed.data?.signedUrl ?? '')
-      } else if (active) setSelectedSampleProductPhotoUrl('')
-
-      if (selectedSample.laudo_id) {
-        const report=await supabase.from('laudos').select('numero,storage_path').eq('id',selectedSample.laudo_id).maybeSingle()
-        if (!active) return
-        if (report.data) {
-          let url:string|null=null
-          if (report.data.storage_path) {
-            const signed=await supabase.storage.from('laudos').createSignedUrl(report.data.storage_path,3600)
-            url=signed.data?.signedUrl ?? null
-          }
-          if (active) setSelectedSampleReport({numero:report.data.numero,url})
-        } else setSelectedSampleReport(null)
-      } else if (active) setSelectedSampleReport(null)
+      const loaded=await apiGet<any>(`/api/amostras/${selectedSample.id}/detalhe`)
+      if (!active) return
+      if (loaded.error || !loaded.data) {
+        setSelectedSamplePhotoUrl('')
+        setSelectedSampleProductPhotoUrl('')
+        setSelectedSampleReport(null)
+        return
+      }
+      setSelectedSamplePhotoUrl(String(loaded.data.fotoCadastroUrl ?? ''))
+      setSelectedSampleProductPhotoUrl(String(loaded.data.produtoFotoPrincipalUrl ?? ''))
+      setSelectedSampleReport(loaded.data.laudo?.numero
+        ? {numero:String(loaded.data.laudo.numero),url:loaded.data.laudo.url ?? null}
+        : null)
     })()
 
     return ()=>{active=false}
