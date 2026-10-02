@@ -84,6 +84,8 @@ type Sample = {
   laudo_numero?: string | null
   laudo_storage_path?: string | null
   foto_cadastro_path?: string | null
+  produto_foto_principal_path?: string | null
+  data_inspecao_referencia?: string | null
 }
 
 const emptySku = () => ({
@@ -96,7 +98,11 @@ const emptySku = () => ({
   quantidadePorCaixa: '',
   caixasRecebidas: '',
   caixasInspecionadas: '',
+  distribuicaoCaixas: '',
   unidadesPorConjunto: '1',
+  fotoFile: null as File | null,
+  fotoPreview: '',
+  fotoPrincipalPath: '',
   omieStatus: '' as '' | 'loading' | 'found' | 'not_found' | 'not_configured' | 'error',
   omieMessage: '',
 })
@@ -123,7 +129,85 @@ function toggleTransport(current: string, mode: 'Aéreo' | 'Marítimo') {
 
 function boxesToInspect(totalBoxes: number) {
   if (totalBoxes <= 0) return 0
+  if (totalBoxes === 1) return 1
+  if (totalBoxes === 2) return 2
+  if (totalBoxes <= 6) return 3
+  if (totalBoxes <= 12) return 4
+  if (totalBoxes <= 20) return 5
+  if (totalBoxes <= 30) return 6
+  if (totalBoxes <= 42) return 7
+  if (totalBoxes <= 56) return 8
   return Math.min(totalBoxes, Math.ceil(Math.sqrt(totalBoxes + 1)))
+}
+
+function parseBoxDistribution(raw:string) {
+  const text=raw.trim().replace(/×/g,'x')
+  if (!text) return { valid:true, groups:[] as Array<{caixas:number;unidades:number}>, boxes:0, units:0, error:'' }
+  const parts=text.split(/[+;,]/).map((x)=>x.trim()).filter(Boolean)
+  const groups:Array<{caixas:number;unidades:number}>=[]
+  for (const part of parts) {
+    const match=part.match(/^(\d+)\s*x\s*(\d+(?:[.,]\d+)?)$/i)
+    if (!match) return { valid:false, groups:[], boxes:0, units:0, error:`Trecho inválido: "${part}". Use, por exemplo, 44x136 + 1x49 + 1x60.` }
+    const caixas=Number(match[1])
+    const unidades=Number(match[2].replace(',','.'))
+    if (caixas<=0 || unidades<=0) return { valid:false, groups:[], boxes:0, units:0, error:'Quantidade de caixas e unidades deve ser maior que zero.' }
+    groups.push({caixas,unidades})
+  }
+  return {
+    valid:true,
+    groups,
+    boxes:groups.reduce((s,g)=>s+g.caixas,0),
+    units:groups.reduce((s,g)=>s+(g.caixas*g.unidades),0),
+    error:'',
+  }
+}
+
+function zplText(value:string|null|undefined,max=54) {
+  return String(value ?? '').replace(/[\^~\r\n]/g,' ').replace(/\s+/g,' ').trim().slice(0,max)
+}
+
+async function imageUrlToGfa(url:string,maxWidth=190,maxHeight=145) {
+  if (!url) return ''
+  try {
+    const img=new Image()
+    img.crossOrigin='anonymous'
+    await new Promise<void>((resolve,reject)=>{
+      img.onload=()=>resolve()
+      img.onerror=()=>reject(new Error('Falha ao carregar imagem'))
+      img.src=url
+    })
+    const scale=Math.min(maxWidth/img.naturalWidth,maxHeight/img.naturalHeight,1)
+    const width=Math.max(1,Math.floor(img.naturalWidth*scale))
+    const height=Math.max(1,Math.floor(img.naturalHeight*scale))
+    const canvas=document.createElement('canvas')
+    canvas.width=width
+    canvas.height=height
+    const ctx=canvas.getContext('2d')
+    if (!ctx) return ''
+    ctx.fillStyle='#fff'
+    ctx.fillRect(0,0,width,height)
+    ctx.drawImage(img,0,0,width,height)
+    const px=ctx.getImageData(0,0,width,height).data
+    const bytesPerRow=Math.ceil(width/8)
+    let hex=''
+    for (let y=0;y<height;y++) {
+      for (let b=0;b<bytesPerRow;b++) {
+        let value=0
+        for (let bit=0;bit<8;bit++) {
+          const x=b*8+bit
+          if (x>=width) continue
+          const idx=(y*width+x)*4
+          const gray=(px[idx]*0.299)+(px[idx+1]*0.587)+(px[idx+2]*0.114)
+          if (gray<165 && px[idx+3]>40) value|=(1<<(7-bit))
+        }
+        hex+=value.toString(16).padStart(2,'0').toUpperCase()
+      }
+    }
+    const total=bytesPerRow*height
+    return `^GFA,${total},${total},${bytesPerRow},${hex}`
+  } catch {
+    return ''
+  }
 }
 
 const LOT_CODES = [
@@ -200,6 +284,7 @@ export default function App() {
   const [selectedSample, setSelectedSample] = useState<Sample | null>(null)
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [selectedSamplePhotoUrl, setSelectedSamplePhotoUrl] = useState('')
+  const [selectedSampleProductPhotoUrl, setSelectedSampleProductPhotoUrl] = useState('')
   const [selectedSampleReport, setSelectedSampleReport] = useState<{numero:string;url:string|null}|null>(null)
 
   const [inspection, setInspection] = useState({
@@ -334,6 +419,7 @@ export default function App() {
     if (!selectedSample) {
       setQrDataUrl('')
       setSelectedSamplePhotoUrl('')
+      setSelectedSampleProductPhotoUrl('')
       setSelectedSampleReport(null)
       return
     }
@@ -347,6 +433,11 @@ export default function App() {
         const signed=await supabase.storage.from('amostra-cadastro').createSignedUrl(selectedSample.foto_cadastro_path,3600)
         if (active) setSelectedSamplePhotoUrl(signed.data?.signedUrl ?? '')
       } else if (active) setSelectedSamplePhotoUrl('')
+
+      if (selectedSample.produto_foto_principal_path) {
+        const signed=await supabase.storage.from('produto-fotos').createSignedUrl(selectedSample.produto_foto_principal_path,3600)
+        if (active) setSelectedSampleProductPhotoUrl(signed.data?.signedUrl ?? '')
+      } else if (active) setSelectedSampleProductPhotoUrl('')
 
       if (selectedSample.laudo_id) {
         const report=await supabase.from('laudos').select('numero,storage_path').eq('id',selectedSample.laudo_id).maybeSingle()
@@ -374,7 +465,7 @@ export default function App() {
       supabase.from('inspecoes').select('id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))').is('excluido_em', null).order('criado_em', { ascending: false }),
       supabase.from('it_versoes').select('id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)').order('criado_em', { ascending: false }),
       supabase.from('grupos_inspecao').select('id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)').order('criado_em', { ascending: false }),
-      supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id,sku,processo_referencia,data_chegada_referencia,nota_fiscal_referencia,cliente_referencia,observacao,origem_importacao,linha_origem,laudo_id,laudo_numero,laudo_storage_path,foto_cadastro_path').order('codigo', { ascending: false }),
+      supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id,sku,processo_referencia,data_chegada_referencia,nota_fiscal_referencia,cliente_referencia,observacao,origem_importacao,linha_origem,laudo_id,laudo_numero,laudo_storage_path,foto_cadastro_path,produto_foto_principal_path,data_inspecao_referencia').order('codigo', { ascending: false }),
       supabase.from('laudos').select('*', { count: 'exact', head: true }),
     ])
     if (!p.data) {
