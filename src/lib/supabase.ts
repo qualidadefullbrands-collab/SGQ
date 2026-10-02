@@ -198,4 +198,12 @@ export const supabase = {
   },
 }
 
+export async function apiPost<T=any>(path:string, body:any):Promise<{data:T|null;error:any;count?:number|null}> {
+  return apiRequest(path,{method:'POST',body:JSON.stringify(body)}) as any
+}
+
+export async function apiGet<T=any>(path:string):Promise<{data:T|null;error:any;count?:number|null}> {
+  return apiRequest(path,{method:'GET'}) as any
+}
+
 export { apiUrl }
