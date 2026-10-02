@@ -18,7 +18,7 @@ Sgq.Api - ASP.NET Core / .NET 10
     +--> integrações externas (OMIE / IA)
 ```
 
-O frontend usa Supabase diretamente apenas para **Auth/sessão**. Consultas de dados, gravações, Storage e Edge Functions passam pela API .NET.
+O frontend usa Supabase diretamente apenas para **Auth/sessão**. Dados e regras operacionais usam endpoints explícitos da API .NET. Uploads de arquivos também passam pela API antes de chegar ao Supabase Storage. Não existe mais gateway genérico de tabelas ou de Edge Functions exposto ao frontend.
 
 ### Serviços Render
 
@@ -34,7 +34,8 @@ O frontend usa Supabase diretamente apenas para **Auth/sessão**. Consultas de d
 - navegação;
 - captura de dados e arquivos;
 - estados transitórios da tela;
-- autenticação via Supabase Auth.
+- autenticação via Supabase Auth;
+- nenhuma regra crítica de persistência ou decisão de inspeção.
 
 ### ASP.NET Core
 
@@ -48,7 +49,9 @@ O frontend usa Supabase diretamente apenas para **Auth/sessão**. Consultas de d
 - gestão de ITs;
 - fotos/metadados;
 - geração e armazenamento de laudos;
-- agregação das consultas usadas pelo frontend.
+- agregação das consultas usadas pelo frontend;
+- endpoints de domínio para Full e Contlog;
+- orquestração de IA, OMIE, documentos e integrações.
 
 ### Supabase
 
