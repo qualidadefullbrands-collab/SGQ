@@ -1982,6 +1982,48 @@ app.MapPost("/api/inspecoes/{id}/retencao", async (string id,RetentionRequest in
     catch(Exception e){return Results.Json(Error("Falha ao registrar retenção.",e.Message),statusCode:500);}
 });
 
+app.MapGet("/api/amostras/{id}/detalhe", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var rows=await RestAsync(client,token,HttpMethod.Get,"vw_saldo_amostras",
+            $"select=id,foto_cadastro_path,produto_foto_principal_path,laudo_id,laudo_numero,laudo_storage_path&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (sample,found)=FirstRow(rows);
+        if(!found) return Results.Json(Error("Amostra não encontrada."),statusCode:404);
+
+        async Task<string?> Sign(string bucket,string? path)
+        {
+            if(string.IsNullOrWhiteSpace(path)) return null;
+            var msg=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/storage/v1/object/sign/{Uri.EscapeDataString(bucket)}/{EncodedPath(path)}");
+            ApplyAuth(msg,token);
+            msg.Content=JsonContent.Create(new {expiresIn=3600});
+            var res=await client.SendAsync(msg);
+            if(!res.IsSuccessStatusCode) return null;
+            var raw=await res.Content.ReadAsStringAsync();
+            using var doc=JsonDocument.Parse(raw);
+            var root=doc.RootElement;
+            var url=root.TryGetProperty("signedURL",out var s1)?s1.GetString():
+                root.TryGetProperty("signedUrl",out var s2)?s2.GetString():null;
+            if(!string.IsNullOrWhiteSpace(url)&&url.StartsWith("/")) url=supabaseUrl+"/storage/v1"+url;
+            return url;
+        }
+
+        string? Value(string name)=>sample!.Value.TryGetProperty(name,out var v)&&v.ValueKind==JsonValueKind.String?v.GetString():null;
+        var cadastro=await Sign("amostra-cadastro",Value("foto_cadastro_path"));
+        var principal=await Sign("produto-fotos",Value("produto_foto_principal_path"));
+        var report=await Sign("laudos",Value("laudo_storage_path"));
+        return Results.Ok(new {data=new {
+            fotoCadastroUrl=cadastro,
+            produtoFotoPrincipalUrl=principal,
+            laudo=string.IsNullOrWhiteSpace(Value("laudo_id"))?null:new {numero=Value("laudo_numero"),url=report}
+        },error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar amostra.",e.Message),statusCode:500);}
+});
+
 app.MapPost("/api/amostras/criar", async (CreateSampleRequest input,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
