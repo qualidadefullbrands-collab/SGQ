@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, MessageCircle, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, X } from 'lucide-react'
 import QRCode from 'qrcode'
-import { apiPost, apiPut, supabase } from './lib/supabase'
+import { apiGet, apiPost, apiPut, supabase } from './lib/supabase'
 import AuditoriasPage from './auditorias/AuditoriasPage'
 import InspectionChat from './full-inspection/InspectionChat'
 
@@ -465,30 +465,27 @@ export default function App() {
 
   async function loadApp() {
     setError('')
-    const [p, proc, ins, its, gs, ss, laudos] = await Promise.all([
-      supabase.from('profiles').select('nome,perfil').eq('id', userId).single(),
-      supabase.from('processos').select('id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em').is('excluido_em', null).order('criado_em', { ascending: false }),
-      supabase.from('inspecoes').select('id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))').is('excluido_em', null).order('criado_em', { ascending: false }),
-      supabase.from('it_versoes').select('id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)').order('criado_em', { ascending: false }),
-      supabase.from('grupos_inspecao').select('id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)').order('criado_em', { ascending: false }),
-      supabase.from('vw_saldo_amostras').select('id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id,sku,processo_referencia,data_chegada_referencia,nota_fiscal_referencia,cliente_referencia,observacao,origem_importacao,linha_origem,laudo_id,laudo_numero,laudo_storage_path,foto_cadastro_path,produto_foto_principal_path,data_inspecao_referencia').order('codigo', { ascending: false }),
-      supabase.from('laudos').select('*', { count: 'exact', head: true }),
-    ])
-    if (!p.data) {
+    const loaded=await apiGet<any>('/api/app/bootstrap')
+    if (loaded.error || !loaded.data) {
+      setError(loaded.error?.message || 'Falha ao carregar o SGQ.')
+      return
+    }
+    const data=loaded.data
+    if (!data.profile) {
       setError('Seu usuário ainda não possui perfil liberado no SGQ.')
       return
     }
-    setProfile(p.data as Profile)
-    setProcesses((proc.data ?? []) as ProcessRow[])
-    setInspections((ins.data ?? []) as unknown as InspectionRow[])
-    setItVersions((its.data ?? []) as unknown as ItVersion[])
-    setGroups((gs.data ?? []) as unknown as Group[])
-    setSamples((ss.data ?? []).map((s: any) => ({ ...s, saldo: Number(s.saldo ?? 0) })))
-    setCounts({
-      processos: (proc.data ?? []).length,
-      inspecoes: (ins.data ?? []).length,
-      amostras: (ss.data ?? []).length,
-      laudos: laudos.count ?? 0,
+    setProfile(data.profile as Profile)
+    setProcesses((data.processes ?? []) as ProcessRow[])
+    setInspections((data.inspections ?? []) as InspectionRow[])
+    setItVersions((data.itVersions ?? []) as ItVersion[])
+    setGroups((data.groups ?? []) as Group[])
+    setSamples((data.samples ?? []).map((s:any)=>({...s,saldo:Number(s.saldo ?? 0)})))
+    setCounts(data.counts ?? {
+      processos:(data.processes ?? []).length,
+      inspecoes:(data.inspections ?? []).length,
+      amostras:(data.samples ?? []).length,
+      laudos:0,
     })
   }
 
@@ -636,60 +633,41 @@ export default function App() {
   async function openInspection(id: string) {
     setError('')
     setSelectedInspectionId(id)
-    const ins = await supabase.from('inspecoes')
-      .select('*,grupos_inspecao(*,processos(*)),it_versoes(*,instrucoes_trabalho(*))')
-      .eq('id', id).single()
-    if (ins.error || !ins.data) return setError(ins.error?.message ?? 'Inspeção não encontrada.')
-    const groupId = ins.data.grupo_inspecao_id
-    const itId = ins.data.it_versao_id
-    const [items, checklist, checkResults, params, dimResults, dimConfigs, tests, testResults, photos, registers, ncs, retained] = await Promise.all([
-      supabase.from('grupo_inspecao_itens').select('id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,material,capacidade,quantidade_por_caixa,caixas_recebidas,caixas_inspecionadas,distribuicao_caixas,produtos(id,sku,nome,foto_principal_path))').eq('grupo_inspecao_id', groupId),
-      supabase.from('it_checklist').select('*').eq('it_versao_id', itId).eq('ativo', true).order('ordem'),
-      supabase.from('inspecao_checklist_resultados').select('*').eq('inspecao_id', id),
-      supabase.from('it_parametros_dimensionais').select('*').eq('it_versao_id', itId).eq('ativo', true).order('ordem'),
-      supabase.from('inspecao_dimensionais').select('*').eq('inspecao_id', id),
-      supabase.from('inspecao_dimensional_configuracoes').select('*').eq('inspecao_id', id),
-      supabase.from('it_testes_especiais').select('*').eq('it_versao_id', itId).eq('ativo', true).order('ordem'),
-      supabase.from('inspecao_testes_resultados').select('*').eq('inspecao_id', id),
-      supabase.from('inspecao_fotos').select('*').eq('inspecao_id', id).order('criado_em'),
-      supabase.from('inspecao_registros').select('*').eq('inspecao_id', id).order('sequencia'),
-      supabase.from('inspecao_nao_conformidades').select('*').eq('inspecao_id', id).order('criado_em'),
-      supabase.from('amostras').select('*').eq('inspecao_id', id),
-    ])
-    let photosWithUrls:any[] = photos.data ?? []
-    if (photosWithUrls.length) {
-      const signed = await supabase.storage.from('inspecao-fotos').createSignedUrls(
-        photosWithUrls.map((p:any)=>p.storage_path), 3600
-      )
-      photosWithUrls = photosWithUrls.map((p:any,i:number)=>({
-        ...p,
-        signed_url: signed.data?.[i]?.signedUrl ?? null,
-      }))
+    const loaded=await apiGet<any>(`/api/inspecoes/${id}/detalhe`)
+    if (loaded.error || !loaded.data?.inspecao) {
+      return setError(loaded.error?.message ?? 'Inspeção não encontrada.')
     }
 
-    const next = {
-      ...ins.data,
-      items: items.data ?? [],
-      checklist: checklist.data ?? [],
-      checklistResults: checkResults.data ?? [],
-      params: params.data ?? [],
-      dimResults: dimResults.data ?? [],
-      dimConfigs: dimConfigs.data ?? [],
-      tests: tests.data ?? [],
-      testResults: testResults.data ?? [],
-      photos: photosWithUrls,
-      registers: registers.data ?? [],
-      ncs: ncs.data ?? [],
-      retained: retained.data ?? [],
+    const data=loaded.data
+    const photoUrls=data.photoUrls ?? {}
+    const photosWithUrls=(data.photos ?? []).map((p:any)=>({
+      ...p,
+      signed_url:photoUrls[p.storage_path] ?? null,
+    }))
+    const next={
+      ...data.inspecao,
+      items:data.items ?? [],
+      checklist:data.checklist ?? [],
+      checklistResults:data.checklistResults ?? [],
+      params:data.params ?? [],
+      dimResults:data.dimResults ?? [],
+      dimConfigs:data.dimConfigs ?? [],
+      tests:data.tests ?? [],
+      testResults:data.testResults ?? [],
+      photos:photosWithUrls,
+      registers:data.registers ?? [],
+      ncs:data.ncs ?? [],
+      retained:data.retained ?? [],
     }
+
     setDetail(next)
-    setFinalObservation(ins.data.observacoes ?? '')
-    setInternalObservation(ins.data.observacao_interna ?? '')
-    const retention: Record<string,{retain:boolean;qty:string;address:string;photoFile:File|null;photoPreview:string}> = {}
+    setFinalObservation(next.observacoes ?? '')
+    setInternalObservation(next.observacao_interna ?? '')
+    const retention:Record<string,{retain:boolean;qty:string;address:string;photoFile:File|null;photoPreview:string}>={}
     for (const link of next.items as any[]) {
-      const item = link.processo_itens
-      const existing = (next.retained as any[]).find((x) => x.produto_id === item?.produto_id)
-      retention[item.id] = { retain: !existing, qty: '', address: '', photoFile: null, photoPreview: '' }
+      const item=link.processo_itens
+      const existing=(next.retained as any[]).find((x:any)=>x.produto_id===item?.produto_id)
+      retention[item.id]={retain:!existing,qty:'',address:'',photoFile:null,photoPreview:''}
     }
     setRetentionRows(retention)
     setTab('execucao')
