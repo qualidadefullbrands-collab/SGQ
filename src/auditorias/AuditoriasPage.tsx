@@ -779,7 +779,11 @@ export default function AuditoriasPage({profileName}:Props) {
         </div>
       ) : (
         <div className="audit-completed">
-          <CheckCircle2 size={22}/><div><strong>Inspeção concluída</strong><span>Word oficial: etapa de geração em preparação · Power Automate: aguardando integração HTTP.</span></div>
+          <CheckCircle2 size={22}/>
+          <div><strong>Inspeção concluída</strong><span>{active.documento_gerado_em?'Word oficial gerado e arquivado no SGQ.':'O Word oficial ainda precisa ser gerado.'}</span></div>
+          <button onClick={()=>downloadExisting()} disabled={documentLoading}>
+            {documentLoading?<Loader2 className="spin" size={17}/>:<Download size={17}/>} {active.documento_gerado_em?'Baixar Word':'Gerar Word'}
+          </button>
         </div>
       )}
 
