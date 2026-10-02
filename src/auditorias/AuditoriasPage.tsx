@@ -239,9 +239,11 @@ export default function AuditoriasPage({profileName}:Props) {
       const execution=data as AuditExecution
       const intro=def.code==='RQ016B'
         ? 'Pré-avaliação iniciada. Selecione a área e informe o local atual. Registre o que encontrar por mensagem. Neste RQ não é necessário anexar fotos.'
-        : def.fixedChecklist
-          ? 'Avaliação iniciada. Vá registrando o que observar por texto, voz ou foto. Eu organizo os achados e acompanho os 30 itens do modelo.'
-          : 'Inspeção iniciada. Informe o local/endereço atual e registre cada achado por texto, voz ou foto. Eu organizo as evidências no modelo do RQ.'
+        : def.code==='RQ014'
+          ? 'Inspeção iniciada. Informe o equipamento e o local, por exemplo “EXT-021, corredor 3”. Depois descreva normalmente o que encontrou ou diga que está tudo certo.'
+          : def.fixedChecklist
+            ? 'Avaliação iniciada. Vá registrando o que observar por texto, voz ou foto. Eu organizo os achados e acompanho os 30 itens do modelo.'
+            : 'Inspeção iniciada. Informe o local/endereço atual e registre cada achado por texto, voz ou foto. Eu organizo as evidências no modelo do RQ.'
       await supabase.from('auditoria_mensagens').insert({execucao_id:execution.id,autor:'assistente',texto:intro})
       await openAudit(execution.id)
       await loadExecutions()
@@ -256,11 +258,12 @@ export default function AuditoriasPage({profileName}:Props) {
     setLoading(true)
     setNotice('')
     try {
-      const [ex,msg,res,ach]=await Promise.all([
+      const [ex,msg,res,ach,obj]=await Promise.all([
         supabase.from('auditoria_execucoes').select('*').eq('id',id).single(),
         supabase.from('auditoria_mensagens').select('*').eq('execucao_id',id).order('criado_em'),
         supabase.from('auditoria_respostas').select('*').eq('execucao_id',id).order('criado_em'),
         supabase.from('auditoria_achados').select('*').eq('execucao_id',id).order('criado_em'),
+        supabase.from('auditoria_objetos').select('*').eq('execucao_id',id).order('criado_em'),
       ])
       if (ex.error) throw ex.error
       const messageRows=(msg.data ?? []) as AuditMessage[]
@@ -273,6 +276,7 @@ export default function AuditoriasPage({profileName}:Props) {
       setMessages(withUrls)
       setAnswers((res.data ?? []) as AuditAnswer[])
       setFindings((ach.data ?? []) as AuditFinding[])
+      setObjects((obj.data ?? []) as AuditObject[])
       setCurrentLocation('')
       setRq016bArea('Ruas')
       setShowChecklist(false)
@@ -295,6 +299,7 @@ export default function AuditoriasPage({profileName}:Props) {
         ...(active.resumo || {}),
         respostas:nextAnswers.length,
         achados:findings.length,
+        objetos:objects.length,
         ultima_localizacao:currentLocation || null,
       }
     }).eq('id',active.id).select('*').single()
@@ -376,19 +381,20 @@ export default function AuditoriasPage({profileName}:Props) {
             currentLocation,
             area:definition.code==='RQ016B'?rq016bArea:null,
             answers:answers.map((a)=>({key:a.item_key,local:a.local_ref,result:a.resultado})),
-            findings:findings.map((f)=>({criteria:f.criterios,location:f.local_ref,address:f.endereco,description:f.descricao_tecnica}))
+            findings:findings.map((f)=>({criteria:f.criterios,location:f.local_ref,address:f.endereco,description:f.descricao_tecnica})),
+            objects:objects.map((o)=>({type:o.objeto_tipo,key:o.chave,identification:o.identificacao,location:o.local_ref,status:o.status}))
           }
         }
       })
 
       const interpreted=aiError ? {
         reply:'Registro salvo. A análise assistida não respondeu agora; você pode revisar pelo checklist.',
-        matches:[],finding:null,finishRequested:false,degraded:true
+        matches:[],finding:null,subject:null,finishRequested:false,degraded:true
       } : ai
 
       let nextAnswers=[...answers]
       for (const match of interpreted?.matches ?? []) {
-        const local=String(match.location || (definition.code==='RQ016B'?currentLocation:'') || '')
+        const local=String(match.location || ((definition.code==='RQ016B'||definition.code==='RQ015')?currentLocation:'') || '')
         const up=await supabase.from('auditoria_respostas').upsert({
           execucao_id:active.id,
           item_key:String(match.key),
@@ -406,6 +412,30 @@ export default function AuditoriasPage({profileName}:Props) {
       }
       setAnswers(nextAnswers)
 
+      if (interpreted?.subject?.type && definition.code==='RQ014') {
+        const s=interpreted.subject
+        const objectKey=String(s.key || s.identification || s.location || currentLocation || '').trim()
+        if (objectKey) {
+          const up=await supabase.from('auditoria_objetos').upsert({
+            execucao_id:active.id,
+            objeto_tipo:s.type,
+            chave:objectKey,
+            identificacao:s.identification || null,
+            local_ref:s.location || currentLocation || null,
+            dados:s.data || {},
+            criterios_nc:s.criteria_nc || [],
+            status:s.status || null,
+            observacao:text,
+            origem_mensagem_id:auditorMessage.id,
+            atualizado_em:new Date().toISOString(),
+          },{onConflict:'execucao_id,objeto_tipo,chave'}).select('*').single()
+          if (up.data) {
+            const row=up.data as AuditObject
+            setObjects((prev)=>[...prev.filter((o)=>!(o.objeto_tipo===row.objeto_tipo && o.chave===row.chave)),row])
+          }
+        }
+      }
+
       if (interpreted?.finding?.description || interpreted?.finding?.criteria?.length) {
         const f=interpreted.finding
         const ins=await supabase.from('auditoria_achados').insert({
@@ -420,7 +450,7 @@ export default function AuditoriasPage({profileName}:Props) {
           status:'pendente',
           foto_path:photoPath,
           origem_mensagem_id:auditorMessage.id,
-          metadata:{ia:true}
+          metadata:{ia:true,risco_sugerido_pela_ia:Boolean(f.riskSuggestion)}
         }).select('*').single()
         if (ins.data) setFindings((x)=>[...x,ins.data as AuditFinding])
       }
@@ -432,6 +462,7 @@ export default function AuditoriasPage({profileName}:Props) {
         metadata:{
           matches:interpreted?.matches ?? [],
           finding:interpreted?.finding ?? null,
+          subject:interpreted?.subject ?? null,
           clarification:interpreted?.clarification ?? null,
           degraded:Boolean(interpreted?.degraded)
         }
