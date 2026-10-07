@@ -759,6 +759,43 @@ export default function App() {
     setTab('execucao')
   }
 
+  function startEditingInspectionData() {
+    if (!detail) return
+    const process=detail.grupos_inspecao?.processos ?? {}
+    const rows=(detail.items ?? []).map((link:any)=>{
+      const item=link.processo_itens
+      const base={...emptySku(),processoItemId:item.id,sku:item.produtos?.sku ?? '',nome:item.produtos?.nome ?? '',lote:item.lote ?? '',material:item.material ?? '',capacidade:item.capacidade ?? '',quantidade:String(item.quantidade ?? ''),quantidadePorCaixa:String(item.quantidade_por_caixa ?? ''),caixasRecebidas:String(item.caixas_recebidas ?? ''),caixasInspecionadas:String(item.caixas_inspecionadas ?? ''),unidadesPorConjunto:String(link.unidades_por_conjunto ?? 1)}
+      return applyBoxGroupsToSku(base,item.distribuicao_caixas)
+    })
+    setEditingInspectionData({
+      codigo:fstDigits(process.codigo),cliente:process.cliente ?? '',notaFiscal:process.nota_fiscal ?? '',origem:process.origem ?? '',transporte:process.transporte ?? '',
+      chegadaCd:process.chegada_cd ?? '',dataInspecao:String(detail.data_inspecao ?? '').slice(0,10),inspectionLevel:detail.nivel_inspecao ?? 'I',
+      observacaoInterna:detail.observacao_interna ?? '',itens:rows,
+    })
+  }
+
+  async function saveEditingInspectionData() {
+    if (!editingInspectionData || !selectedInspectionId) return
+    const itens=(editingInspectionData.itens ?? []).map((row:any)=>({
+      processoItemId:row.processoItemId,sku:String(row.sku ?? '').trim(),nome:String(row.nome ?? '').trim(),lote:String(row.lote ?? '').trim() || null,
+      material:String(row.material ?? '').trim() || null,capacidade:String(row.capacidade ?? '').trim() || null,quantidade:Number(row.quantidade)||0,
+      quantidadePorCaixa:Number(row.quantidadePorCaixa)||null,caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
+      unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,distribuicaoCaixas:boxGroupsFromRow(row),
+    }))
+    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/dados`,{
+      codigo:String(editingInspectionData.codigo ?? '').trim(),cliente:String(editingInspectionData.cliente ?? '').trim() || null,
+      notaFiscal:String(editingInspectionData.notaFiscal ?? '').trim() || null,origem:String(editingInspectionData.origem ?? '').trim() || null,
+      transporte:String(editingInspectionData.transporte ?? '').trim() || null,chegadaCd:editingInspectionData.chegadaCd || null,
+      dataInspecao:editingInspectionData.dataInspecao || null,inspectionLevel:editingInspectionData.inspectionLevel || 'I',
+      observacaoInterna:String(editingInspectionData.observacaoInterna ?? '').trim() || null,itens,
+    })
+    if (saved.error) return setError(saved.error.message)
+    setEditingInspectionData(null)
+    const p=saved.data?.plano
+    setMessage(`Dados atualizados. Plano recalculado: ${p?.codigo ?? '—'} · ${p?.amostra ?? 0} un. · Ac/Re ${p?.ac ?? '—'}/${p?.re ?? '—'}.`)
+    await loadApp()
+    await openInspection(selectedInspectionId)
+  }
   async function createInspection(e: React.FormEvent) {
     e.preventDefault()
     if (!canWrite || !userId) return
@@ -1220,16 +1257,20 @@ export default function App() {
     const result=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/conclusao-assistida`,{payload})
     setAiLoading(false)
     const data=result.data
-    if (result.error) {
-      const msg=String(result.error?.details ?? result.error?.message ?? '')
-      if (msg.includes('ai_not_configured')) return setError('A geração por IA está pronta, mas a chave GEMINI_API_KEY ainda não foi configurada neste SGQ.')
-      return setError('Não foi possível gerar a conclusão com IA.')
+    if (result.error || data?.error || !data?.text) {
+      const nc=Number(detail.total_nao_conforme ?? 0)
+      const inspected=Number(detail.total_inspecionado ?? 0)
+      const sample=Number(detail.tamanho_amostra ?? 0)
+      const re=detail.limite_rejeicao==null?null:Number(detail.limite_rejeicao)
+      const decision=re!=null && nc>=re ? 'O limite de rejeição foi atingido.' : 'O limite de rejeição não foi atingido.'
+      const pending=(detail.checklist ?? []).filter((x:any)=>!(detail.checklistResults ?? []).some((r:any)=>r.checklist_id===x.id)).length
+      let text=`Inspeção com ${inspected}/${sample} unidade(s) registradas e ${nc} unidade(s) não conforme(s). ${decision}`
+      if (pending) text+=` Permanecem ${pending} verificação(ões) sem registro.`
+      setFinalObservation(text)
+      setMessage('Conclusão gerada em modo local porque a IA externa não respondeu.')
+      return
     }
-    if (data?.error === 'ai_not_configured') {
-      return setError('A geração por IA está pronta, mas a integração Gemini ainda não foi configurada em Configurações.')
-    }
-    if (data?.error) return setError('Não foi possível gerar a conclusão com IA.')
-    if (data?.text) setFinalObservation(String(data.text))
+    setFinalObservation(String(data.text))
   }
 
 
@@ -1255,61 +1296,27 @@ export default function App() {
 
     if (!selected.length) {
       if (!retentionReason.trim()) return setError('Informe o motivo para não reter amostra.')
-      const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/retencao`,{
-        motivoSemRetencao:retentionReason.trim(),
-        itens:[],
-      })
+      const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/retencao`,{motivoSemRetencao:retentionReason.trim(),itens:[]})
       if (saved.error) return setError(saved.error.message)
       setMessage('Inspeção encerrada sem retenção, com justificativa registrada.')
       await openInspection(selectedInspectionId)
       return
     }
 
-    const newSelected=(selected as any[]).filter((link:any)=>
-      !(detail.retained ?? []).some((x:any)=>x.produto_id===link.processo_itens.produto_id)
-    )
-    if (!newSelected.length) {
-      setMessage('As amostras selecionadas já estão registradas no estoque.')
-      return
-    }
+    const newSelected=(selected as any[]).filter((link:any)=>!(detail.retained ?? []).some((x:any)=>x.produto_id===link.processo_itens.produto_id))
+    if (!newSelected.length) return setMessage('As amostras selecionadas já estão registradas no estoque.')
 
     const itens:any[]=[]
     for (const link of newSelected) {
       const item=link.processo_itens
       const draft=retentionRows[item.id]
-      if (!draft?.qty || !draft.address.trim()) {
-        return setError(`Informe quantidade e endereço para ${item.produtos?.nome ?? 'o produto'}.`)
-      }
-      if (!draft.photoFile) {
-        return setError(`Escolha uma foto de cadastro para ${item.produtos?.nome ?? 'o produto'}.`)
-      }
-
-      const safe=draft.photoFile.name.replace(/[^a-zA-Z0-9._-]/g,'_')
-      const photoPath=`${selectedInspectionId}/${item.produto_id}/${Date.now()}-${safe}`
-      const upload=await supabase.storage.from('amostra-cadastro').upload(photoPath,draft.photoFile,{
-        contentType:draft.photoFile.type||undefined,
-      })
-      if (upload.error) return setError(upload.error.message)
-
-      itens.push({
-        processoItemId:item.id,
-        quantidade:Number(draft.qty),
-        endereco:draft.address.trim(),
-        fotoCadastroPath:photoPath,
-      })
+      if (!draft?.qty || !draft.address.trim()) return setError(`Informe quantidade e endereço para ${item.produtos?.nome ?? 'o produto'}.`)
+      itens.push({processoItemId:item.id,quantidade:Number(draft.qty),endereco:draft.address.trim(),fotoCadastroPath:null})
     }
 
-    const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/retencao`,{
-      motivoSemRetencao:null,
-      itens,
-    })
+    const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/retencao`,{motivoSemRetencao:null,itens})
     if (saved.error) return setError(saved.error.message)
-
-    newSelected.forEach((link:any)=>{
-      const draft=retentionRows[link.processo_itens.id]
-      if (draft?.photoPreview) URL.revokeObjectURL(draft.photoPreview)
-    })
-    setMessage('Amostras enviadas ao estoque com foto de cadastro e laudo vinculado.')
+    setMessage(`${saved.data?.retidos ?? itens.length} amostra(s) enviada(s) ao estoque usando a foto principal já definida na inspeção.`)
     await loadApp()
     await openInspection(selectedInspectionId)
   }
