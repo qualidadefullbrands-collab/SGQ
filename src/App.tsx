@@ -1736,7 +1736,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 </div></div>
                 <label>Data da inspeção<input type="date" value={inspection.dataInspecao} onChange={(e)=>setInspection({...inspection,dataInspecao:e.target.value})}/></label>
                 <label>IT aplicável
-                  <select value={inspection.itVersionId} onChange={(e)=>setInspection({...inspection,itVersionId:e.target.value})}>
+                  <select value={inspection.itVersionId} onChange={(e)=>{ const value=e.target.value; const selected=itVersions.find((it)=>it.id===value); setInspection({...inspection,itVersionId:value,inspectionLevel:selected?.nivel_inspecao_padrao || inspection.inspectionLevel}) }}>
                     <option value="">Selecione</option>
                     {itVersions.filter((it)=>it.status==='publicada').map((it)=>(
                       <option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo} · {it.versao}</option>
@@ -1753,6 +1753,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     <option value="S3">Especial S3</option>
                     <option value="S4">Especial S4</option>
                   </select>
+                </label>
+                <label className="span-2">Observação interna
+                  <textarea rows={3} value={inspection.observacaoInterna} onChange={(e)=>setInspection({...inspection,observacaoInterna:e.target.value})} placeholder="Ex.: 60 un retiradas no laboratório para retenção; caixa fracionada com 16 un."/>
+                  <small className="field-hint">Uso interno da Qualidade, não disponível no laudo</small>
                 </label>
               </div>
             </section>
@@ -1773,11 +1777,15 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                         {skuRows.length>1 && <button type="button" className="icon-button" onClick={()=>setSkuRows(skuRows.filter((_,j)=>j!==i))}><X size={16}/></button>}
                       </div>
                       <div className="form-grid">
-                        <label>Código
+                        <label className="product-search-field">Código / produto
                           <div className="input-action">
-                            <input value={row.sku} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,sku:e.target.value,omieStatus:'',omieMessage:''}:r))} onBlur={()=>lookupProduct(i)} placeholder="Código Omie"/>
+                            <input value={row.sku} onChange={(e)=>{ const value=e.target.value; setSkuRows(skuRows.map((r,j)=>j===i?{...r,sku:value,omieStatus:'',omieMessage:'',suggestions:[]}:r)); queueProductSuggestions(i,value) }} onBlur={()=>window.setTimeout(()=>lookupProduct(i),180)} placeholder="Digite código ou parte do nome"/>
                             <button type="button" className="secondary icon-only" title="Consultar no OMIE" onClick={()=>lookupProduct(i)}><Search size={16}/></button>
                           </div>
+                          {row.suggesting && <small className="field-status">Buscando sugestões…</small>}
+                          {!!row.suggestions?.length && <div className="product-suggestions">
+                            {row.suggestions.map((s:any,k:number)=><button type="button" key={s.sku+'-'+k} onMouseDown={(e)=>e.preventDefault()} onClick={()=>chooseProductSuggestion(i,s)}><b>{s.sku}</b><span>{s.nome}</span></button>)}
+                          </div>}
                         </label>
                         <label>Descrição
                           <input value={row.nome} readOnly placeholder="Preenchida pelo OMIE"/>
@@ -1798,10 +1806,15 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                           setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasRecebidas:received,caixasInspecionadas:calc}:r))
                         }}/></label>
                         <label>Caixas inspecionadas<input type="number" step="0.01" value={row.caixasInspecionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasInspecionadas:e.target.value}:r))}/><small className="field-hint">Sugerido pela tabela da IT; pode ser alterado.</small></label>
-                        <label className="span-2">Distribuição real das caixas (quando houver caixas fracionadas)
-                          <input value={row.distribuicaoCaixas} placeholder="Ex.: 44x136 + 1x49 + 1x60" onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,distribuicaoCaixas:e.target.value}:r))}/>
-                          {row.distribuicaoCaixas && (()=>{const d=parseBoxDistribution(row.distribuicaoCaixas); const mismatch=d.valid && (d.boxes!==Number(row.caixasRecebidas) || Math.abs(d.units-Number(row.quantidade))>0.0001); return <small className={'field-status '+(!d.valid||mismatch?'bad':'ok')}>{!d.valid?d.error:`${d.boxes} caixa(s) · ${d.units.toLocaleString('pt-BR')} unidades${mismatch?' — confira com os totais informados.':' — conferência fechada.'}`}</small>})()}
-                        </label>
+                        <div className="span-2 box-distribution-editor">
+                          <div className="field-label"><span>Distribuição das caixas</span><small>Separe caixas padrão, fracionada e retirada no laboratório.</small></div>
+                          <div className="distribution-grid">
+                            <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasPadrao} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasPadrao:e.target.value}:r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesPadrao || row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPadrao:e.target.value,quantidadePorCaixa:e.target.value}:r))}/></label></div>
+                            <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasFracionadas:e.target.value}:r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesFracionadas:e.target.value}:r))}/></label></div>
+                            <div className="distribution-line"><strong>Retirada laboratório</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasLaboratorio} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasLaboratorio:e.target.value}:r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesLaboratorio} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesLaboratorio:e.target.value}:r))}/></label></div>
+                          </div>
+                          {(()=>{const d=boxDistributionTotals(row); if(!d.groups.length) return null; const mismatch=(d.boxes!==Number(row.caixasRecebidas) || Math.abs(d.units-Number(row.quantidade))>0.0001); return <small className={'field-status '+(mismatch?'bad':'ok')}>{d.expression} = {d.units.toLocaleString('pt-BR')} un · {d.boxes} caixa(s){mismatch?' — confira com os totais informados.':' — conferência fechada.'}</small>})()}
+                        </div>
                         {isComponentSet && <label>Unidades por conjunto<input type="number" step="0.01" value={row.unidadesPorConjunto} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPorConjunto:e.target.value}:r))}/></label>}
                       </div>
                       <div className="computed">
