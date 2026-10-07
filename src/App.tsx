@@ -901,8 +901,8 @@ export default function App() {
     const current = getDimConfig(itemId,param.id) ?? {}
     const next:any = { ...current, ...patch }
     const nominal = next.valor_nominal === '' || next.valor_nominal == null ? null : Number(next.valor_nominal)
-    const minus = next.desvio_menos === '' || next.desvio_menos == null ? null : Number(next.desvio_menos)
-    const plus = next.desvio_mais === '' || next.desvio_mais == null ? null : Number(next.desvio_mais)
+    const deviationRaw=next.desvio ?? next.desvio_mais ?? next.desvio_menos
+    const deviation = deviationRaw === '' || deviationRaw == null ? null : Math.abs(Number(deviationRaw))
 
     const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/dimensionais/${itemId}/${param.id}/config`,{
       naoAplicavel:!!next.nao_aplicavel,
@@ -910,9 +910,10 @@ export default function App() {
       codigoEquipamento:next.codigo_equipamento || null,
       unidade:next.unidade || param.unidade || null,
       valorNominal:nominal,
-      desvioMenos:minus,
-      desvioMais:plus,
-      especificacaoDesvio:next.especificacao_desvio || null,
+      desvio:deviation,
+      desvioMenos:deviation,
+      desvioMais:deviation,
+      especificacaoDesvio:null,
       tipoReferencia:next.tipo_referencia || param.tipo_referencia || null,
     })
     if (saved.error || !saved.data) return setError(saved.error?.message ?? 'Falha ao salvar configuração dimensional.')
@@ -963,10 +964,22 @@ export default function App() {
   }
 
   async function saveTest(testId: string, result: string) {
-    if (!selectedInspectionId) return
+    if (!selectedInspectionId || !detail) return
+    const previous=(detail.testResults ?? []).find((x:any)=>x.teste_id===testId)
+    const optimistic={...(previous ?? {}),teste_id:testId,inspecao_id:selectedInspectionId,resultado:result}
+    setDetail((d:any)=>{
+      const others=(d.testResults ?? []).filter((x:any)=>x.teste_id!==testId)
+      return {...d,testResults:[...others,optimistic]}
+    })
     const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/testes/${testId}`,{resultado:result})
-    if (saved.error) return setError(saved.error.message)
-    await openInspection(selectedInspectionId)
+    if (saved.error) {
+      setDetail((d:any)=>{
+        const others=(d.testResults ?? []).filter((x:any)=>x.teste_id!==testId)
+        return {...d,testResults:previous?[...others,previous]:others}
+      })
+      return setError(saved.error.message)
+    }
+    if (saved.data?.finalizados) setDetail((d:any)=>d?{...d,testes_finalizados:true}:d)
   }
 
   async function markTestsDone() {
@@ -984,6 +997,7 @@ export default function App() {
       url: URL.createObjectURL(file),
       legenda: '',
       productId: '',
+      isProductId: false,
     }))
     setPendingPhotos((old)=>[...old,...next])
   }
@@ -1013,8 +1027,10 @@ export default function App() {
       if (up.error) return setError(up.error.message)
 
       let productPhotoPath:string|null=null
-      if (p.productId && validProductIds.has(p.productId)) {
-        productPhotoPath=`${p.productId}/${stamp}-${safe}`
+      const defaultProductId=(detail?.items ?? [])[0]?.processo_itens?.produto_id ?? ''
+      const productId=p.isProductId ? (p.productId || defaultProductId) : ''
+      if (productId && validProductIds.has(productId)) {
+        productPhotoPath=`${productId}/${stamp}-${safe}`
         const productUpload=await supabase.storage.from('produto-fotos').upload(productPhotoPath,p.file,{contentType:p.file.type||undefined})
         if (productUpload.error) return setError('A foto da inspeção foi salva, mas não foi possível defini-la como identificação do produto: '+productUpload.error.message)
         hasProductPhoto=true
@@ -1023,7 +1039,7 @@ export default function App() {
       registros.push({
         storagePath:path,
         legenda:p.legenda.trim(),
-        productId:p.productId || null,
+        productId:productId || null,
         productPhotoPath,
       })
     }
@@ -1121,6 +1137,7 @@ export default function App() {
         gerais:(detail.photos ?? []).filter((p:any)=>!p.nc_id).length,
         nc:(detail.photos ?? []).filter((p:any)=>!!p.nc_id).length,
       },
+      observacao_interna:detail.observacao_interna ?? internalObservation ?? '',
       conclusao_atual:finalObservation,
     }
   }
