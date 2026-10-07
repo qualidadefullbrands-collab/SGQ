@@ -713,7 +713,9 @@ app.MapGet("/api/produtos/sugerir", async (string termo,HttpRequest request,IHtt
             : new List<object>();
 
         var knownSkus=new HashSet<string>(
-            local.Select(x=>(string?)x.GetType().GetProperty("sku")?.GetValue(x)).Where(x=>!string.IsNullOrWhiteSpace(x))!,
+            local.Select(x=>(string?)x.GetType().GetProperty("sku")?.GetValue(x))
+                .Where(x=>!string.IsNullOrWhiteSpace(x))
+                .Select(x=>x!),
             StringComparer.OrdinalIgnoreCase);
         if(local.Count<5)
         {
