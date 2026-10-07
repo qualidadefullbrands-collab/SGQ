@@ -970,7 +970,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             new { grupo_inspecao_id = groupId, it_versao_id = input.ItVersionId, principal = true },
             "return=minimal");
 
-        var inspectionNumber = $"INS-{DateTime.UtcNow.Year}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()[^7..]}";
+        var inspectionNumber = $"INS-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
         var totalBoxesReceived = items.Sum(x => x.CaixasRecebidas);
         var totalBoxesInspect = items.Sum(x => x.CaixasInspecionadas);
 
@@ -1047,6 +1047,12 @@ app.MapPost("/api/inspecoes/{id}/unidades", async (string id, RegisterUnitReques
         var client=factory.CreateClient("supabase");
         var userId=await CurrentUserId(client,token);
 
+        if(!input.Conforme)
+        {
+            if(string.IsNullOrWhiteSpace(input.ChecklistId)) return Results.Json(Error("Selecione o item da IT relacionado à não conformidade."),statusCode:400);
+            if(string.IsNullOrWhiteSpace(input.Descricao)) return Results.Json(Error("Descreva a não conformidade."),statusCode:400);
+        }
+
         var existing=await RestAsync(client,token,HttpMethod.Get,"inspecao_registros",
             $"select=id,conforme&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=sequencia.asc");
         var rows=existing is { ValueKind:JsonValueKind.Array } ? existing.Value.EnumerateArray().ToList() : [];
@@ -1060,8 +1066,13 @@ app.MapPost("/api/inspecoes/{id}/unidades", async (string id, RegisterUnitReques
 
         if(!input.Conforme)
         {
-            if(string.IsNullOrWhiteSpace(input.ChecklistId)) return Results.Json(Error("Selecione o item da IT relacionado à não conformidade."),statusCode:400);
-            if(string.IsNullOrWhiteSpace(input.Descricao)) return Results.Json(Error("Descreva a não conformidade."),statusCode:400);
+            var checklistSeverity=string.IsNullOrWhiteSpace(input.Severidade)?"grave":input.Severidade;
+            var ncSeverity=checklistSeverity switch
+            {
+                "critico" => "critica",
+                "toleravel" => "leve",
+                _ => "maior"
+            };
 
             await RestAsync(client,token,HttpMethod.Post,"inspecao_nao_conformidades","",
                 new {
@@ -1069,8 +1080,8 @@ app.MapPost("/api/inspecoes/{id}/unidades", async (string id, RegisterUnitReques
                     inspecao_registro_id=regId,
                     processo_item_id=string.IsNullOrWhiteSpace(input.ItemId)?null:input.ItemId,
                     checklist_id=input.ChecklistId,
-                    descricao=input.Descricao.Trim(),
-                    severidade=string.IsNullOrWhiteSpace(input.Severidade)?"grave":input.Severidade,
+                    descricao=input.Descricao!.Trim(),
+                    severidade=ncSeverity,
                     tipo="amostragem"
                 },"return=minimal");
 
@@ -1080,7 +1091,7 @@ app.MapPost("/api/inspecoes/{id}/unidades", async (string id, RegisterUnitReques
                     inspecao_id=id,
                     checklist_id=input.ChecklistId,
                     resultado="nao_conforme",
-                    severidade_confirmada=string.IsNullOrWhiteSpace(input.Severidade)?"grave":input.Severidade,
+                    severidade_confirmada=checklistSeverity,
                     registrado_por=userId,
                     registrado_em=DateTimeOffset.UtcNow
                 },"resolution=merge-duplicates,return=minimal");
