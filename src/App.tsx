@@ -2064,26 +2064,29 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {detail.status!=='concluida' && !detail.dimensionais_finalizados && <div className="actions"><button className="secondary" onClick={markDimensionalsDone}>Concluir dimensionais</button></div>}
           </section>
 
-          <section className="panel section-card">
-            <div className="section-title"><h2>Testes especiais</h2>{detail.testes_finalizados && <span className="pill">Concluído</span>}</div>
+          <section id="sec-testes" className="panel section-card">
+            <div className="section-title"><div><h2>Testes especiais</h2><span className="section-note">Selecione C, NC ou NA. O resultado é salvo automaticamente.</span></div>{detail.testes_finalizados && <span className="pill">Concluído</span>}</div>
             {(detail.tests ?? []).map((test:any)=>{
               const r=detail.testResults?.find((x:any)=>x.teste_id===test.id)
               return (
                 <article className="test-card" key={test.id}>
                   <div><strong>{test.nome}</strong><p>{test.procedimento}</p><small>Critério: {test.criterio_aprovacao}</small></div>
-                  <div className="tri-buttons">
-                    <button className={r?.resultado==='conforme'?'selected ok':''} onClick={()=>saveTest(test.id,'conforme')}>C</button>
-                    <button className={r?.resultado==='nao_conforme'?'selected bad':''} onClick={()=>saveTest(test.id,'nao_conforme')}>NC</button>
-                    <button className={r?.resultado==='nao_aplicavel'?'selected':''} onClick={()=>saveTest(test.id,'nao_aplicavel')}>NA</button>
+                  <div className="test-actions">
+                    <div className="tri-buttons quick">
+                      <button type="button" className={r?.resultado==='conforme'?'selected ok':''} onClick={()=>saveTest(test.id,'conforme')}>C</button>
+                      <button type="button" className={r?.resultado==='nao_conforme'?'selected bad':''} onClick={()=>saveTest(test.id,'nao_conforme')}>NC</button>
+                      <button type="button" className={r?.resultado==='nao_aplicavel'?'selected':''} onClick={()=>saveTest(test.id,'nao_aplicavel')}>NA</button>
+                    </div>
+                    {r?.resultado && <span className="pill">Salvo</span>}
                   </div>
                 </article>
               )
             })}
             {!detail.tests?.length && <div className="muted">Sem teste especial estruturado para esta IT.</div>}
-            {detail.status!=='concluida' && !detail.testes_finalizados && <div className="actions"><button className="secondary" onClick={markTestsDone}>Concluir testes</button></div>}
+            {!!detail.tests?.length && <small className="field-hint">Não é necessário concluir manualmente; a seção fica concluída quando todos os testes tiverem resultado.</small>}
           </section>
 
-          <section className="panel section-card">
+          <section id="sec-fotos" className="panel section-card">
             <div className="section-title">
               <div><h2>Fotos da inspeção</h2><span className="section-note">Opcional nesta fase de testes. As fotos continuam concentradas nesta etapa da inspeção.</span></div>
               <span className="pill">{detail.photos?.length ?? 0} enviada(s)</span>
@@ -2097,17 +2100,14 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     <article className="photo-card" key={p.id}>
                       <img src={p.url} alt="Prévia"/>
                       <label>Legenda<input value={p.legenda} onChange={(e)=>setPendingPhotos((old)=>old.map((x)=>x.id===p.id?{...x,legenda:e.target.value}:x))} placeholder="Ex.: Tampa com risco na lateral"/></label>
-                      <label>Usar também como identificação do produto
-                        <select value={p.productId} onChange={(e)=>setPendingPhotos((old)=>old.map((x)=>x.id===p.id?{...x,productId:e.target.value}:x))}>
-                          <option value="">Não usar como foto principal</option>
-                          {(detail.items ?? []).map((link:any)=>(
-                            <option key={link.processo_itens.produto_id} value={link.processo_itens.produto_id}>
-                              {link.processo_itens.produtos?.sku} · {link.processo_itens.produtos?.nome}
-                            </option>
-                          ))}
-                        </select>
+                      <label className="check-option compact photo-id-flag">
+                        <input type="checkbox" checked={p.isProductId} onChange={(e)=>setPendingPhotos((old)=>old.map((x)=>x.id===p.id?{...x,isProductId:e.target.checked}:x))}/>
+                        <span>Foto principal do produto</span>
                       </label>
-                      {!!p.productId && <span className="product-id-photo-tag">ID do produto</span>}
+                      {p.isProductId && (detail.items ?? []).length>1 && <select className="compact-product-select" value={p.productId} onChange={(e)=>setPendingPhotos((old)=>old.map((x)=>x.id===p.id?{...x,productId:e.target.value}:x))}>
+                        <option value="">Selecione o componente</option>
+                        {(detail.items ?? []).map((link:any)=><option key={link.processo_itens.produto_id} value={link.processo_itens.produto_id}>{link.processo_itens.produtos?.sku} · {link.processo_itens.produtos?.nome}</option>)}
+                      </select>}
                       <button className="secondary small" type="button" onClick={()=>removePendingPhoto(p.id)}>Remover</button>
                     </article>
                   ))}
@@ -2128,7 +2128,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
 
           {detail.status!=='concluida' && (
-            <section className="panel section-card result-panel">
+            <section id="sec-resultado" className="panel section-card result-panel">
               <h2>Resultado final</h2>
               <div className="readiness">
                 <span className={samplingDone?'done':''}>Amostragem</span>
@@ -2157,6 +2157,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <span className={'result-badge '+detail.resultado}>{statusLabel(detail.resultado)}</span>
               </div>
               {(detail.retained ?? []).length>0 && <div className="alert success">Já existem {(detail.retained ?? []).length} amostra(s) deste registro no estoque.</div>}
+              {retentionSuggestion.quantidade!=null && <div className="retention-suggestion"><Sparkles size={15}/><span>Sugestão de retenção: <b>{retentionSuggestion.quantidade} un.</b> com base na observação interna.</span></div>}
               {(detail.items ?? []).map((link:any)=>{
                 const item=link.processo_itens
                 const existing=detail.retained?.find((x:any)=>x.produto_id===item.produto_id)
@@ -2170,21 +2171,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     {!existing && draft.retain && <>
                       <label>Quantidade<input type="number" step="0.01" value={draft.qty} onChange={(e)=>setRetentionRows({...retentionRows,[item.id]:{...draft,qty:e.target.value}})}/></label>
                       <label>Endereço<input value={draft.address} onChange={(e)=>setRetentionRows({...retentionRows,[item.id]:{...draft,address:e.target.value}})} placeholder="Ex.: ARM 03 ou INSPEÇÃO"/></label>
-                      <label className="retention-photo-field">Foto de cadastro
-                        <input type="file" accept="image/*" onChange={(e)=>{
-                          const file=e.target.files?.[0] ?? null
-                          if (draft.photoPreview) URL.revokeObjectURL(draft.photoPreview)
-                          setRetentionRows({
-                            ...retentionRows,
-                            [item.id]:{
-                              ...draft,
-                              photoFile:file,
-                              photoPreview:file?URL.createObjectURL(file):'',
-                            },
-                          })
-                        }}/>
-                      </label>
-                      {draft.photoPreview && <img className="retention-photo-preview" src={draft.photoPreview} alt="Foto de cadastro da amostra"/>}
+                      <small className="field-hint">A foto principal marcada na inspeção será reutilizada no estoque.</small>
                     </>}
                     {existing && <span className="pill">No estoque</span>}
                   </div>
