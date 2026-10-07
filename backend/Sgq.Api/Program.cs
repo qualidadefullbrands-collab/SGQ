@@ -869,6 +869,18 @@ app.MapPost("/api/produtos/consultar", async (ProductLookupRequest input,HttpReq
     catch(Exception e){return Results.Json(Error("Falha ao consultar produto.",e.Message),statusCode:500);}
 });
 
+decimal EffectiveReceived(CreateInspectionItem item)
+{
+    if(item.DistribuicaoCaixas is {Count:>0})
+    {
+        var sum=item.DistribuicaoCaixas
+            .Where(x=>x.Caixas>0 && x.Unidades>0)
+            .Sum(x=>x.Caixas*x.Unidades);
+        if(sum>0) return sum;
+    }
+    return Math.Max(0m,item.Quantidade);
+}
+
 app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRequest request, IHttpClientFactory factory) =>
 {
     try
@@ -902,7 +914,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             .ToList();
 
         var statisticalLot = items
-            .Select(x => (long)Math.Floor(x.Quantidade / Math.Max(x.UnidadesPorConjunto <= 0 ? 1m : x.UnidadesPorConjunto, 0.000001m)))
+            .Select(x => (long)Math.Floor(EffectiveReceived(x) / Math.Max(x.UnidadesPorConjunto <= 0 ? 1m : x.UnidadesPorConjunto, 0.000001m)))
             .Where(x => x > 0)
             .DefaultIfEmpty(1)
             .Min();
@@ -977,6 +989,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         foreach (var item in items)
         {
             itemIndex++;
+            var effectiveQuantity=EffectiveReceived(item);
             var normalizedSku = string.IsNullOrWhiteSpace(item.Sku)
                 ? $"TMP-{Guid.NewGuid().ToString("N")[..10].ToUpperInvariant()}"
                 : item.Sku.Trim();
@@ -1023,7 +1036,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     lote = string.IsNullOrWhiteSpace(item.Lote) ? null : item.Lote.Trim(),
                     material = string.IsNullOrWhiteSpace(item.Material) ? null : item.Material.Trim(),
                     capacidade = string.IsNullOrWhiteSpace(item.Capacidade) ? null : item.Capacidade.Trim(),
-                    quantidade = Math.Max(0m, item.Quantidade),
+                    quantidade = effectiveQuantity,
                     quantidade_por_caixa = item.QuantidadePorCaixa is > 0 ? item.QuantidadePorCaixa : null,
                     caixas_recebidas = item.CaixasRecebidas > 0 ? (decimal?)item.CaixasRecebidas : null,
                     caixas_inspecionadas = item.CaixasInspecionadas > 0 ? (decimal?)item.CaixasInspecionadas : null,
@@ -1038,7 +1051,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 new {
                     grupo_inspecao_id = groupId,
                     processo_item_id = itemId,
-                    quantidade_componente = Math.Max(0m, item.Quantidade),
+                    quantidade_componente = effectiveQuantity,
                     unidades_por_conjunto = item.UnidadesPorConjunto <= 0 ? 1m : item.UnidadesPorConjunto
                 }, "return=minimal");
         }
@@ -1144,6 +1157,7 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         foreach(var item in input.Itens ?? [])
         {
             if(string.IsNullOrWhiteSpace(item.ProcessoItemId)) continue;
+            var effectiveQuantity=EffectiveReceived(item);
             var productId=(string?)null;
             if(!string.IsNullOrWhiteSpace(item.Sku))
             {
@@ -1168,7 +1182,7 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 ["lote"]=string.IsNullOrWhiteSpace(item.Lote)?null:item.Lote.Trim(),
                 ["material"]=string.IsNullOrWhiteSpace(item.Material)?null:item.Material.Trim(),
                 ["capacidade"]=string.IsNullOrWhiteSpace(item.Capacidade)?null:item.Capacidade.Trim(),
-                ["quantidade"]=Math.Max(0,item.Quantidade),
+                ["quantidade"]=effectiveQuantity,
                 ["quantidade_por_caixa"]=item.QuantidadePorCaixa is >0?item.QuantidadePorCaixa:null,
                 ["caixas_recebidas"]=item.CaixasRecebidas>0?(decimal?)item.CaixasRecebidas:null,
                 ["caixas_inspecionadas"]=item.CaixasInspecionadas>0?(decimal?)item.CaixasInspecionadas:null,
@@ -1178,7 +1192,7 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
             await RestAsync(client,token,HttpMethod.Patch,"processo_itens",$"id=eq.{Uri.EscapeDataString(item.ProcessoItemId)}",patch,"return=minimal");
             await RestAsync(client,token,HttpMethod.Patch,"grupo_inspecao_itens",
                 $"grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}&processo_item_id=eq.{Uri.EscapeDataString(item.ProcessoItemId)}",
-                new {unidades_por_conjunto=item.UnidadesPorConjunto<=0?1m:item.UnidadesPorConjunto,quantidade_componente=Math.Max(0,item.Quantidade)},"return=minimal");
+                new {unidades_por_conjunto=item.UnidadesPorConjunto<=0?1m:item.UnidadesPorConjunto,quantidade_componente=effectiveQuantity},"return=minimal");
         }
 
         var links=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
