@@ -576,7 +576,7 @@ export default function App() {
   function resetNewInspection() {
     setInspection({
       processoId: '', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
-      dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I',
+      dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I', observacaoInterna: '',
     })
     setSkuRows([emptySku()])
   }
@@ -598,8 +598,33 @@ export default function App() {
     setMessage('Dados gerais reutilizados. Informe o novo código/produto desta inspeção.')
   }
 
-  async function lookupProduct(index: number) {
-    const code = skuRows[index].sku.trim()
+  function queueProductSuggestions(index:number, value:string) {
+    const old=productSearchTimers.current[index]
+    if (old) window.clearTimeout(old)
+    const term=value.trim()
+    if (term.length<2) {
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,suggestions:[],suggesting:false}:r))
+      return
+    }
+    setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,suggesting:true}:r))
+    productSearchTimers.current[index]=window.setTimeout(async()=>{
+      const result=await apiGet<any[]>(`/api/produtos/sugerir?termo=${encodeURIComponent(term)}`)
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{
+        ...r,
+        suggestions:(result.data ?? []).map((x:any)=>({sku:String(x.sku ?? ''),nome:String(x.nome ?? ''),origem:String(x.origem ?? '')})),
+        suggesting:false,
+      }:r))
+    },280)
+  }
+
+  function chooseProductSuggestion(index:number, suggestion:{sku:string;nome:string}) {
+    setSkuRows((rows)=>rows.map((r,i)=>i===index?{
+      ...r,sku:suggestion.sku,nome:suggestion.nome,suggestions:[],omieStatus:'loading',omieMessage:'Confirmando no OMIE…'
+    }:r))
+    window.setTimeout(()=>void lookupProduct(index,suggestion.sku),0)
+  }
+  async function lookupProduct(index: number, codeOverride?:string) {
+    const code = String(codeOverride ?? skuRows[index]?.sku ?? '').trim()
     if (!code) return
     setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,omieStatus:'loading',omieMessage:'Consultando cadastro do OMIE…'}:r))
 
@@ -614,7 +639,8 @@ export default function App() {
       return
     }
     if (data?.error === 'not_found') {
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_found',omieMessage:String(data?.message ?? 'Código não encontrado no OMIE.')}:r))
+      const suggestions=(data?.sugestoes ?? []).map((x:any)=>({sku:String(x.codigo ?? ''),nome:String(x.descricao ?? ''),origem:'omie'}))
+      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_found',omieMessage:String(data?.message ?? 'Código não encontrado no OMIE.'),suggestions}:r))
       return
     }
     if (data?.error) {
@@ -723,6 +749,12 @@ export default function App() {
       const existing=(next.retained as any[]).find((x:any)=>x.produto_id===item?.produto_id)
       retention[item.id]={retain:!existing,qty:'',address:'',photoFile:null,photoPreview:''}
     }
+    const suggestion=await apiGet<any>(`/api/inspecoes/${id}/retencao-sugestao`)
+    const suggestedQty=Number(suggestion.data?.quantidade ?? 0)
+    if (suggestedQty>0) {
+      setRetentionSuggestion({quantidade:suggestedQty,fonte:String(suggestion.data?.fonte ?? 'observacao_interna')})
+      for (const key of Object.keys(retention)) retention[key].qty=String(suggestedQty)
+    } else setRetentionSuggestion({quantidade:null,fonte:null})
     setRetentionRows(retention)
     setTab('execucao')
   }
@@ -742,11 +774,12 @@ export default function App() {
         row.sku.trim() || row.nome.trim() || row.lote.trim() || row.material.trim() ||
         row.capacidade.trim() || row.quantidade || row.quantidadePorCaixa ||
         row.caixasRecebidas || row.caixasInspecionadas || row.distribuicaoCaixas.trim() ||
-        row.fotoFile || row.fotoPrincipalPath
+        row.caixasPadrao || row.unidadesPadrao || row.caixasFracionadas || row.unidadesFracionadas ||
+        row.caixasLaboratorio || row.unidadesLaboratorio || row.fotoFile || row.fotoPrincipalPath
       )
       if (!hasAnyData) continue
 
-      const dist=parseBoxDistribution(row.distribuicaoCaixas)
+      const dist=boxDistributionTotals(row)
       let fotoPrincipalPath=row.fotoPrincipalPath || ''
       if (row.fotoFile) {
         const safe=row.fotoFile.name.replace(/[^a-zA-Z0-9._-]/g,'_')
@@ -768,7 +801,7 @@ export default function App() {
         caixasRecebidas:Number(row.caixasRecebidas) || 0,
         caixasInspecionadas:Number(row.caixasInspecionadas) || 0,
         unidadesPorConjunto:Number(row.unidadesPorConjunto || 1) || 1,
-        distribuicaoCaixas:dist.valid && dist.groups.length ? dist.groups : null,
+        distribuicaoCaixas:dist.groups.length ? dist.groups : null,
         fotoPrincipalPath:fotoPrincipalPath || null,
       })
     }
@@ -783,6 +816,7 @@ export default function App() {
       dataInspecao:inspection.dataInspecao || null,
       itVersionId:inspection.itVersionId,
       inspectionLevel:inspection.inspectionLevel,
+      observacaoInterna:inspection.observacaoInterna.trim() || null,
       itens,
     })
 
