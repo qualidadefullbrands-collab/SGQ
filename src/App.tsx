@@ -321,10 +321,6 @@ export default function App() {
   const [editingProcess, setEditingProcess] = useState<ProcessRow | null>(null)
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null)
   const [detail, setDetail] = useState<any>(null)
-  const [ncDraft, setNcDraft] = useState<{
-    open:boolean; severity:string; description:string; itemId:string; checklistId:string;
-    photoFile:File|null; photoPreview:string; photoLegenda:string;
-  }>({ open:false, severity:'grave', description:'', itemId:'', checklistId:'', photoFile:null, photoPreview:'', photoLegenda:'' })
   const [finalObservation, setFinalObservation] = useState('')
   const [internalObservation, setInternalObservation] = useState('')
   const [retentionRows, setRetentionRows] = useState<Record<string,{
@@ -1019,12 +1015,6 @@ export default function App() {
     if (saved.data?.finalizados) setDetail((d:any)=>d?{...d,testes_finalizados:true}:d)
   }
 
-  async function markTestsDone() {
-    if (!selectedInspectionId) return
-    const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/testes/finalizar`,{})
-    if (saved.error) return setError(saved.error.message)
-    await openInspection(selectedInspectionId)
-  }
 
   function addPendingPhotos(files: FileList | null) {
     if (!files) return
