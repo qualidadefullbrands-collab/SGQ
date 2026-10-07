@@ -110,11 +110,16 @@ const emptySku = () => ({
 })
 
 function fstDigits(value: string) {
-  return value.replace(/\D/g, '').slice(0,5)
+  const raw=String(value ?? '').trim()
+  if (/^TMP-/i.test(raw)) return ''
+  return raw.replace(/\D/g, '').slice(0,5)
 }
 function formatFst(value: string | null | undefined) {
-  const d = String(value ?? '').replace(/\D/g, '')
-  return d ? 'FST' + d : '—'
+  const raw=String(value ?? '').trim()
+  if (!raw) return '—'
+  if (/^TMP-/i.test(raw)) return 'Rascunho'
+  const d=raw.replace(/\D/g,'')
+  return d ? 'FST' + d : raw
 }
 function formatDateBR(value: string | null | undefined) {
   if (!value) return '—'
