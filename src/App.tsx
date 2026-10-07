@@ -208,6 +208,7 @@ function updateBoxDistributionField(row:any,key:string,value:string) {
   if (totals.groups.length) {
     next.quantidade=String(totals.units)
     next.caixasRecebidas=String(totals.boxes)
+    next.caixasInspecionadas=String(boxesToInspect(totals.boxes))
   }
   return next
 }
@@ -1820,8 +1821,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                         <label>Lote<input value={row.lote} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,lote:e.target.value}:r))}/></label>
                         <label>Material<input value={row.material} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,material:e.target.value}:r))}/></label>
                         <label>Capacidade<input value={row.capacidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,capacidade:e.target.value}:r))}/></label>
-                        <label>Quantidade recebida<input type="number" step="0.01" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/></label>
-                        <label>Quantidade padrão por caixa (opcional)<input type="number" step="0.01" value={row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidadePorCaixa:e.target.value}:r))}/></label>
+                        <label>Quantidade total recebida<input type="number" step="0.01" value={row.quantidade} readOnly={boxDistributionTotals(row).groups.length>0} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/>{boxDistributionTotals(row).groups.length>0 && <small className="field-hint">Calculada automaticamente pela distribuição das caixas.</small>}</label>
                         <label>Caixas recebidas<input type="number" step="0.01" value={row.caixasRecebidas} onChange={(e)=>{
                           const received=e.target.value
                           const calc=received ? String(boxesToInspect(Number(received))) : ''
@@ -1831,7 +1831,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                         <div className="span-2 box-distribution-editor">
                           <div className="field-label"><span>Distribuição das caixas</span><small>Separe caixas padrão, fracionada e retirada no laboratório.</small></div>
                           <div className="distribution-grid">
-                            <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasPadrao} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasPadrao',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesPadrao || row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPadrao:e.target.value,quantidadePorCaixa:e.target.value}:r))}/></label></div>
+                            <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasPadrao} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasPadrao',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesPadrao || row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...updateBoxDistributionField(r,'unidadesPadrao',e.target.value),quantidadePorCaixa:e.target.value}:r))}/></label></div>
                             <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasFracionadas',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'unidadesFracionadas',e.target.value):r))}/></label></div>
                             <div className="distribution-line"><strong>Retirada laboratório</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasLaboratorio} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasLaboratorio',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesLaboratorio} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'unidadesLaboratorio',e.target.value):r))}/></label></div>
                           </div>
