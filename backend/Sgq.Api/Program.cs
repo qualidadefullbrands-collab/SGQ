@@ -95,10 +95,15 @@ async Task<string> CurrentUserId(HttpClient client, string token)
     if (lot <= 0) return ("", 0, null, null);
     if (lot < 281) return ("100%", (int)Math.Min(lot, int.MaxValue), 0, 1);
 
-    var rows = new (long Min,long Max,string I,string II,string S2)[] {
-        (281,500,"F","H","C"),(501,1200,"G","J","C"),(1201,3200,"H","K","D"),
-        (3201,10000,"J","L","D"),(10001,35000,"K","M","D"),(35001,150000,"L","N","E"),
-        (150001,500000,"M","P","E"),(500001,long.MaxValue,"N","Q","E")
+    var rows = new (long Min,long Max,string I,string II,string III,string S1,string S2,string S3,string S4)[] {
+        (281,500,"F","H","J","B","C","D","E"),
+        (501,1200,"G","J","K","C","C","E","F"),
+        (1201,3200,"H","K","L","C","D","E","G"),
+        (3201,10000,"J","L","M","C","D","F","H"),
+        (10001,35000,"K","M","N","C","D","F","J"),
+        (35001,150000,"L","N","P","D","E","G","K"),
+        (150001,500000,"M","P","Q","D","E","G","L"),
+        (500001,long.MaxValue,"N","Q","R","D","E","H","M")
     };
     var sizes = new Dictionary<string,int> {
         ["A"]=2,["B"]=3,["C"]=5,["D"]=8,["E"]=13,["F"]=20,["G"]=32,["H"]=50,
@@ -109,9 +114,17 @@ async Task<string> CurrentUserId(HttpClient client, string token)
         ["L"]=(7,8),["M"]=(10,11),["N"]=(14,15),["P"]=(21,22)
     };
     var row = rows.FirstOrDefault(x => lot >= x.Min && lot <= x.Max);
-    var code = level switch { "II" => row.II, "S2" => row.S2, _ => row.I };
+    var code = level switch {
+        "II" => row.II,
+        "III" => row.III,
+        "S1" => row.S1,
+        "S2" => row.S2,
+        "S3" => row.S3,
+        "S4" => row.S4,
+        _ => row.I
+    };
     var sample = sizes.TryGetValue(code ?? "", out var s) ? s : 0;
-    if (level == "S2") return (code ?? "", sample, null, null);
+    if (level.StartsWith("S", StringComparison.OrdinalIgnoreCase)) return (code ?? "", sample, null, null);
     return acre.TryGetValue(code ?? "", out var ar) ? (code ?? "", sample, ar.Ac, ar.Re) : (code ?? "", sample, null, null);
 }
 
