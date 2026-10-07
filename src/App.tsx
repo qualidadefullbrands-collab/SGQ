@@ -1848,6 +1848,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
+              <button className="secondary" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados</button>
               <button className="secondary" type="button" onClick={()=>setInspectionChatOpen(true)}>
                 <MessageCircle size={16}/> Modo chat
               </button>
@@ -1864,6 +1865,15 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <ProgressItem done={detail.status==='concluida'} label="Resultado"/>
             <ProgressItem done={detail.retencao_decisao!==null} label="Retenção"/>
           </section>
+          <nav className="inspection-quick-nav">
+            <a href="#sec-dados">Dados</a>
+            <a href="#sec-amostragem">Amostragem</a>
+            <a href="#sec-verificacoes">Verificações</a>
+            <a href="#sec-dimensionais">Dimensionais</a>
+            <a href="#sec-testes">Testes</a>
+            <a href="#sec-fotos">Fotos</a>
+            <a href="#sec-resultado">Resultado</a>
+          </nav>
 
           <section className="inspection-assistant-strip">
             <div className="assistant-strip-copy">
@@ -1881,25 +1891,20 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </button>
           </section>
 
-          <section className="panel section-card internal-note-panel">
-            <div className="section-title">
-              <div>
-                <h2>Observação interna</h2>
-                <span className="section-note">Uso interno da Qualidade. Esta informação não é incluída no laudo nem no Word da inspeção.</span>
-              </div>
-              <span className="pill">Somente SGQ</span>
-            </div>
+          <section id="sec-dados" className="panel section-card internal-note-panel">
+            <div className="section-title"><h2>Observação interna</h2></div>
             <textarea
               value={internalObservation}
               onChange={(e)=>setInternalObservation(e.target.value)}
               rows={3}
-              placeholder="Ex.: alinhamento interno, pendência de retorno do fornecedor, orientação para próxima inspeção..."
+              placeholder="Ex.: 60 un retiradas no laboratório para retenção."
               disabled={!canWrite}
             />
-            {canWrite && <div className="actions"><button className="secondary" type="button" onClick={()=>void saveInternalObservation()}>Salvar observação interna</button></div>}
+            <small className="field-hint">Uso interno da Qualidade, não disponível no laudo</small>
+            {canWrite && <div className="actions"><button className="secondary" type="button" onClick={()=>void saveInternalObservation()}>Salvar</button></div>}
           </section>
 
-          <section className="panel section-card">
+          <section id="sec-amostragem" className="panel section-card">
             <div className="section-title">
               <h2>Plano de amostragem</h2>
               <span className="pill">Nível {detail.nivel_inspecao} · código {detail.codigo_amostragem || '—'}</span>
