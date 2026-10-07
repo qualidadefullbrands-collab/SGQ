@@ -202,16 +202,28 @@ function boxDistributionTotals(row:any) {
   }
 }
 
+function updateBoxDistributionField(row:any,key:string,value:string) {
+  const next={...row,[key]:value}
+  const totals=boxDistributionTotals(next)
+  if (totals.groups.length) {
+    next.quantidade=String(totals.units)
+    next.caixasRecebidas=String(totals.boxes)
+  }
+  return next
+}
+
 function applyBoxGroupsToSku(base:any, groups:any[]|null|undefined) {
   const next={...base}
   for (const g of groups ?? []) {
-    const tipo=String(g?.tipo ?? '').toLowerCase()
-    if (tipo==='padrao') { next.caixasPadrao=String(g.caixas ?? ''); next.unidadesPadrao=String(g.unidades ?? '') }
-    else if (tipo==='laboratorio' || tipo==='retida' || tipo==='retencao') { next.caixasLaboratorio=String(g.caixas ?? ''); next.unidadesLaboratorio=String(g.unidades ?? '') }
-    else if (tipo==='fracionada') { next.caixasFracionadas=String(g.caixas ?? ''); next.unidadesFracionadas=String(g.unidades ?? '') }
-    else if (!next.caixasPadrao) { next.caixasPadrao=String(g.caixas ?? ''); next.unidadesPadrao=String(g.unidades ?? '') }
-    else if (!next.caixasFracionadas) { next.caixasFracionadas=String(g.caixas ?? ''); next.unidadesFracionadas=String(g.unidades ?? '') }
-    else { next.caixasLaboratorio=String(g.caixas ?? ''); next.unidadesLaboratorio=String(g.unidades ?? '') }
+    const tipo=String(g?.tipo ?? g?.Tipo ?? '').toLowerCase()
+    const caixas=g?.caixas ?? g?.Caixas ?? ''
+    const unidades=g?.unidades ?? g?.Unidades ?? ''
+    if (tipo==='padrao') { next.caixasPadrao=String(caixas); next.unidadesPadrao=String(unidades) }
+    else if (tipo==='laboratorio' || tipo==='retida' || tipo==='retencao') { next.caixasLaboratorio=String(caixas); next.unidadesLaboratorio=String(unidades) }
+    else if (tipo==='fracionada') { next.caixasFracionadas=String(caixas); next.unidadesFracionadas=String(unidades) }
+    else if (!next.caixasPadrao) { next.caixasPadrao=String(caixas); next.unidadesPadrao=String(unidades) }
+    else if (!next.caixasFracionadas) { next.caixasFracionadas=String(caixas); next.unidadesFracionadas=String(unidades) }
+    else { next.caixasLaboratorio=String(caixas); next.unidadesLaboratorio=String(unidades) }
   }
   return next
 }
@@ -1819,9 +1831,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                         <div className="span-2 box-distribution-editor">
                           <div className="field-label"><span>Distribuição das caixas</span><small>Separe caixas padrão, fracionada e retirada no laboratório.</small></div>
                           <div className="distribution-grid">
-                            <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasPadrao} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasPadrao:e.target.value}:r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesPadrao || row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPadrao:e.target.value,quantidadePorCaixa:e.target.value}:r))}/></label></div>
-                            <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasFracionadas:e.target.value}:r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesFracionadas:e.target.value}:r))}/></label></div>
-                            <div className="distribution-line"><strong>Retirada laboratório</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasLaboratorio} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasLaboratorio:e.target.value}:r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesLaboratorio} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesLaboratorio:e.target.value}:r))}/></label></div>
+                            <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasPadrao} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasPadrao',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesPadrao || row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPadrao:e.target.value,quantidadePorCaixa:e.target.value}:r))}/></label></div>
+                            <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasFracionadas',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'unidadesFracionadas',e.target.value):r))}/></label></div>
+                            <div className="distribution-line"><strong>Retirada laboratório</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasLaboratorio} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasLaboratorio',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesLaboratorio} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'unidadesLaboratorio',e.target.value):r))}/></label></div>
                           </div>
                           {(()=>{const d=boxDistributionTotals(row); if(!d.groups.length) return null; const mismatch=(d.boxes!==Number(row.caixasRecebidas) || Math.abs(d.units-Number(row.quantidade))>0.0001); return <small className={'field-status '+(mismatch?'bad':'ok')}>{d.expression} = {d.units.toLocaleString('pt-BR')} un · {d.boxes} caixa(s){mismatch?' — confira com os totais informados.':' — conferência fechada.'}</small>})()}
                         </div>
@@ -2552,9 +2564,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <label>Caixas inspecionadas<input type="number" step="1" value={row.caixasInspecionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasInspecionadas:e.target.value}:x)})}/></label>
                 </div>
                 <div className="distribution-grid compact">
-                  <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" value={row.caixasPadrao} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasPadrao:e.target.value}:x)})}/></label><label>Un/caixa<input type="number" value={row.unidadesPadrao} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,unidadesPadrao:e.target.value}:x)})}/></label></div>
-                  <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" value={row.caixasFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasFracionadas:e.target.value}:x)})}/></label><label>Un/caixa<input type="number" value={row.unidadesFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,unidadesFracionadas:e.target.value}:x)})}/></label></div>
-                  <div className="distribution-line"><strong>Laboratório</strong><label>Caixas<input type="number" value={row.caixasLaboratorio} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasLaboratorio:e.target.value}:x)})}/></label><label>Un/caixa<input type="number" value={row.unidadesLaboratorio} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,unidadesLaboratorio:e.target.value}:x)})}/></label></div>
+                  <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" value={row.caixasPadrao} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'caixasPadrao',e.target.value):x)})}/></label><label>Un/caixa<input type="number" value={row.unidadesPadrao} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'unidadesPadrao',e.target.value):x)})}/></label></div>
+                  <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" value={row.caixasFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'caixasFracionadas',e.target.value):x)})}/></label><label>Un/caixa<input type="number" value={row.unidadesFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'unidadesFracionadas',e.target.value):x)})}/></label></div>
+                  <div className="distribution-line"><strong>Laboratório</strong><label>Caixas<input type="number" value={row.caixasLaboratorio} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'caixasLaboratorio',e.target.value):x)})}/></label><label>Un/caixa<input type="number" value={row.unidadesLaboratorio} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'unidadesLaboratorio',e.target.value):x)})}/></label></div>
                 </div>
                 {!!d.groups.length && <small className="field-hint">{d.expression} = {d.units.toLocaleString('pt-BR')} un</small>}
               </article>})}
