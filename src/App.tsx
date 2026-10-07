@@ -1928,26 +1928,20 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {!!detail.limite_rejeicao && detail.total_nao_conforme>=detail.limite_rejeicao && <div className="alert error">Limite de rejeição atingido. Você pode encerrar ou continuar a inspeção; a decisão ficará registrada.</div>}
           </section>
 
-          <section className="panel section-card">
-            <h2>Verificações C / NC / NA</h2>
-            <div className="checklist">
+          <section id="sec-verificacoes" className="panel section-card">
+            <div className="section-title"><div><h2>Verificações</h2><span className="section-note">Toque em C, NC ou NA. A classificação da NC vem automaticamente da IT.</span></div></div>
+            <div className="checklist compact-checklist">
               {(detail.checklist ?? []).map((item:any)=>{
                 const r=detail.checklistResults?.find((x:any)=>x.checklist_id===item.id)
+                const automatic=item.classificacao_sugerida
                 return (
                   <div className="check-row" key={item.id}>
-                    <div className="check-copy"><b>{item.ordem}. {item.requisito}</b><span>{item.instrucao}</span></div>
-                    <div className="tri-buttons">
-                      <button className={r?.resultado==='conforme'?'selected ok':''} onClick={()=>saveChecklist(item.id,'conforme')}>C</button>
-                      <button className={r?.resultado==='nao_conforme'?'selected bad':''} onClick={()=>openNcModal(item.id)}>NC</button>
-                      <button className={r?.resultado==='nao_aplicavel'?'selected':''} onClick={()=>saveChecklist(item.id,'nao_aplicavel')}>NA</button>
+                    <div className="check-copy"><b>{item.ordem}. {item.requisito}</b><span>{item.instrucao}</span>{automatic && <small>NC: {automatic==='critico'?'Crítico':automatic==='grave'?'Grave':'Tolerável'} · definido pela IT</small>}</div>
+                    <div className="tri-buttons quick">
+                      <button type="button" className={r?.resultado==='conforme'?'selected ok':''} onClick={()=>saveChecklist(item.id,'conforme')}>C</button>
+                      <button type="button" className={r?.resultado==='nao_conforme'?'selected bad':''} onClick={()=>saveChecklist(item.id,'nao_conforme')}>NC</button>
+                      <button type="button" className={r?.resultado==='nao_aplicavel'?'selected':''} onClick={()=>saveChecklist(item.id,'nao_aplicavel')}>NA</button>
                     </div>
-                    {r?.resultado==='nao_conforme' && (
-                      <select className="severity" value={r.severidade_confirmada || 'grave'} onChange={(e)=>saveChecklistSeverity(item.id,e.target.value)}>
-                        <option value="critico">Crítico</option>
-                        <option value="grave">Grave</option>
-                        <option value="toleravel">Tolerável</option>
-                      </select>
-                    )}
                   </div>
                 )
               })}
@@ -1970,7 +1964,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </section>
 
-          <section className="panel section-card">
+          <section id="sec-dimensionais" className="panel section-card">
             <div className="section-title">
               <div><h2>Análises dimensionais</h2><span className="section-note">Especificação, instrumento, desvio aceitável e 10 medições por parâmetro.</span></div>
               {detail.dimensionais_finalizados && <span className="pill">Concluído</span>}
@@ -2029,14 +2023,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                             <label>Cód. equipamento
                               <input defaultValue={cfg.codigo_equipamento ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{codigo_equipamento:e.target.value})} disabled={detail.status==='concluida'}/>
                             </label>
-                            <label>Desvio - 
-                              <input type="number" min="0" step="any" defaultValue={cfg.desvio_menos ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{desvio_menos:e.target.value})} disabled={detail.status==='concluida'}/>
-                            </label>
-                            <label>Desvio +
-                              <input type="number" min="0" step="any" defaultValue={cfg.desvio_mais ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{desvio_mais:e.target.value})} disabled={detail.status==='concluida'}/>
+                            <label>Desvio ±
+                              <input type="number" min="0" step="any" defaultValue={cfg.desvio_mais ?? cfg.desvio_menos ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{desvio:e.target.value,desvio_menos:e.target.value,desvio_mais:e.target.value})} disabled={detail.status==='concluida'}/>
                             </label>
                             <label className="span-2">Especificação / desvio
-                              <input defaultValue={cfg.especificacao_desvio ?? ''} placeholder="Ex.: 60 g ± 2 g" onBlur={(e)=>saveDimConfig(item.id,p,{especificacao_desvio:e.target.value})} disabled={detail.status==='concluida'}/>
+                              <input value={cfg.especificacao_desvio ?? ((cfg.valor_nominal!=null && (cfg.desvio_mais!=null || cfg.desvio_menos!=null)) ? (String(cfg.valor_nominal)+' '+String(cfg.unidade ?? p.unidade ?? '')+' ± '+String(cfg.desvio_mais ?? cfg.desvio_menos)+' '+String(cfg.unidade ?? p.unidade ?? '')).trim() : '')} readOnly placeholder="Preenchido automaticamente"/>
                             </label>
                           </div>
 
