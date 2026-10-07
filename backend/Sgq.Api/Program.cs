@@ -712,6 +712,9 @@ app.MapGet("/api/produtos/sugerir", async (string termo,HttpRequest request,IHtt
             }).ToList<object>()
             : new List<object>();
 
+        var knownSkus=new HashSet<string>(
+            local.Select(x=>(string?)x.GetType().GetProperty("sku")?.GetValue(x)).Where(x=>!string.IsNullOrWhiteSpace(x))!,
+            StringComparer.OrdinalIgnoreCase);
         if(local.Count<5)
         {
             var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/omie-produto");
@@ -730,8 +733,9 @@ app.MapGet("/api/produtos/sugerir", async (string termo,HttpRequest request,IHtt
                         {
                             var sku=item.TryGetProperty("codigo",out var sk)?sk.GetString():null;
                             var nome=item.TryGetProperty("descricao",out var nm)?nm.GetString():null;
-                            if(string.IsNullOrWhiteSpace(sku)||local.Any(x=>String.Equals((string?)x.GetType().GetProperty("sku")?.GetValue(x),sku,StringComparison.OrdinalIgnoreCase))) continue;
+                            if(string.IsNullOrWhiteSpace(sku)||knownSkus.Contains(sku)) continue;
                             local.Add(new {id=(string?)null,sku,nome,origem="omie"});
+                            knownSkus.Add(sku);
                             if(local.Count>=8) break;
                         }
                     }
@@ -1890,197 +1894,22 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
     try
     {
         var token=Token(request);
-        var client=factory.CreateClient("supabase");
+        var msg=new HttpRequestMessage(HttpMethod.Get,$"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}");
+        msg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
+        var res=await factory.CreateClient("supabase").SendAsync(msg);
+        var bytes=await res.Content.ReadAsByteArrayAsync();
+        if(!res.IsSuccessStatusCode)
+            return Results.Text(Encoding.UTF8.GetString(bytes),"application/json",statusCode:(int)res.StatusCode);
 
-        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=numero,resultado,observacoes,data_inspecao,tamanho_lote,nivel_inspecao,codigo_amostragem,tamanho_amostra,total_inspecionado,total_nao_conforme,grupo_inspecao_id,it_versao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
-        var (ins,found)=FirstRow(insRows);
-        if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
-        var i=ins!.Value;
-        var numero=i.GetProperty("numero").GetString() ?? id;
-        var groupId=i.GetProperty("grupo_inspecao_id").GetString()!;
-        var itVersionId=i.GetProperty("it_versao_id").GetString()!;
-
-        var groupRows=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
-            $"select=processo_id&id=eq.{Uri.EscapeDataString(groupId)}&limit=1");
-        var (group,gf)=FirstRow(groupRows);
-        if(!gf) throw new InvalidOperationException("Grupo não encontrado.");
-        var processId=group!.Value.GetProperty("processo_id").GetString()!;
-
-        var processRows=await RestAsync(client,token,HttpMethod.Get,"processos",
-            $"select=codigo,cliente,nota_fiscal,origem,transporte&id=eq.{Uri.EscapeDataString(processId)}&limit=1");
-        var (process,pf)=FirstRow(processRows);
-        if(!pf) throw new InvalidOperationException("Processo não encontrado.");
-
-        var versionRows=await RestAsync(client,token,HttpMethod.Get,"it_versoes",
-            $"select=versao,instrucao_trabalho_id&id=eq.{Uri.EscapeDataString(itVersionId)}&limit=1");
-        var (version,vf)=FirstRow(versionRows);
-        if(!vf) throw new InvalidOperationException("Versão da IT não encontrada.");
-        var instructionId=version!.Value.GetProperty("instrucao_trabalho_id").GetString()!;
-        var instructionRows=await RestAsync(client,token,HttpMethod.Get,"instrucoes_trabalho",
-            $"select=codigo,titulo&id=eq.{Uri.EscapeDataString(instructionId)}&limit=1");
-        var (instruction,inf)=FirstRow(instructionRows);
-
-        var itemLinks=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
-            $"select=processo_item_id&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
-        var productsHtml=new StringBuilder();
-        if(itemLinks is {ValueKind:JsonValueKind.Array})
-        {
-            foreach(var link in itemLinks.Value.EnumerateArray())
-            {
-                var itemId=link.GetProperty("processo_item_id").GetString()!;
-                var itemRows=await RestAsync(client,token,HttpMethod.Get,"processo_itens",
-                    $"select=produto_id,lote,quantidade&id=eq.{Uri.EscapeDataString(itemId)}&limit=1");
-                var (item,itemFound)=FirstRow(itemRows);
-                if(!itemFound) continue;
-                var productId=item!.Value.GetProperty("produto_id").GetString()!;
-                var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
-                    $"select=sku,nome&id=eq.{Uri.EscapeDataString(productId)}&limit=1");
-                var (product,productFound)=FirstRow(productRows);
-                if(!productFound) continue;
-                string Enc(JsonElement el,string name)
-                    => el.TryGetProperty(name,out var v)&&v.ValueKind!=JsonValueKind.Null
-                        ? System.Net.WebUtility.HtmlEncode(v.ToString()) : "";
-                productsHtml.Append("<tr><td>").Append(Enc(product!.Value,"sku")).Append("</td><td>")
-                    .Append(Enc(product.Value,"nome")).Append("</td><td>")
-                    .Append(Enc(item.Value,"lote")).Append("</td><td>")
-                    .Append(Enc(item.Value,"quantidade")).Append("</td></tr>");
-            }
-        }
-
-        var checks=await RestAsync(client,token,HttpMethod.Get,"it_checklist",
-            $"select=id,ordem,requisito&it_versao_id=eq.{Uri.EscapeDataString(itVersionId)}&ativo=eq.true&order=ordem.asc");
-        var checkResults=await RestAsync(client,token,HttpMethod.Get,"inspecao_checklist_resultados",
-            $"select=checklist_id,resultado,severidade_confirmada&inspecao_id=eq.{Uri.EscapeDataString(id)}");
-        var resultMap=new Dictionary<string,(string? Resultado,string? Severidade)>();
-        if(checkResults is {ValueKind:JsonValueKind.Array})
-        {
-            foreach(var r in checkResults.Value.EnumerateArray())
-            {
-                var cid=r.GetProperty("checklist_id").GetString();
-                if(string.IsNullOrWhiteSpace(cid)) continue;
-                resultMap[cid]=(r.TryGetProperty("resultado",out var rv)?rv.GetString():null,
-                    r.TryGetProperty("severidade_confirmada",out var sv)&&sv.ValueKind==JsonValueKind.String?sv.GetString():null);
-            }
-        }
-        var checksHtml=new StringBuilder();
-        if(checks is {ValueKind:JsonValueKind.Array})
-        {
-            foreach(var check in checks.Value.EnumerateArray())
-            {
-                var cid=check.GetProperty("id").GetString()!;
-                resultMap.TryGetValue(cid,out var rr);
-                var order=check.TryGetProperty("ordem",out var or)?or.ToString():"";
-                var req=check.TryGetProperty("requisito",out var rq)?rq.GetString():"";
-                checksHtml.Append("<tr><td>").Append(System.Net.WebUtility.HtmlEncode(order)).Append("</td><td>")
-                    .Append(System.Net.WebUtility.HtmlEncode(req)).Append("</td><td>")
-                    .Append(System.Net.WebUtility.HtmlEncode(rr.Resultado??"pendente")).Append("</td><td>")
-                    .Append(System.Net.WebUtility.HtmlEncode(rr.Severidade??"")).Append("</td></tr>");
-            }
-        }
-
-        string Str(JsonElement el,string name)
-            => el.TryGetProperty(name,out var v)&&v.ValueKind!=JsonValueKind.Null?v.ToString():"";
-        var p=process!.Value;
-        var instructionCode=inf?Str(instruction!.Value,"codigo"):"";
-        var instructionTitle=inf?Str(instruction!.Value,"titulo"):"";
-        var itVersion=Str(version.Value,"versao");
-        var html=$@"<html><head><meta charset=""utf-8""><style>
-body{{font-family:Calibri,Arial,sans-serif;font-size:10.5pt}}h1{{font-size:17pt}}h2{{font-size:12pt;margin-top:18px}}
-table{{border-collapse:collapse;width:100%;margin:8px 0}}td,th{{border:1px solid #777;padding:5px}}th{{background:#eee;text-align:left}}
-</style></head><body>
-<h1>REGISTRO DE INSPEÇÃO</h1>
-<p><b>{System.Net.WebUtility.HtmlEncode(instructionCode)}</b> · {System.Net.WebUtility.HtmlEncode(instructionTitle)} · versão {System.Net.WebUtility.HtmlEncode(itVersion)}</p>
-<h2>Identificação</h2>
-<table><tr><th>Processo FST</th><td>{System.Net.WebUtility.HtmlEncode(Str(p,"codigo"))}</td><th>Cliente</th><td>{System.Net.WebUtility.HtmlEncode(Str(p,"cliente"))}</td></tr>
-<tr><th>Nota fiscal</th><td>{System.Net.WebUtility.HtmlEncode(Str(p,"nota_fiscal"))}</td><th>Data</th><td>{System.Net.WebUtility.HtmlEncode(Str(i,"data_inspecao"))}</td></tr>
-<tr><th>Origem</th><td>{System.Net.WebUtility.HtmlEncode(Str(p,"origem"))}</td><th>Transporte</th><td>{System.Net.WebUtility.HtmlEncode(Str(p,"transporte"))}</td></tr></table>
-<h2>Produtos / componentes</h2><table><tr><th>Código</th><th>Descrição</th><th>Lote</th><th>Quantidade</th></tr>{productsHtml}</table>
-<h2>Plano de amostragem</h2><table>
-<tr><th>Lote estatístico</th><td>{System.Net.WebUtility.HtmlEncode(Str(i,"tamanho_lote"))}</td><th>Nível</th><td>{System.Net.WebUtility.HtmlEncode(Str(i,"nivel_inspecao"))}</td></tr>
-<tr><th>Código</th><td>{System.Net.WebUtility.HtmlEncode(Str(i,"codigo_amostragem"))}</td><th>Amostra prevista</th><td>{System.Net.WebUtility.HtmlEncode(Str(i,"tamanho_amostra"))}</td></tr>
-<tr><th>Amostra efetiva</th><td>{System.Net.WebUtility.HtmlEncode(Str(i,"total_inspecionado"))}</td><th>Não conformes</th><td>{System.Net.WebUtility.HtmlEncode(Str(i,"total_nao_conforme"))}</td></tr></table>
-<h2>Verificações</h2><table><tr><th>Nº</th><th>Análise</th><th>Resultado</th><th>Classe</th></tr>{checksHtml}</table>
-<h2>Resultado final</h2><p><b>{System.Net.WebUtility.HtmlEncode(Str(i,"resultado").ToUpperInvariant())}</b></p>
-<p>{System.Net.WebUtility.HtmlEncode(Str(i,"observacoes"))}</p>
-</body></html>";
-        var bytes=Encoding.UTF8.GetBytes(html);
-        var storagePath=$"{id}/{numero}.doc";
-        var upload=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/storage/v1/object/laudos/{EncodedPath(storagePath)}");
-        ApplyAuth(upload,token);
-        upload.Headers.TryAddWithoutValidation("x-upsert","true");
-        upload.Content=new ByteArrayContent(bytes);
-        upload.Content.Headers.ContentType=new MediaTypeHeaderValue("application/msword");
-        var uploadRes=await client.SendAsync(upload);
-        var uploadRaw=await uploadRes.Content.ReadAsStringAsync();
-        if(!uploadRes.IsSuccessStatusCode) throw new InvalidOperationException("Falha ao armazenar laudo: "+uploadRaw);
-
-        var reportRows=await RestAsync(client,token,HttpMethod.Get,"laudos",
-            $"select=id&inspecao_id=eq.{Uri.EscapeDataString(id)}&limit=1");
-        var (report,reportFound)=FirstRow(reportRows);
-        string reportId;
-        if(reportFound) reportId=report!.Value.GetProperty("id").GetString()!;
-        else
-        {
-            var newReport=await RestAsync(client,token,HttpMethod.Post,"laudos","select=id",
-                new {inspecao_id=id,numero},"return=representation");
-            var (nr,nf)=FirstRow(newReport);
-            if(!nf) throw new InvalidOperationException("Falha ao criar registro do laudo.");
-            reportId=nr!.Value.GetProperty("id").GetString()!;
-        }
-        var generatedAt=DateTimeOffset.UtcNow;
-        await RestAsync(client,token,HttpMethod.Patch,"laudos",$"id=eq.{Uri.EscapeDataString(reportId)}",
-            new {storage_path=storagePath,gerado_em=generatedAt},"return=minimal");
-        await RestAsync(client,token,HttpMethod.Patch,"amostras",
-            $"inspecao_id=eq.{Uri.EscapeDataString(id)}&laudo_id=is.null",new {laudo_id=reportId},"return=minimal");
-        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
-            new {documento_gerado_em=generatedAt},"return=minimal");
-
-        var sign=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/storage/v1/object/sign/laudos/{EncodedPath(storagePath)}");
-        ApplyAuth(sign,token);
-        sign.Content=JsonContent.Create(new {expiresIn=600});
-        var signRes=await client.SendAsync(sign);
-        var signRaw=await signRes.Content.ReadAsStringAsync();
-        string? signedUrl=null;
-        if(signRes.IsSuccessStatusCode)
-        {
-            using var sd=JsonDocument.Parse(signRaw);
-            var root=sd.RootElement;
-            signedUrl=root.TryGetProperty("signedURL",out var s1)?s1.GetString():
-                root.TryGetProperty("signedUrl",out var s2)?s2.GetString():null;
-            if(!string.IsNullOrWhiteSpace(signedUrl)&&signedUrl.StartsWith("/")) signedUrl=supabaseUrl+"/storage/v1"+signedUrl;
-        }
-
-        return Results.Ok(new {data=new {url=signedUrl,filename=$"{Str(p,"codigo")}-{numero}.doc",storage_path=storagePath,laudo_id=reportId},error=(object?)null});
+        var contentType=res.Content.Headers.ContentType?.ToString()
+            ?? "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        var fileName=res.Headers.TryGetValues("X-SGQ-File-Name",out var names)
+            ? names.FirstOrDefault()
+            : $"Inspecao-{id}.docx";
+        return Results.File(bytes,contentType,fileName);
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
-    catch(Exception e){return Results.Json(Error("Falha ao gerar laudo.",e.Message),statusCode:500);}
-});
-
-app.MapGet("/api/inspecoes/{id}/retencao-sugestao", async (string id,HttpRequest request,IHttpClientFactory factory)=>
-{
-    try
-    {
-        var token=Token(request);
-        var client=factory.CreateClient("supabase");
-        var rows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=observacao_interna&id=eq.{Uri.EscapeDataString(id)}&limit=1");
-        var (ins,found)=FirstRow(rows);
-        if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
-        var note=ins!.Value.TryGetProperty("observacao_interna",out var no)&&no.ValueKind==JsonValueKind.String?no.GetString()??"":"";
-        decimal? qty=null;
-        var matches=Regex.Matches(note,@"(?i)(\d+(?:[\.,]\d+)?)\s*(?:un|unid|unidade|unidades)?[^\n\.;]{0,45}(?:laborat[oó]rio|reten[cç][aã]o|retid[ao]s?)");
-        if(matches.Count==0)
-            matches=Regex.Matches(note,@"(?i)(?:laborat[oó]rio|reten[cç][aã]o|retid[ao]s?)[^\n\.;]{0,45}(\d+(?:[\.,]\d+)?)\s*(?:un|unid|unidade|unidades)?");
-        if(matches.Count>0)
-        {
-            var raw=matches[^1].Groups[1].Value.Replace(",",".");
-            if(decimal.TryParse(raw,System.Globalization.NumberStyles.Any,System.Globalization.CultureInfo.InvariantCulture,out var parsed)) qty=parsed;
-        }
-        return Results.Ok(new {data=new {quantidade=qty,fonte=qty.HasValue?"observacao_interna":null,observacao=note},error=(object?)null});
-    }
-    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
-    catch(Exception e){return Results.Json(Error("Falha ao sugerir retenção.",e.Message),statusCode:500);}
+    catch(Exception e){return Results.Json(Error("Falha ao gerar Word pelo modelo oficial da IT.",e.Message),statusCode:500);}
 });
 
 app.MapPost("/api/inspecoes/{id}/retencao", async (string id,RetentionRequest input,HttpRequest request,IHttpClientFactory factory)=>
@@ -2700,7 +2529,7 @@ public sealed class FinishInspectionRequest
     public string? Observacoes { get; set; }
 }
 
-public sealed class CreateInspectionRequest
+public class CreateInspectionRequest
 {
     public string Codigo { get; set; } = "";
     public string Cliente { get; set; } = "";
