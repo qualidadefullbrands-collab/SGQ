@@ -834,7 +834,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         var plan = SamplingPlan(statisticalLot, level);
 
         var existingProcessRows = await RestAsync(client, token, HttpMethod.Get, "processos",
-            $"select=id&codigo=eq.{Uri.EscapeDataString(processCode)}&excluido_em=is.null&limit=1");
+            $"select=id,excluido_em&codigo=eq.{Uri.EscapeDataString(processCode)}&limit=1");
         var (existingProcess, hasProcess) = FirstRow(existingProcessRows);
         string processId;
 
@@ -850,6 +850,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     transporte = string.IsNullOrWhiteSpace(input.Transporte) ? null : input.Transporte.Trim(),
                     chegada_cd = input.ChegadaCd,
                     status = "em_inspecao",
+                    excluido_em = (DateTimeOffset?)null,
+                    excluido_por = (string?)null,
                     atualizado_em = DateTimeOffset.UtcNow
                 }, "return=minimal");
         }
