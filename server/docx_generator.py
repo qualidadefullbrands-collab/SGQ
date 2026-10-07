@@ -186,3 +186,185 @@ def file_name(rq:str,date_raw:str)->str:
     if rq=="RQ015": return f"RQ 015 - {month}.docx"
     if rq=="RQ016": return f"RQ 016 - Avaliação 5S {d.day:02d}.{d.month:02d}.{d.year}.docx"
     return f"Avaliação Pré Avaliação 5S - {month.capitalize()}.{d.year}.docx"
+
+
+def _norm(value):
+    return re.sub(r"\s+"," ",str(value or "")).strip().lower()
+
+def _mark_choice(text, choice):
+    raw=str(text or "")
+    labels={
+        "I":"Nível I","II":"Nível II","III":"Nível III",
+        "S1":"Especial S1","S2":"Especial S2","S3":"Especial S3","S4":"Especial S4",
+        "aprovado":"APROVADO","reprovado":"REPROVADO",
+    }
+    target=labels.get(str(choice),str(choice))
+    def repl(m):
+        label=m.group(2)
+        return f"( X ) {label}" if _norm(label)==_norm(target) else f"(   ) {label}"
+    return re.sub(r"\(\s*[xX]?\s*\)\s*([^()]+?)(?=(?:\s*\(\s*[xX]?\s*\))|$)",lambda m: repl(type("M",(),{"group":lambda self,n: m.group(0) if n==0 else (None if n==1 else m.group(1))})()),raw)
+
+def _fill_choice_text(raw, selected):
+    raw=str(raw or "")
+    candidates=["Nível I","Nível II","Nível III","Especial S1","Especial S2","Especial S3","Especial S4","APROVADO","REPROVADO"]
+    out=raw
+    for label in candidates:
+        if label.lower() not in out.lower():
+            continue
+        pattern=re.compile(r"\(\s*[xX]?\s*\)\s*"+re.escape(label),re.I)
+        out=pattern.sub(("( X ) " if _norm(label)==_norm(selected) else "(   ) ")+label,out)
+    return out
+
+def _first(payload,key,default=""):
+    v=payload.get(key,default)
+    return "" if v is None else str(v)
+
+def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
+    doc=Document(BytesIO(template_bytes))
+    inspection=payload.get("inspection") or {}
+    process=payload.get("process") or {}
+    items=payload.get("items") or []
+    checks=payload.get("checklist") or []
+    check_results=payload.get("check_results") or []
+    dim_params=payload.get("dim_params") or []
+    dim_configs=payload.get("dim_configs") or []
+    dim_results=payload.get("dim_results") or []
+    photos=payload.get("photos") or []
+    inspector=payload.get("inspector_name") or ""
+
+    first_item=items[0] if items else {}
+    product=first_item.get("produto") or {}
+    identification={
+        "produto / descrição": product.get("nome") or "",
+        "código do cliente": product.get("sku") or "",
+        "cliente": process.get("cliente") or "",
+        "processo fst": process.get("codigo") or "",
+        "nota fiscal": process.get("nota_fiscal") or "",
+        "lote": first_item.get("lote") or "",
+        "material": first_item.get("material") or "",
+        "capacidade": first_item.get("capacidade") or "",
+        "origem": process.get("origem") or "",
+        "transporte": process.get("transporte") or "",
+        "quantidade recebida": first_item.get("quantidade") or "",
+        "quantidade por caixa": first_item.get("quantidade_por_caixa") or "",
+        "nº de caixas recebidas": first_item.get("caixas_recebidas") or "",
+        "n° de caixas recebidas": first_item.get("caixas_recebidas") or "",
+        "chegada no cd": fmt_date(process.get("chegada_cd")),
+        "data da inspeção": fmt_date(inspection.get("data_inspecao")),
+    }
+
+    for table in doc.tables:
+        for row in table.rows:
+            cells=row.cells
+            if len(cells)>=2:
+                for idx in range(0,len(cells)-1):
+                    label=_norm(cells[idx].text)
+                    if label in identification:
+                        set_cell(cells[idx+1],identification[label],8)
+            joined=" ".join(c.text for c in cells)
+            if "Nível de inspeção" in joined or "Nível I" in joined:
+                level=str(inspection.get("nivel_inspecao") or "")
+                for cell in cells:
+                    if "Nível" in cell.text or "Especial" in cell.text:
+                        set_cell(cell,_fill_choice_text(cell.text,{"I":"Nível I","II":"Nível II","III":"Nível III","S1":"Especial S1","S2":"Especial S2","S3":"Especial S3","S4":"Especial S4"}.get(level,level)),8)
+            if len(cells)>=2 and _norm(cells[0].text)=="quantidade amostrada":
+                set_cell(cells[1],inspection.get("tamanho_amostra") or inspection.get("total_inspecionado") or "",8,bold=True,center=True)
+            if len(cells)>=4 and _norm(cells[2].text)=="caixas avaliadas":
+                set_cell(cells[3],inspection.get("caixas_avaliar") or "",8,bold=True,center=True)
+
+    by_check={str(x.get("checklist_id")):x for x in check_results}
+    by_order={str(x.get("ordem")):x for x in checks}
+    for table in doc.tables:
+        if not table.rows: continue
+        headers=[_norm(c.text) for c in table.rows[0].cells]
+        if "análise" in headers and "c" in headers and "nc" in headers and "na" in headers:
+            for row in table.rows[1:]:
+                order=row.cells[0].text.strip().rstrip(".")
+                check=by_order.get(order)
+                if not check: continue
+                result=by_check.get(str(check.get("id")),{}).get("resultado")
+                if len(row.cells)>=6:
+                    set_cell(row.cells[3],"X" if result=="conforme" else "",9,bold=True,center=True)
+                    set_cell(row.cells[4],"X" if result=="nao_conforme" else "",9,bold=True,center=True)
+                    set_cell(row.cells[5],"X" if result=="nao_aplicavel" else "",9,bold=True,center=True)
+
+    config_key={(str(x.get("processo_item_id")),str(x.get("parametro_id"))):x for x in dim_configs}
+    result_key={}
+    for x in dim_results:
+        result_key.setdefault((str(x.get("processo_item_id")),str(x.get("parametro_id"))),[]).append(x)
+    for vals in result_key.values():
+        vals.sort(key=lambda x:int(x.get("sequencia_amostra") or 0))
+
+    first_item_id=str(first_item.get("id") or "")
+    params_by_name={_norm(x.get("nome")):x for x in dim_params}
+    for table in doc.tables:
+        for ridx,row in enumerate(table.rows):
+            if len(row.cells)<4: continue
+            pname=_norm(row.cells[0].text)
+            param=params_by_name.get(pname)
+            if not param: continue
+            pid=str(param.get("id"))
+            cfg=config_key.get((first_item_id,pid),{})
+            vals=result_key.get((first_item_id,pid),[])
+            if len(row.cells)>1:
+                base=row.cells[1].text.split(":")[0].strip()
+                set_cell(row.cells[1],f"{base}: {cfg.get('equipamento') or ''}",7.5)
+            if len(row.cells)>2:
+                base=row.cells[2].text.split(":")[0].strip()
+                set_cell(row.cells[2],f"{base}: {cfg.get('codigo_equipamento') or ''}",7.5)
+            if len(row.cells)>3:
+                base=row.cells[3].text.split(":")[0].strip()
+                spec=cfg.get("especificacao_desvio") or ""
+                set_cell(row.cells[3],f"{base}: {spec}",7.5)
+            for rr in table.rows[ridx+1:min(ridx+3,len(table.rows))]:
+                for cell in rr.cells:
+                    m=re.match(r"\s*(\d+)\.",cell.text)
+                    if not m: continue
+                    seq=int(m.group(1))
+                    hit=next((x for x in vals if int(x.get("sequencia_amostra") or 0)==seq),None)
+                    if hit:
+                        value=hit.get("valor")
+                        unit=hit.get("unidade") or cfg.get("unidade") or param.get("unidade") or ""
+                        set_cell(cell,f"{seq}. {value} {unit}".strip(),7.5)
+
+    any_dim_nc=any(x.get("conforme") is False for x in dim_results)
+    for table in doc.tables:
+        for row in table.rows:
+            if row.cells and _norm(row.cells[0].text)=="resultado dimensional":
+                for cell in row.cells[1:]:
+                    set_cell(cell,_fill_choice_text(cell.text,"REPROVADO" if any_dim_nc else "APROVADO"),8,bold=True)
+
+    final_result=str(inspection.get("resultado") or "").lower()
+    for table in doc.tables:
+        for row in table.rows:
+            if not row.cells: continue
+            label=_norm(row.cells[0].text)
+            if label=="resultado final":
+                for cell in row.cells[1:]:
+                    set_cell(cell,_fill_choice_text(cell.text,"REPROVADO" if final_result=="reprovado" else "APROVADO"),8,bold=True)
+            elif label=="inspecionado por" and len(row.cells)>=2:
+                set_cell(row.cells[1],inspector,8)
+                if len(row.cells)>=4: set_cell(row.cells[3],fmt_date(inspection.get("data_inspecao")),8)
+            elif label.startswith("responsável técnico") and len(row.cells)>=2:
+                set_cell(row.cells[1],"Vanessa T. Casarin – Responsável Técnica – CRF 22864",8)
+            elif label.startswith("observação / conclusão") and len(row.cells)>=2:
+                set_cell(row.cells[1],inspection.get("observacoes") or "",8)
+
+    photo_table=None
+    for idx,table in enumerate(doc.tables):
+        if any("FOTO" in (c.text or "").upper() for row in table.rows for c in row.cells):
+            if len(table.rows)>=2 and len(table.columns)>=2:
+                photo_table=table
+    if photo_table and photos:
+        cells=[cell for row in photo_table.rows for cell in row.cells]
+        for idx,item in enumerate(photos[:len(cells)]):
+            data=photo_bytes(item.get("bytes"))
+            if data:
+                add_photo(cells[idx],data,item.get("caption") or "",width=1.75)
+
+    out=BytesIO(); doc.save(out); return out.getvalue()
+
+def inspection_file_name(process_code:str|None,inspection_number:str|None)->str:
+    process=str(process_code or "FST").replace("/","-")
+    number=str(inspection_number or "INSPECAO").replace("/","-")
+    return f"{process} - {number} - Laudo de Inspeção.docx"
