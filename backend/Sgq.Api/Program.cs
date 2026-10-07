@@ -691,6 +691,60 @@ app.MapPost("/api/inspecoes/{id}/excluir", async (string id,DeleteInspectionRequ
     catch(Exception e){return Results.Json(Error("Falha ao excluir inspeção.",e.Message),statusCode:500);}
 });
 
+app.MapGet("/api/produtos/sugerir", async (string termo,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var q=(termo??"").Trim();
+        if(q.Length<2) return Results.Ok(new {data=Array.Empty<object>(),error=(object?)null});
+        var client=factory.CreateClient("supabase");
+        var escaped=q.Replace("*","").Replace(","," ").Trim();
+        var filter=Uri.EscapeDataString($"(sku.ilike.*{escaped}*,nome.ilike.*{escaped}*)");
+        var rows=await RestAsync(client,token,HttpMethod.Get,"produtos",
+            $"select=id,sku,nome,foto_principal_path&or={filter}&order=sku.asc&limit=8");
+        var local=rows is {ValueKind:JsonValueKind.Array}
+            ? rows.Value.EnumerateArray().Select(x=>new {
+                id=x.GetProperty("id").GetString(),
+                sku=x.TryGetProperty("sku",out var sk)?sk.GetString():null,
+                nome=x.TryGetProperty("nome",out var nm)?nm.GetString():null,
+                origem="cache"
+            }).ToList<object>()
+            : new List<object>();
+
+        if(local.Count<5)
+        {
+            var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/omie-produto");
+            ApplyAuth(fn,token);
+            fn.Content=JsonContent.Create(new {termo=q,modo="sugerir"});
+            var res=await client.SendAsync(fn);
+            if(res.IsSuccessStatusCode)
+            {
+                var raw=await res.Content.ReadAsStringAsync();
+                try
+                {
+                    using var doc=JsonDocument.Parse(raw);
+                    if(doc.RootElement.TryGetProperty("sugestoes",out var arr)&&arr.ValueKind==JsonValueKind.Array)
+                    {
+                        foreach(var item in arr.EnumerateArray())
+                        {
+                            var sku=item.TryGetProperty("codigo",out var sk)?sk.GetString():null;
+                            var nome=item.TryGetProperty("descricao",out var nm)?nm.GetString():null;
+                            if(string.IsNullOrWhiteSpace(sku)||local.Any(x=>String.Equals((string?)x.GetType().GetProperty("sku")?.GetValue(x),sku,StringComparison.OrdinalIgnoreCase))) continue;
+                            local.Add(new {id=(string?)null,sku,nome,origem="omie"});
+                            if(local.Count>=8) break;
+                        }
+                    }
+                } catch {}
+            }
+        }
+
+        return Results.Ok(new {data=local.Take(8),error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao sugerir produtos.",e.Message),statusCode:500);}
+});
+
 app.MapPost("/api/produtos/consultar", async (ProductLookupRequest input,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -1012,6 +1066,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 data_inspecao = inspectionDate,
                 responsavel_id = userId,
                 iniciada_em = DateTimeOffset.UtcNow,
+                observacao_interna = string.IsNullOrWhiteSpace(input.ObservacaoInterna) ? null : input.ObservacaoInterna.Trim(),
                 parametros_amostragem = new {
                     fonte = "backend_dotnet",
                     regra_caixas = "informada_por_item",
@@ -1046,6 +1101,115 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
     }
 });
 
+app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequest input, HttpRequest request, IHttpClientFactory factory) =>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=grupo_inspecao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (ins,found)=FirstRow(insRows);
+        if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var groupId=ins!.Value.GetProperty("grupo_inspecao_id").GetString()!;
+
+        var groupRows=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
+            $"select=processo_id&id=eq.{Uri.EscapeDataString(groupId)}&limit=1");
+        var (group,gf)=FirstRow(groupRows);
+        if(!gf) return Results.Json(Error("Grupo de inspeção não encontrado."),statusCode:404);
+        var processId=group!.Value.GetProperty("processo_id").GetString()!;
+
+        var processCode=(input.Codigo??"").Trim();
+        var processUpdate=new Dictionary<string,object?> {
+            ["cliente"]=string.IsNullOrWhiteSpace(input.Cliente)?null:input.Cliente.Trim(),
+            ["nota_fiscal"]=string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim(),
+            ["origem"]=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
+            ["transporte"]=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
+            ["chegada_cd"]=input.ChegadaCd,
+            ["atualizado_em"]=DateTimeOffset.UtcNow
+        };
+        if(!string.IsNullOrWhiteSpace(processCode)) processUpdate["codigo"]=processCode;
+        await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(processId)}",processUpdate,"return=minimal");
+
+        foreach(var item in input.Itens ?? [])
+        {
+            if(string.IsNullOrWhiteSpace(item.ProcessoItemId)) continue;
+            var productId=(string?)null;
+            if(!string.IsNullOrWhiteSpace(item.Sku))
+            {
+                var sku=item.Sku.Trim();
+                var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
+                    $"select=id&sku=ilike.{Uri.EscapeDataString(sku)}&limit=1");
+                var (prod,pf)=FirstRow(productRows);
+                if(pf) productId=prod!.Value.GetProperty("id").GetString();
+                else
+                {
+                    var created=await RestAsync(client,token,HttpMethod.Post,"produtos","select=id",
+                        new {sku,nome=string.IsNullOrWhiteSpace(item.Nome)?"Produto em preenchimento":item.Nome.Trim()},"return=representation");
+                    var (pr,pc)=FirstRow(created);
+                    if(pc) productId=pr!.Value.GetProperty("id").GetString();
+                }
+                if(!string.IsNullOrWhiteSpace(productId) && !string.IsNullOrWhiteSpace(item.Nome))
+                    await RestAsync(client,token,HttpMethod.Patch,"produtos",$"id=eq.{Uri.EscapeDataString(productId)}",
+                        new {nome=item.Nome.Trim()},"return=minimal");
+            }
+
+            var patch=new Dictionary<string,object?> {
+                ["lote"]=string.IsNullOrWhiteSpace(item.Lote)?null:item.Lote.Trim(),
+                ["material"]=string.IsNullOrWhiteSpace(item.Material)?null:item.Material.Trim(),
+                ["capacidade"]=string.IsNullOrWhiteSpace(item.Capacidade)?null:item.Capacidade.Trim(),
+                ["quantidade"]=Math.Max(0,item.Quantidade),
+                ["quantidade_por_caixa"]=item.QuantidadePorCaixa is >0?item.QuantidadePorCaixa:null,
+                ["caixas_recebidas"]=item.CaixasRecebidas>0?(decimal?)item.CaixasRecebidas:null,
+                ["caixas_inspecionadas"]=item.CaixasInspecionadas>0?(decimal?)item.CaixasInspecionadas:null,
+                ["distribuicao_caixas"]=item.DistribuicaoCaixas is {Count:>0}?item.DistribuicaoCaixas:null
+            };
+            if(!string.IsNullOrWhiteSpace(productId)) patch["produto_id"]=productId;
+            await RestAsync(client,token,HttpMethod.Patch,"processo_itens",$"id=eq.{Uri.EscapeDataString(item.ProcessoItemId)}",patch,"return=minimal");
+            await RestAsync(client,token,HttpMethod.Patch,"grupo_inspecao_itens",
+                $"grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}&processo_item_id=eq.{Uri.EscapeDataString(item.ProcessoItemId)}",
+                new {unidades_por_conjunto=item.UnidadesPorConjunto<=0?1m:item.UnidadesPorConjunto,quantidade_componente=Math.Max(0,item.Quantidade)},"return=minimal");
+        }
+
+        var links=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+            $"select=unidades_por_conjunto,processo_itens(id,quantidade,caixas_recebidas,caixas_inspecionadas)&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
+        var lots=new List<long>();
+        decimal totalBoxes=0,totalInspect=0;
+        if(links is {ValueKind:JsonValueKind.Array})
+        {
+            foreach(var link in links.Value.EnumerateArray())
+            {
+                var per=link.TryGetProperty("unidades_por_conjunto",out var up)&&up.ValueKind==JsonValueKind.Number?up.GetDecimal():1m;
+                if(per<=0) per=1m;
+                if(!link.TryGetProperty("processo_itens",out var pi)||pi.ValueKind!=JsonValueKind.Object) continue;
+                var qty=pi.TryGetProperty("quantidade",out var q)&&q.ValueKind==JsonValueKind.Number?q.GetDecimal():0m;
+                if(qty>0) lots.Add((long)Math.Floor(qty/per));
+                if(pi.TryGetProperty("caixas_recebidas",out var cr)&&cr.ValueKind==JsonValueKind.Number) totalBoxes+=cr.GetDecimal();
+                if(pi.TryGetProperty("caixas_inspecionadas",out var ci)&&ci.ValueKind==JsonValueKind.Number) totalInspect+=ci.GetDecimal();
+            }
+        }
+        var lot=lots.Count>0?lots.Min():1;
+        var level=string.IsNullOrWhiteSpace(input.InspectionLevel)?"I":input.InspectionLevel;
+        var plan=SamplingPlan(lot,level);
+
+        await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",$"id=eq.{Uri.EscapeDataString(groupId)}",
+            new {tamanho_lote_estatistico=lot},"return=minimal");
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {
+                tamanho_lote=lot,tamanho_amostra=plan.Sample,limite_aceitacao=plan.Ac,limite_rejeicao=plan.Re,
+                nivel_inspecao=level,codigo_amostragem=plan.Code,
+                caixas_recebidas=totalBoxes>0?(decimal?)totalBoxes:null,
+                caixas_avaliar=totalInspect>0?(decimal?)totalInspect:null,
+                data_inspecao=input.DataInspecao,
+                observacao_interna=string.IsNullOrWhiteSpace(input.ObservacaoInterna)?null:input.ObservacaoInterna.Trim()
+            },"return=minimal");
+
+        return Results.Ok(new {data=new {ok=true,plano=new {lote,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re}},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao atualizar dados da inspeção.",e.Message),statusCode:500);}
+});
+
 app.MapGet("/api/amostragem/plano", (long lote, string? nivel) =>
 {
     var plan = SamplingPlan(lote, string.IsNullOrWhiteSpace(nivel) ? "I" : nivel);
@@ -1060,12 +1224,6 @@ app.MapPost("/api/inspecoes/{id}/unidades", async (string id, RegisterUnitReques
         var client=factory.CreateClient("supabase");
         var userId=await CurrentUserId(client,token);
 
-        if(!input.Conforme)
-        {
-            if(string.IsNullOrWhiteSpace(input.ChecklistId)) return Results.Json(Error("Selecione o item da IT relacionado à não conformidade."),statusCode:400);
-            if(string.IsNullOrWhiteSpace(input.Descricao)) return Results.Json(Error("Descreva a não conformidade."),statusCode:400);
-        }
-
         var existing=await RestAsync(client,token,HttpMethod.Get,"inspecao_registros",
             $"select=id,conforme&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=sequencia.asc");
         var rows=existing is { ValueKind:JsonValueKind.Array } ? existing.Value.EnumerateArray().ToList() : [];
@@ -1077,7 +1235,7 @@ app.MapPost("/api/inspecoes/{id}/unidades", async (string id, RegisterUnitReques
         if(!found) throw new InvalidOperationException("Falha ao registrar unidade.");
         var regId=regRow!.Value.GetProperty("id").GetString()!;
 
-        if(!input.Conforme)
+        if(!input.Conforme && !string.IsNullOrWhiteSpace(input.ChecklistId) && !string.IsNullOrWhiteSpace(input.Descricao))
         {
             var checklistSeverity=string.IsNullOrWhiteSpace(input.Severidade)?"grave":input.Severidade;
             var ncSeverity=checklistSeverity switch
@@ -1140,26 +1298,23 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
         var client=factory.CreateClient("supabase");
         var userId=await CurrentUserId(client,token);
 
-        if(string.IsNullOrWhiteSpace(input.Resultado))
-        {
-            await RestAsync(client,token,HttpMethod.Patch,"inspecao_checklist_resultados",
-                $"inspecao_id=eq.{Uri.EscapeDataString(id)}&checklist_id=eq.{Uri.EscapeDataString(checkId)}",
-                new { severidade_confirmada=string.IsNullOrWhiteSpace(input.Severidade)?null:input.Severidade },"return=minimal");
-        }
-        else
-        {
-            await RestAsync(client,token,HttpMethod.Post,"inspecao_checklist_resultados",
-                "on_conflict=inspecao_id,checklist_id",
-                new {
-                    inspecao_id=id,
-                    checklist_id=checkId,
-                    resultado=input.Resultado,
-                    severidade_confirmada=input.Resultado=="nao_conforme"?(string.IsNullOrWhiteSpace(input.Severidade)?"grave":input.Severidade):null,
-                    registrado_por=userId,
-                    registrado_em=DateTimeOffset.UtcNow
-                },"resolution=merge-duplicates,return=minimal");
-        }
-        return Results.Ok(new { data=new { ok=true },error=(object?)null });
+        var checkRows=await RestAsync(client,token,HttpMethod.Get,"it_checklist",
+            $"select=classificacao_sugerida&id=eq.{Uri.EscapeDataString(checkId)}&limit=1");
+        var (check,checkFound)=FirstRow(checkRows);
+        var automaticSeverity=checkFound && check!.Value.TryGetProperty("classificacao_sugerida",out var cs) && cs.ValueKind==JsonValueKind.String
+            ? cs.GetString() : null;
+
+        await RestAsync(client,token,HttpMethod.Post,"inspecao_checklist_resultados",
+            "on_conflict=inspecao_id,checklist_id",
+            new {
+                inspecao_id=id,
+                checklist_id=checkId,
+                resultado=input.Resultado,
+                severidade_confirmada=input.Resultado=="nao_conforme"?automaticSeverity:null,
+                registrado_por=userId,
+                registrado_em=DateTimeOffset.UtcNow
+            },"resolution=merge-duplicates,return=minimal");
+        return Results.Ok(new { data=new { ok=true,resultado=input.Resultado,severidade=automaticSeverity },error=(object?)null });
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao salvar checklist.",e.Message),statusCode:500);}
@@ -1185,8 +1340,16 @@ app.MapPut("/api/inspecoes/{id}/dimensionais/{itemId}/{paramId}/config", async (
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         decimal? min=null,max=null;
-        if(input.ValorNominal.HasValue && input.DesvioMenos.HasValue) min=input.ValorNominal.Value-input.DesvioMenos.Value;
-        if(input.ValorNominal.HasValue && input.DesvioMais.HasValue) max=input.ValorNominal.Value+input.DesvioMais.Value;
+        var deviation=input.Desvio ?? input.DesvioMais ?? input.DesvioMenos;
+        if(input.ValorNominal.HasValue && deviation.HasValue)
+        {
+            min=input.ValorNominal.Value-deviation.Value;
+            max=input.ValorNominal.Value+deviation.Value;
+        }
+        var unit=string.IsNullOrWhiteSpace(input.Unidade)?null:input.Unidade.Trim();
+        var autoSpec=input.ValorNominal.HasValue && deviation.HasValue
+            ? $"{input.ValorNominal.Value:0.###}{(string.IsNullOrWhiteSpace(unit)?"":" "+unit)} ± {deviation.Value:0.###}{(string.IsNullOrWhiteSpace(unit)?"":" "+unit)}"
+            : null;
 
         var saved=await RestAsync(client,token,HttpMethod.Post,"inspecao_dimensional_configuracoes",
             "on_conflict=inspecao_id,processo_item_id,parametro_id&select=*",
@@ -1197,13 +1360,13 @@ app.MapPut("/api/inspecoes/{id}/dimensionais/{itemId}/{paramId}/config", async (
                 nao_aplicavel=input.NaoAplicavel,
                 equipamento=input.Equipamento,
                 codigo_equipamento=input.CodigoEquipamento,
-                unidade=input.Unidade,
+                unidade=unit,
                 valor_nominal=input.ValorNominal,
-                desvio_menos=input.DesvioMenos,
-                desvio_mais=input.DesvioMais,
+                desvio_menos=deviation,
+                desvio_mais=deviation,
                 minimo_aceitavel=min,
                 maximo_aceitavel=max,
-                especificacao_desvio=input.EspecificacaoDesvio,
+                especificacao_desvio=autoSpec,
                 tipo_referencia=input.TipoReferencia,
                 atualizado_em=DateTimeOffset.UtcNow
             },"resolution=merge-duplicates,return=representation");
@@ -1277,7 +1440,21 @@ app.MapPut("/api/inspecoes/{id}/testes/{testId}", async (string id,string testId
             "on_conflict=inspecao_id,teste_id",
             new {inspecao_id=id,teste_id=testId,resultado=input.Resultado,registrado_por=userId,registrado_em=DateTimeOffset.UtcNow},
             "resolution=merge-duplicates,return=minimal");
-        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",$"select=it_versao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (ins,found)=FirstRow(insRows);
+        var complete=false;
+        if(found)
+        {
+            var itId=ins!.Value.GetProperty("it_versao_id").GetString()!;
+            var tests=await RestAsync(client,token,HttpMethod.Get,"it_testes_especiais",$"select=id&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true");
+            var results=await RestAsync(client,token,HttpMethod.Get,"inspecao_testes_resultados",$"select=teste_id&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+            var total=tests is {ValueKind:JsonValueKind.Array}?tests.Value.GetArrayLength():0;
+            var done=results is {ValueKind:JsonValueKind.Array}?results.Value.GetArrayLength():0;
+            complete=total==0 || done>=total;
+            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",new {testes_finalizados=complete},"return=minimal");
+        }
+        return Results.Ok(new {data=new {ok=true,finalizados=complete},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao salvar teste.",e.Message),statusCode:500);}
@@ -1331,8 +1508,7 @@ app.MapPost("/api/inspecoes/{id}/concluir", async (string id,FinishInspectionReq
         var testResults=await RestAsync(client,token,HttpMethod.Get,"inspecao_testes_resultados",$"select=teste_id&inspecao_id=eq.{Uri.EscapeDataString(id)}");
         var testCount=tests is {ValueKind:JsonValueKind.Array}?tests.Value.GetArrayLength():0;
         var testDone=testResults is {ValueKind:JsonValueKind.Array}?testResults.Value.GetArrayLength():0;
-        var testsMarked=i.TryGetProperty("testes_finalizados",out var tf)&&tf.ValueKind==JsonValueKind.True;
-        if(testDone<testCount||(testCount>0&&!testsMarked)) pending.Add("Testes especiais incompletos.");
+        if(testDone<testCount) pending.Add("Testes especiais incompletos.");
 
         await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
             new {
@@ -1877,6 +2053,32 @@ table{{border-collapse:collapse;width:100%;margin:8px 0}}td,th{{border:1px solid
     catch(Exception e){return Results.Json(Error("Falha ao gerar laudo.",e.Message),statusCode:500);}
 });
 
+app.MapGet("/api/inspecoes/{id}/retencao-sugestao", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var rows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=observacao_interna&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (ins,found)=FirstRow(rows);
+        if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var note=ins!.Value.TryGetProperty("observacao_interna",out var no)&&no.ValueKind==JsonValueKind.String?no.GetString()??"":"";
+        decimal? qty=null;
+        var matches=Regex.Matches(note,@"(?i)(\d+(?:[\.,]\d+)?)\s*(?:un|unid|unidade|unidades)?[^\n\.;]{0,45}(?:laborat[oó]rio|reten[cç][aã]o|retid[ao]s?)");
+        if(matches.Count==0)
+            matches=Regex.Matches(note,@"(?i)(?:laborat[oó]rio|reten[cç][aã]o|retid[ao]s?)[^\n\.;]{0,45}(\d+(?:[\.,]\d+)?)\s*(?:un|unid|unidade|unidades)?");
+        if(matches.Count>0)
+        {
+            var raw=matches[^1].Groups[1].Value.Replace(",",".");
+            if(decimal.TryParse(raw,System.Globalization.NumberStyles.Any,System.Globalization.CultureInfo.InvariantCulture,out var parsed)) qty=parsed;
+        }
+        return Results.Ok(new {data=new {quantidade=qty,fonte=qty.HasValue?"observacao_interna":null,observacao=note},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao sugerir retenção.",e.Message),statusCode:500);}
+});
+
 app.MapPost("/api/inspecoes/{id}/retencao", async (string id,RetentionRequest input,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -1926,9 +2128,6 @@ app.MapPost("/api/inspecoes/{id}/retencao", async (string id,RetentionRequest in
         {
             if(item.Quantidade<=0 || string.IsNullOrWhiteSpace(item.Endereco))
                 return Results.Json(Error("Quantidade e endereço são obrigatórios para retenção."),statusCode:400);
-            if(string.IsNullOrWhiteSpace(item.FotoCadastroPath))
-                return Results.Json(Error("Foto de cadastro é obrigatória para retenção."),statusCode:400);
-
             var processItemRows=await RestAsync(client,token,HttpMethod.Get,"processo_itens",
                 $"select=id,produto_id,lote&processo_id=eq.{Uri.EscapeDataString(processId)}&id=eq.{Uri.EscapeDataString(item.ProcessoItemId)}&limit=1");
             var (processItem,pif)=FirstRow(processItemRows);
@@ -1941,9 +2140,11 @@ app.MapPost("/api/inspecoes/{id}/retencao", async (string id,RetentionRequest in
             if(already) continue;
 
             var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
-                $"select=nome&id=eq.{Uri.EscapeDataString(productId)}&limit=1");
+                $"select=nome,foto_principal_path&id=eq.{Uri.EscapeDataString(productId)}&limit=1");
             var (product,pf)=FirstRow(productRows);
             var productName=pf && product!.Value.TryGetProperty("nome",out var pn)&&pn.ValueKind==JsonValueKind.String?pn.GetString():null;
+            var principalPhoto=pf && product!.Value.TryGetProperty("foto_principal_path",out var pp)&&pp.ValueKind==JsonValueKind.String?pp.GetString():null;
+            var retentionPhoto=string.IsNullOrWhiteSpace(item.FotoCadastroPath)?principalPhoto:item.FotoCadastroPath;
             var lote=processItem.Value.TryGetProperty("lote",out var lt)&&lt.ValueKind==JsonValueKind.String?lt.GetString():null;
             var code=$"AMO-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
 
@@ -1961,7 +2162,7 @@ app.MapPost("/api/inspecoes/{id}/retencao", async (string id,RetentionRequest in
                     unidade_controle="unidade",
                     descricao=productName,
                     laudo_id=reportId,
-                    foto_cadastro_path=item.FotoCadastroPath
+                    foto_cadastro_path=retentionPhoto
                 },"return=representation");
             var (sample,sf)=FirstRow(createdSample);
             if(!sf) throw new InvalidOperationException("Falha ao criar amostra retida.");
@@ -2421,7 +2622,7 @@ public sealed class RetentionItemRequest
     public string ProcessoItemId { get; set; } = "";
     public decimal Quantidade { get; set; }
     public string Endereco { get; set; } = "";
-    public string FotoCadastroPath { get; set; } = "";
+    public string? FotoCadastroPath { get; set; }
 }
 public sealed class CreateSampleRequest
 {
@@ -2474,6 +2675,7 @@ public sealed class DimConfigRequest
     public string? CodigoEquipamento { get; set; }
     public string? Unidade { get; set; }
     public decimal? ValorNominal { get; set; }
+    public decimal? Desvio { get; set; }
     public decimal? DesvioMenos { get; set; }
     public decimal? DesvioMais { get; set; }
     public string? EspecificacaoDesvio { get; set; }
@@ -2505,10 +2707,12 @@ public sealed class CreateInspectionRequest
     public DateOnly? DataInspecao { get; set; }
     public string ItVersionId { get; set; } = "";
     public string InspectionLevel { get; set; } = "I";
+    public string? ObservacaoInterna { get; set; }
     public List<CreateInspectionItem> Itens { get; set; } = [];
 }
 public sealed class CreateInspectionItem
 {
+    public string? ProcessoItemId { get; set; }
     public string Sku { get; set; } = "";
     public string Nome { get; set; } = "";
     public string? Lote { get; set; }
@@ -2524,6 +2728,8 @@ public sealed class CreateInspectionItem
 }
 public sealed class BoxDistribution
 {
+    public string? Tipo { get; set; }
     public decimal Caixas { get; set; }
     public decimal Unidades { get; set; }
 }
+public sealed class EditInspectionDataRequest : CreateInspectionRequest { }
