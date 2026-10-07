@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, MessageCircle, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { apiGet, apiPost, apiPut, supabase } from './lib/supabase'
@@ -101,12 +101,20 @@ const emptySku = () => ({
   caixasRecebidas: '',
   caixasInspecionadas: '',
   distribuicaoCaixas: '',
+  caixasPadrao: '',
+  unidadesPadrao: '',
+  caixasFracionadas: '',
+  unidadesFracionadas: '',
+  caixasLaboratorio: '',
+  unidadesLaboratorio: '',
   unidadesPorConjunto: '1',
   fotoFile: null as File | null,
   fotoPreview: '',
   fotoPrincipalPath: '',
   omieStatus: '' as '' | 'loading' | 'found' | 'not_found' | 'not_configured' | 'error',
   omieMessage: '',
+  suggestions: [] as Array<{sku:string;nome:string;origem?:string}>,
+  suggesting: false,
 })
 
 function fstDigits(value: string) {
@@ -128,9 +136,7 @@ function formatDateBR(value: string | null | undefined) {
   return y && m && d ? `${d}/${m}/${y}` : raw
 }
 function toggleTransport(current: string, mode: 'Aéreo' | 'Marítimo') {
-  const set = new Set(current.split(',').map((x)=>x.trim()).filter(Boolean))
-  set.has(mode) ? set.delete(mode) : set.add(mode)
-  return [...set].join(', ')
+  return current===mode ? '' : mode
 }
 
 
@@ -167,6 +173,47 @@ function parseBoxDistribution(raw:string) {
     units:groups.reduce((s,g)=>s+(g.caixas*g.unidades),0),
     error:'',
   }
+}
+
+function boxGroupsFromRow(row:any) {
+  const groups:Array<{tipo:string;caixas:number;unidades:number}>=[]
+  const add=(tipo:string,caixasRaw:any,unidadesRaw:any)=>{
+    const caixas=Number(caixasRaw)||0
+    const unidades=Number(unidadesRaw)||0
+    if(caixas>0 && unidades>0) groups.push({tipo,caixas,unidades})
+  }
+  add('padrao',row.caixasPadrao,row.unidadesPadrao || row.quantidadePorCaixa)
+  add('fracionada',row.caixasFracionadas,row.unidadesFracionadas)
+  add('laboratorio',row.caixasLaboratorio,row.unidadesLaboratorio)
+  if (!groups.length && row.distribuicaoCaixas) {
+    const legacy=parseBoxDistribution(row.distribuicaoCaixas)
+    if (legacy.valid) return legacy.groups.map((g:any,i:number)=>({...g,tipo:i===0?'padrao':'fracionada'}))
+  }
+  return groups
+}
+
+function boxDistributionTotals(row:any) {
+  const groups=boxGroupsFromRow(row)
+  return {
+    groups,
+    boxes:groups.reduce((s,g)=>s+g.caixas,0),
+    units:groups.reduce((s,g)=>s+(g.caixas*g.unidades),0),
+    expression:groups.map((g)=>`${g.caixas}×${g.unidades}`).join(' + '),
+  }
+}
+
+function applyBoxGroupsToSku(base:any, groups:any[]|null|undefined) {
+  const next={...base}
+  for (const g of groups ?? []) {
+    const tipo=String(g?.tipo ?? '').toLowerCase()
+    if (tipo==='padrao') { next.caixasPadrao=String(g.caixas ?? ''); next.unidadesPadrao=String(g.unidades ?? '') }
+    else if (tipo==='laboratorio' || tipo==='retida' || tipo==='retencao') { next.caixasLaboratorio=String(g.caixas ?? ''); next.unidadesLaboratorio=String(g.unidades ?? '') }
+    else if (tipo==='fracionada') { next.caixasFracionadas=String(g.caixas ?? ''); next.unidadesFracionadas=String(g.unidades ?? '') }
+    else if (!next.caixasPadrao) { next.caixasPadrao=String(g.caixas ?? ''); next.unidadesPadrao=String(g.unidades ?? '') }
+    else if (!next.caixasFracionadas) { next.caixasFracionadas=String(g.caixas ?? ''); next.unidadesFracionadas=String(g.unidades ?? '') }
+    else { next.caixasLaboratorio=String(g.caixas ?? ''); next.unidadesLaboratorio=String(g.unidades ?? '') }
+  }
+  return next
 }
 
 function zplText(value:string|null|undefined,max=54) {
@@ -285,7 +332,7 @@ export default function App() {
   }>>({})
   const [retentionReason, setRetentionReason] = useState('')
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
-  const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string;productId:string}>>([])
+  const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string;productId:string;isProductId:boolean}>>([])
   const [pendingModal, setPendingModal] = useState<string[]>([])
   const [aiLoading, setAiLoading] = useState(false)
   const [assistantOpen, setAssistantOpen] = useState(false)
@@ -315,8 +362,12 @@ export default function App() {
     dataInspecao: new Date().toISOString().slice(0, 10),
     itVersionId: '',
     inspectionLevel: 'I',
+    observacaoInterna: '',
   })
   const [skuRows, setSkuRows] = useState([emptySku()])
+  const productSearchTimers = useRef<Record<number,number>>({})
+  const [editingInspectionData, setEditingInspectionData] = useState<any>(null)
+  const [retentionSuggestion, setRetentionSuggestion] = useState<{quantidade:number|null;fonte:string|null}>({quantidade:null,fonte:null})
 
   const [itForm, setItForm] = useState({
     codigo: '',
