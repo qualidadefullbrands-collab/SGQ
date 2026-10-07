@@ -776,7 +776,11 @@ app.MapPost("/api/produtos/consultar", async (ProductLookupRequest input,HttpReq
         var found=omie.TryGetProperty("found",out var fd)&&fd.ValueKind==JsonValueKind.True;
         var descricao=omie.TryGetProperty("descricao",out var de)&&de.ValueKind==JsonValueKind.String?de.GetString():null;
         if(!found||string.IsNullOrWhiteSpace(descricao))
-            return Results.Ok(new {data=new {found=false,error="not_found",message="Código não localizado no cadastro de produtos do OMIE."},error=(object?)null});
+        {
+            object? suggestions=null;
+            if(omie.TryGetProperty("sugestoes",out var sg)) suggestions=sg.Clone();
+            return Results.Ok(new {data=new {found=false,error="not_found",message="Código não localizado no cadastro de produtos do OMIE.",sugestoes=suggestions},error=(object?)null});
+        }
 
         var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
             $"select=id,foto_principal_path&sku=eq.{Uri.EscapeDataString(code)}&limit=1");
