@@ -213,14 +213,21 @@ async function imageUrlToGfa(url:string,maxWidth=190,maxHeight=145) {
 }
 
 const LOT_CODES = [
-  { min:2,max:8,I:'A',II:'A',S2:'A' }, { min:9,max:15,I:'A',II:'B',S2:'A' },
-  { min:16,max:25,I:'B',II:'C',S2:'A' }, { min:26,max:50,I:'C',II:'D',S2:'B' },
-  { min:51,max:90,I:'C',II:'E',S2:'B' }, { min:91,max:150,I:'D',II:'F',S2:'B' },
-  { min:151,max:280,I:'E',II:'G',S2:'C' }, { min:281,max:500,I:'F',II:'H',S2:'C' },
-  { min:501,max:1200,I:'G',II:'J',S2:'C' }, { min:1201,max:3200,I:'H',II:'K',S2:'D' },
-  { min:3201,max:10000,I:'J',II:'L',S2:'D' }, { min:10001,max:35000,I:'K',II:'M',S2:'D' },
-  { min:35001,max:150000,I:'L',II:'N',S2:'E' }, { min:150001,max:500000,I:'M',II:'P',S2:'E' },
-  { min:500001,max:Number.MAX_SAFE_INTEGER,I:'N',II:'Q',S2:'E' },
+  { min:2,max:8,I:'A',II:'A',III:'B',S1:'A',S2:'A',S3:'A',S4:'A' },
+  { min:9,max:15,I:'A',II:'B',III:'C',S1:'A',S2:'A',S3:'A',S4:'A' },
+  { min:16,max:25,I:'B',II:'C',III:'D',S1:'A',S2:'A',S3:'B',S4:'B' },
+  { min:26,max:50,I:'C',II:'D',III:'E',S1:'A',S2:'B',S3:'B',S4:'C' },
+  { min:51,max:90,I:'C',II:'E',III:'F',S1:'B',S2:'B',S3:'C',S4:'C' },
+  { min:91,max:150,I:'D',II:'F',III:'G',S1:'B',S2:'B',S3:'C',S4:'D' },
+  { min:151,max:280,I:'E',II:'G',III:'H',S1:'B',S2:'C',S3:'D',S4:'E' },
+  { min:281,max:500,I:'F',II:'H',III:'J',S1:'B',S2:'C',S3:'D',S4:'E' },
+  { min:501,max:1200,I:'G',II:'J',III:'K',S1:'C',S2:'C',S3:'E',S4:'F' },
+  { min:1201,max:3200,I:'H',II:'K',III:'L',S1:'C',S2:'D',S3:'E',S4:'G' },
+  { min:3201,max:10000,I:'J',II:'L',III:'M',S1:'C',S2:'D',S3:'F',S4:'H' },
+  { min:10001,max:35000,I:'K',II:'M',III:'N',S1:'C',S2:'D',S3:'F',S4:'J' },
+  { min:35001,max:150000,I:'L',II:'N',III:'P',S1:'D',S2:'E',S3:'G',S4:'K' },
+  { min:150001,max:500000,I:'M',II:'P',III:'Q',S1:'D',S2:'E',S3:'G',S4:'L' },
+  { min:500001,max:Number.MAX_SAFE_INTEGER,I:'N',II:'Q',III:'R',S1:'D',S2:'E',S3:'H',S4:'M' },
 ]
 const SAMPLE_SIZE: Record<string,number> = { A:2,B:3,C:5,D:8,E:13,F:20,G:32,H:50,J:80,K:125,L:200,M:315,N:500,P:800,Q:1250,R:2000 }
 const AC_RE_15: Record<string,{ac:number;re:number}> = {
@@ -233,7 +240,7 @@ function samplingPlan(lot:number, level:string) {
   const row=LOT_CODES.find((x)=>lot>=x.min&&lot<=x.max)
   const code=row ? String((row as any)[level] ?? row.I) : ''
   const sample=SAMPLE_SIZE[code] ?? 0
-  if (level==='S2') return { code, sample, ac:null, re:null }
+  if (level.startsWith('S')) return { code, sample, ac:null, re:null }
   const rule=AC_RE_15[code]
   return { code, sample, ac:rule?.ac ?? null, re:rule?.re ?? null }
 }
@@ -1641,7 +1648,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <select value={inspection.inspectionLevel} onChange={(e)=>setInspection({...inspection,inspectionLevel:e.target.value})}>
                     <option value="I">Nível I</option>
                     <option value="II">Nível II</option>
+                    <option value="III">Nível III</option>
+                    <option value="S1">Especial S1</option>
                     <option value="S2">Especial S2</option>
+                    <option value="S3">Especial S3</option>
+                    <option value="S4">Especial S4</option>
                   </select>
                 </label>
               </div>
