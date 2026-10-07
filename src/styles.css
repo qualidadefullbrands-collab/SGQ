@@ -1509,3 +1509,87 @@ input,select,textarea{min-height:46px;padding:11px 13px;font-size:15px}
 @media(max-width:650px){
   .photo-final-lock{align-items:flex-start}
 }
+
+
+/* ===== Inspection UX v3: faster, clearer, tablet-friendly ===== */
+:root{font-size:16px}
+body{font-size:16px}
+label,.field-label{font-size:14px}
+input,select,textarea,button{font-size:15px}
+.field-status,.field-hint,.section-note{font-size:12px;line-height:1.45}
+.section-card h2,.section-title h2{font-size:18px}
+.check-copy b{font-size:15px;line-height:1.35}
+.check-copy span{font-size:13px}
+.check-copy small{display:block;margin-top:5px;color:#667085;font-size:11px}
+.plan-grid small,.computed span{font-size:12px}
+.plan-grid strong{font-size:20px}
+
+.product-search-field{position:relative}
+.product-suggestions{
+  position:absolute;z-index:30;top:100%;left:0;right:0;
+  max-height:260px;overflow:auto;margin-top:5px;padding:5px;
+  border:1px solid #ccd9e1;border-radius:10px;background:#fff;
+  box-shadow:0 16px 32px rgba(16,24,40,.16)
+}
+.product-suggestions button{
+  width:100%;display:grid;grid-template-columns:110px minmax(0,1fr);gap:10px;
+  padding:9px 10px;border:0;border-radius:7px;background:#fff;text-align:left;color:#344054
+}
+.product-suggestions button:hover{background:#eef6fc}
+.product-suggestions b{color:#1769aa}
+.product-suggestions span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+
+.box-distribution-editor{
+  padding:14px;border:1px solid #d7e2e8;border-radius:10px;background:#f9fbfc
+}
+.box-distribution-editor>.field-label{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.box-distribution-editor>.field-label small{color:#667085;font-weight:500}
+.distribution-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.distribution-grid.compact{margin-top:10px}
+.distribution-line{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:11px;border:1px solid #e0e7ec;border-radius:9px;background:#fff}
+.distribution-line strong{grid-column:1/-1;color:#344054;font-size:13px}
+.distribution-line label{font-size:11px}
+.distribution-line input{min-height:38px;padding:8px 10px}
+
+.inspection-quick-nav{
+  position:sticky;top:74px;z-index:10;display:flex;gap:6px;overflow-x:auto;
+  margin:0 0 14px;padding:7px;border:1px solid #dce5ea;border-radius:10px;
+  background:rgba(255,255,255,.96);box-shadow:0 2px 8px rgba(16,24,40,.04)
+}
+.inspection-quick-nav a{
+  flex:0 0 auto;padding:8px 11px;border-radius:7px;color:#475467;
+  text-decoration:none;font-size:12px;font-weight:800
+}
+.inspection-quick-nav a:hover{background:#eef6fc;color:#1769aa}
+
+.compact-checklist{gap:7px}
+.compact-checklist .check-row{grid-template-columns:minmax(0,1fr) auto;padding:12px 14px}
+.tri-buttons.quick{gap:7px}
+.tri-buttons.quick button{min-width:58px;min-height:44px;padding:9px 12px;font-size:14px}
+.test-actions{display:flex;align-items:center;gap:10px}
+.photo-id-flag{justify-self:start;padding:6px 8px}
+.compact-product-select{min-height:36px;padding:6px 8px;font-size:12px}
+.retention-suggestion{
+  display:flex;align-items:center;gap:8px;margin:10px 0 4px;padding:10px 12px;
+  border:1px solid #cfe0eb;border-radius:9px;background:#f4f9fc;color:#36576d;font-size:13px
+}
+.inspection-edit-modal{width:min(980px,calc(100vw - 28px));max-height:92vh;overflow:auto}
+.edit-items-list{display:grid;gap:12px;margin:16px 0}
+.sku-card.compact{padding:13px}
+.internal-note-panel .actions{margin-top:8px}
+.retention-row{grid-template-columns:minmax(220px,1.4fr) 130px minmax(190px,1fr) auto}
+
+@media(max-width:900px){
+  .distribution-grid{grid-template-columns:1fr}
+  .box-distribution-editor>.field-label{align-items:flex-start;flex-direction:column;gap:3px}
+  .inspection-quick-nav{top:122px}
+}
+@media(max-width:650px){
+  :root{font-size:16px}
+  label,.field-label{font-size:14px}
+  input,select,textarea,button{font-size:16px}
+  .tri-buttons.quick{width:100%}
+  .tri-buttons.quick button{flex:1;min-height:48px}
+  .compact-checklist .check-row{grid-template-columns:1fr}
+  .inspection-quick-nav{top:128px}
+}
