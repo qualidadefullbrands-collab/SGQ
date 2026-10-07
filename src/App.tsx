@@ -2509,6 +2509,50 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </section>
       )}
 
+      {editingInspectionData && (
+        <div className="modal-backdrop" onClick={()=>setEditingInspectionData(null)}>
+          <article className="sample-detail inspection-edit-modal" onClick={(e)=>e.stopPropagation()}>
+            <button className="close" type="button" onClick={()=>setEditingInspectionData(null)}>×</button>
+            <span className="eyebrow">DADOS DA INSPEÇÃO</span>
+            <h2>Editar a qualquer momento</h2>
+            <p className="muted">As alterações recalculam lote, amostra e Ac/Re sem recriar a inspeção.</p>
+            <div className="form-grid">
+              <label>Processo FST<input value={editingInspectionData.codigo ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,codigo:e.target.value})}/></label>
+              <label>Cliente<input value={editingInspectionData.cliente ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,cliente:e.target.value})}/></label>
+              <label>Nota fiscal<input value={editingInspectionData.notaFiscal ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,notaFiscal:e.target.value})}/></label>
+              <label>Chegada no CD<input type="date" value={editingInspectionData.chegadaCd ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,chegadaCd:e.target.value})}/></label>
+              <label>Origem<input value={editingInspectionData.origem ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,origem:e.target.value})}/></label>
+              <div className="field-label"><span>Transporte</span><div className="transport-checks">
+                <label className="check-option"><input type="checkbox" checked={editingInspectionData.transporte==='Aéreo'} onChange={()=>setEditingInspectionData({...editingInspectionData,transporte:toggleTransport(editingInspectionData.transporte || '','Aéreo')})}/><span>Aéreo</span></label>
+                <label className="check-option"><input type="checkbox" checked={editingInspectionData.transporte==='Marítimo'} onChange={()=>setEditingInspectionData({...editingInspectionData,transporte:toggleTransport(editingInspectionData.transporte || '','Marítimo')})}/><span>Marítimo</span></label>
+              </div></div>
+              <label>Data da inspeção<input type="date" value={editingInspectionData.dataInspecao ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,dataInspecao:e.target.value})}/></label>
+              <label>Nível de inspeção<select value={editingInspectionData.inspectionLevel ?? 'I'} onChange={(e)=>setEditingInspectionData({...editingInspectionData,inspectionLevel:e.target.value})}><option value="I">Nível I</option><option value="II">Nível II</option><option value="III">Nível III</option><option value="S1">S1</option><option value="S2">S2</option><option value="S3">S3</option><option value="S4">S4</option></select></label>
+              <label className="span-2">Observação interna<textarea rows={3} value={editingInspectionData.observacaoInterna ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,observacaoInterna:e.target.value})}/><small className="field-hint">Uso interno da Qualidade, não disponível no laudo</small></label>
+            </div>
+            <div className="edit-items-list">
+              {(editingInspectionData.itens ?? []).map((row:any,i:number)=>{ const d=boxDistributionTotals(row); return <article className="sku-card compact" key={row.processoItemId || i}>
+                <div className="sku-card-head"><strong>{row.sku || 'Produto'} · {row.nome || 'Em preenchimento'}</strong></div>
+                <div className="form-grid">
+                  <label>Código<input value={row.sku} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,sku:e.target.value}:x)})}/></label>
+                  <label>Descrição<input value={row.nome} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,nome:e.target.value}:x)})}/></label>
+                  <label>Lote<input value={row.lote} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,lote:e.target.value}:x)})}/></label>
+                  <label>Quantidade recebida<input type="number" step="0.01" value={row.quantidade} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,quantidade:e.target.value}:x)})}/></label>
+                  <label>Caixas recebidas<input type="number" step="1" value={row.caixasRecebidas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasRecebidas:e.target.value}:x)})}/></label>
+                  <label>Caixas inspecionadas<input type="number" step="1" value={row.caixasInspecionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasInspecionadas:e.target.value}:x)})}/></label>
+                </div>
+                <div className="distribution-grid compact">
+                  <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" value={row.caixasPadrao} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasPadrao:e.target.value}:x)})}/></label><label>Un/caixa<input type="number" value={row.unidadesPadrao} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,unidadesPadrao:e.target.value}:x)})}/></label></div>
+                  <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" value={row.caixasFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasFracionadas:e.target.value}:x)})}/></label><label>Un/caixa<input type="number" value={row.unidadesFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,unidadesFracionadas:e.target.value}:x)})}/></label></div>
+                  <div className="distribution-line"><strong>Laboratório</strong><label>Caixas<input type="number" value={row.caixasLaboratorio} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasLaboratorio:e.target.value}:x)})}/></label><label>Un/caixa<input type="number" value={row.unidadesLaboratorio} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,unidadesLaboratorio:e.target.value}:x)})}/></label></div>
+                </div>
+                {!!d.groups.length && <small className="field-hint">{d.expression} = {d.units.toLocaleString('pt-BR')} un</small>}
+              </article>})}
+            </div>
+            <button className="primary wide" type="button" onClick={saveEditingInspectionData}>Salvar e recalcular plano</button>
+          </article>
+        </div>
+      )}
       {editingProcess && (
         <div className="modal-backdrop" onClick={()=>setEditingProcess(null)}>
           <form className="sample-detail" onSubmit={saveProcessEdit} onClick={(e)=>e.stopPropagation()}>
@@ -2527,46 +2571,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </div>
       )}
 
-      {ncDraft.open && (
-        <div className="modal-backdrop">
-          <form className="sample-detail" onSubmit={(e)=>{e.preventDefault();persistUnit(false,ncDraft)}}>
-            <button className="close" type="button" onClick={resetNcDraft}>×</button>
-            <span className="eyebrow">NÃO CONFORMIDADE</span>
-            <h2>Registrar NC</h2>
-
-            <label>Item da IT relacionado
-              <select required value={ncDraft.checklistId} onChange={(e)=>setNcDraft({...ncDraft,checklistId:e.target.value})}>
-                <option value="">Selecione o item verificado</option>
-                {(detail?.checklist ?? []).map((x:any)=><option key={x.id} value={x.id}>{x.ordem}. {x.requisito}</option>)}
-              </select>
-            </label>
-
-            <label>Componente / produto
-              <select value={ncDraft.itemId} onChange={(e)=>setNcDraft({...ncDraft,itemId:e.target.value})}>
-                <option value="">Conjunto / geral</option>
-                {(detail?.items ?? []).map((x:any)=><option key={x.processo_itens.id} value={x.processo_itens.id}>{x.processo_itens.produtos?.sku} · {x.processo_itens.produtos?.nome}</option>)}
-              </select>
-            </label>
-
-            <label>Classificação
-              <select value={ncDraft.severity} onChange={(e)=>setNcDraft({...ncDraft,severity:e.target.value})}>
-                <option value="critico">Crítico</option>
-                <option value="grave">Grave</option>
-                <option value="toleravel">Tolerável</option>
-              </select>
-            </label>
-
-            <label>Descrição<textarea required rows={4} value={ncDraft.description} onChange={(e)=>setNcDraft({...ncDraft,description:e.target.value})}/></label>
-
-            <div className="nc-photo-deferred">
-              <Camera size={18}/>
-              <span>A foto não é cadastrada aqui. As evidências serão adicionadas juntas na etapa final da inspeção.</span>
-            </div>
-
-            <button className="danger wide" type="submit">Registrar NC</button>
-          </form>
-        </div>
-      )}
 
       {!!pendingModal.length && (
         <div className="modal-backdrop" onClick={()=>setPendingModal([])}>
