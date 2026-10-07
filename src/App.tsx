@@ -830,72 +830,57 @@ export default function App() {
     await openInspection(created.data.id)
   }
 
-  function resetNcDraft() {
-    if (ncDraft.photoPreview) URL.revokeObjectURL(ncDraft.photoPreview)
-    setNcDraft({ open:false, severity:'grave', description:'', itemId:'', checklistId:'', photoFile:null, photoPreview:'', photoLegenda:'' })
-  }
-
-  function openNcModal(checklistId = '') {
-    resetNcDraft()
-    setNcDraft({ open:true, severity:'grave', description:'', itemId:'', checklistId, photoFile:null, photoPreview:'', photoLegenda:'' })
-  }
-
   async function recordUnit(conforme: boolean) {
     if (!detail || !selectedInspectionId) return
-    if (!conforme) {
-      openNcModal('')
-      return
-    }
-    await persistUnit(true)
-  }
-
-  async function persistUnit(conforme: boolean, nc?: {
-    severity:string; description:string; itemId:string; checklistId:string;
-    photoFile:File|null; photoPreview:string; photoLegenda:string;
-  }) {
-    if (!detail || !selectedInspectionId) return
-    if (!conforme) {
-      if (!nc?.checklistId) return setError('Selecione o item da IT relacionado à não conformidade.')
-      if (!nc?.description.trim()) return setError('Descreva a não conformidade.')
-    }
+    const before={total:Number(detail.total_inspecionado ?? 0),ok:Number(detail.total_conforme ?? 0),nc:Number(detail.total_nao_conforme ?? 0)}
+    setDetail((d:any)=>d?{
+      ...d,
+      total_inspecionado:before.total+1,
+      total_conforme:before.ok+(conforme?1:0),
+      total_nao_conforme:before.nc+(conforme?0:1),
+    }:d)
 
     const result=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/unidades`,{
-      conforme,
-      severidade:nc?.severity || null,
-      descricao:nc?.description?.trim() || null,
-      itemId:nc?.itemId || null,
-      checklistId:nc?.checklistId || null,
+      conforme,severidade:null,descricao:null,itemId:null,checklistId:null,
     })
-    if (result.error) return setError(result.error.message || 'Falha ao registrar unidade.')
-
-    resetNcDraft()
-    await openInspection(selectedInspectionId)
+    if (result.error) {
+      setDetail((d:any)=>d?{...d,total_inspecionado:before.total,total_conforme:before.ok,total_nao_conforme:before.nc}:d)
+      return setError(result.error.message || 'Falha ao registrar unidade.')
+    }
+    setDetail((d:any)=>d?{
+      ...d,
+      total_inspecionado:result.data?.total ?? before.total+1,
+      total_conforme:result.data?.total_conforme ?? before.ok+(conforme?1:0),
+      total_nao_conforme:result.data?.total_nao_conforme ?? before.nc+(conforme?0:1),
+    }:d)
     if (result.data?.re_atingido) {
-      setMessage('Limite de rejeição atingido. Você pode encerrar agora ou continuar até completar a amostra.')
+      setMessage(`Limite de rejeição atingido: ${result.data.total_nao_conforme} NC para Re ${result.data.limite_rejeicao}.`)
     }
   }
 
-  async function saveChecklist(checkId: string, result: string, severity?: string) {
-    if (!selectedInspectionId) return
-    const existing = detail?.checklistResults?.find((x:any) => x.checklist_id === checkId)
-    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/checklist/${checkId}`,{
-      resultado:result,
-      severidade:result==='nao_conforme' ? (severity || existing?.severidade_confirmada || 'grave') : null,
+  async function saveChecklist(checkId: string, result: string) {
+    if (!selectedInspectionId || !detail) return
+    const previous=(detail.checklistResults ?? []).find((x:any)=>x.checklist_id===checkId)
+    const automatic=detail.checklist?.find((x:any)=>x.id===checkId)?.classificacao_sugerida ?? null
+    const optimistic={...(previous ?? {}),checklist_id:checkId,inspecao_id:selectedInspectionId,resultado:result,severidade_confirmada:result==='nao_conforme'?automatic:null}
+    setDetail((d:any)=>{
+      const others=(d.checklistResults ?? []).filter((x:any)=>x.checklist_id!==checkId)
+      return {...d,checklistResults:[...others,optimistic]}
     })
-    if (saved.error) return setError(saved.error.message)
-    await openInspection(selectedInspectionId)
-  }
-
-  async function saveChecklistSeverity(checkId: string, severity: string) {
-    if (!selectedInspectionId) return
-    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/checklist/${checkId}`,{
-      resultado:null,
-      severidade:severity,
+    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/checklist/${checkId}`,{resultado:result})
+    if (saved.error) {
+      setDetail((d:any)=>{
+        const others=(d.checklistResults ?? []).filter((x:any)=>x.checklist_id!==checkId)
+        return {...d,checklistResults:previous?[...others,previous]:others}
+      })
+      setError(saved.error.message)
+      return
+    }
+    setDetail((d:any)=>{
+      const others=(d.checklistResults ?? []).filter((x:any)=>x.checklist_id!==checkId)
+      return {...d,checklistResults:[...others,{...optimistic,severidade_confirmada:saved.data?.severidade ?? optimistic.severidade_confirmada}]}
     })
-    if (saved.error) return setError(saved.error.message)
-    await openInspection(selectedInspectionId)
   }
-
   async function saveInternalObservation() {
     if (!selectedInspectionId || !canWrite) return
     const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/observacao-interna`,{
