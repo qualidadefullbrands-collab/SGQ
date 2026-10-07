@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, MessageCircle, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, X } from 'lucide-react'
 import QRCode from 'qrcode'
-import { apiGet, apiPost, apiPut, supabase } from './lib/supabase'
+import { apiGet, apiPost, apiPut, apiUrl, supabase } from './lib/supabase'
 import AuditoriasPage from './auditorias/AuditoriasPage'
 import InspectionChat from './full-inspection/InspectionChat'
 
@@ -1504,17 +1504,37 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
   async function downloadInspectionWord() {
     if (!detail || !selectedInspectionId) return
-    const generated=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/laudo`,{})
-    if (generated.error) return setError(generated.error.message || 'Não foi possível gerar o laudo.')
-    if (!generated.data?.url) return setError('O laudo foi gerado, mas a URL para download não ficou disponível.')
+    setError('')
+    setMessage('Gerando Word a partir do modelo oficial da IT…')
+    const session=await supabase.auth.getSession()
+    const token=session.data.session?.access_token
+    if (!token) return setError('Sua sessão expirou. Entre novamente no SGQ.')
 
+    const response=await fetch(`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo`,{
+      method:'POST',
+      headers:{Authorization:`Bearer ${token}`},
+    })
+    if (!response.ok) {
+      let msg='Não foi possível gerar o Word pelo modelo oficial da IT.'
+      try {
+        const body=await response.json()
+        msg=body?.detail || body?.error?.message || body?.message || msg
+      } catch {}
+      return setError(msg)
+    }
+
+    const blob=await response.blob()
+    const disposition=response.headers.get('content-disposition') || ''
+    const utf=disposition.match(/filename\*=UTF-8''([^;]+)/i)
+    const basic=disposition.match(/filename="?([^";]+)"?/i)
+    const filename=decodeURIComponent(utf?.[1] || basic?.[1] || `${detail.numero}.docx`)
+    const href=URL.createObjectURL(blob)
     const a=document.createElement('a')
-    a.href=generated.data.url
-    a.download=generated.data.filename || `${detail.numero}.doc`
-    a.target='_blank'
-    a.rel='noopener'
+    a.href=href
+    a.download=filename
     a.click()
-    setMessage('Laudo gerado e armazenado pelo backend.')
+    setTimeout(()=>URL.revokeObjectURL(href),1500)
+    setMessage('Word preenchido no modelo oficial da IT e armazenado no SGQ.')
     await loadApp()
   }
 
