@@ -2041,24 +2041,34 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
         var prepare=request.Query.TryGetValue("preparar",out var prepareRaw)
             && string.Equals(prepareRaw.ToString(),"true",StringComparison.OrdinalIgnoreCase);
 
-        // A completed inspection with an already generated document is served straight from Storage.
-        var cachedRows=await RestAsync(client,token,HttpMethod.Get,"laudos",
-            $"select=numero,storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}&storage_path=not.is.null&limit=1");
-        var (cached,cachedFound)=FirstRow(cachedRows);
-        if(cachedFound)
+        // Só reutiliza o Word quando a inspeção confirma que o documento atual está válido.
+        var inspectionRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=documento_gerado_em&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inspection,inspectionFound)=FirstRow(inspectionRows);
+        var cacheValid=inspectionFound
+            && inspection!.Value.TryGetProperty("documento_gerado_em",out var generatedAt)
+            && generatedAt.ValueKind!=JsonValueKind.Null;
+
+        if(cacheValid)
         {
-            var path=cached!.Value.TryGetProperty("storage_path",out var sp)&&sp.ValueKind==JsonValueKind.String?sp.GetString():null;
-            if(!string.IsNullOrWhiteSpace(path))
+            var cachedRows=await RestAsync(client,token,HttpMethod.Get,"laudos",
+                $"select=numero,storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}&storage_path=not.is.null&limit=1");
+            var (cached,cachedFound)=FirstRow(cachedRows);
+            if(cachedFound)
             {
-                using var cachedMsg=new HttpRequestMessage(HttpMethod.Get,$"{supabaseUrl}/storage/v1/object/authenticated/laudos/{EncodedPath(path!)}");
-                ApplyAuth(cachedMsg,token);
-                var cachedRes=await client.SendAsync(cachedMsg);
-                if(cachedRes.IsSuccessStatusCode)
+                var path=cached!.Value.TryGetProperty("storage_path",out var sp)&&sp.ValueKind==JsonValueKind.String?sp.GetString():null;
+                if(!string.IsNullOrWhiteSpace(path))
                 {
-                    if(prepare) return Results.Ok(new {data=new {prepared=true,cached=true},error=(object?)null});
-                    var cachedBytes=await cachedRes.Content.ReadAsByteArrayAsync();
-                    var cachedName=Path.GetFileName(path) ?? $"Inspecao-{id}.docx";
-                    return Results.File(cachedBytes,"application/vnd.openxmlformats-officedocument.wordprocessingml.document",cachedName);
+                    using var cachedMsg=new HttpRequestMessage(HttpMethod.Get,$"{supabaseUrl}/storage/v1/object/authenticated/laudos/{EncodedPath(path!)}");
+                    ApplyAuth(cachedMsg,token);
+                    var cachedRes=await client.SendAsync(cachedMsg);
+                    if(cachedRes.IsSuccessStatusCode)
+                    {
+                        if(prepare) return Results.Ok(new {data=new {prepared=true,cached=true},error=(object?)null});
+                        var cachedBytes=await cachedRes.Content.ReadAsByteArrayAsync();
+                        var cachedName=Path.GetFileName(path) ?? $"Inspecao-{id}.docx";
+                        return Results.File(cachedBytes,"application/vnd.openxmlformats-officedocument.wordprocessingml.document",cachedName);
+                    }
                 }
             }
         }
