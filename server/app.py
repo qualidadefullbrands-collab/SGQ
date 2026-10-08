@@ -245,7 +245,14 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
     token=authorization.split(" ",1)[1].strip()
     async with httpx.AsyncClient(timeout=60.0) as client:
         user=await verify_user(client,token)
-        rows=await table_rows(client,token,"inspecoes",{"id":f"eq.{inspection_id}","select":"*","limit":"1"})
+        rows=await table_rows(
+            client,token,"inspecoes",
+            {
+                "id":f"eq.{inspection_id}",
+                "select":"*,grupos_inspecao(*,processos(*)),it_versoes(*,instrucoes_trabalho(codigo,titulo))",
+                "limit":"1"
+            }
+        )
         if not rows: raise HTTPException(status_code=404,detail="Inspeção não encontrada.")
         inspection=rows[0]
         group_id=inspection.get("grupo_inspecao_id")
@@ -254,22 +261,16 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
             raise HTTPException(status_code=409,detail="Esta inspeção não possui grupo vinculado e não pode gerar o Word.")
         if not version_id:
             raise HTTPException(status_code=409,detail="Esta inspeção não possui IT vinculada. Vincule uma IT para gerar o Word no modelo oficial.")
-        groups=await table_rows(client,token,"grupos_inspecao",{"id":f"eq.{group_id}","select":"*","limit":"1"})
-        if not groups: raise HTTPException(status_code=409,detail="Grupo da inspeção não encontrado.")
-        group=groups[0]
-        processes=await table_rows(client,token,"processos",{"id":f"eq.{group.get('processo_id')}","select":"*","limit":"1"})
-        process=processes[0] if processes else {}
 
-        versions=await table_rows(client,token,"it_versoes",{"id":f"eq.{version_id}","select":"*","limit":"1"})
-        if not versions:
+        group=inspection.get("grupos_inspecao") or {}
+        if not group:
+            raise HTTPException(status_code=409,detail="Grupo da inspeção não encontrado.")
+        process=group.get("processos") or {}
+
+        version=inspection.get("it_versoes") or {}
+        if not version:
             raise HTTPException(status_code=409,detail="Versão da IT vinculada não encontrada.")
-        version=versions[0]
-
-        instruction_rows=await table_rows(
-            client,token,"instrucoes_trabalho",
-            {"id":f"eq.{version.get('instrucao_trabalho_id')}","select":"codigo,titulo","limit":"1"}
-        )
-        instruction=instruction_rows[0] if instruction_rows else {}
+        instruction=version.get("instrucoes_trabalho") or {}
         it_code=instruction.get("codigo") or ""
         # A versão publicada no SGQ é a fonte oficial. O modelo embarcado fica apenas como fallback técnico.
         template_bytes=None
@@ -291,15 +292,20 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
         if not template_bytes:
             raise HTTPException(status_code=409,detail=f"Modelo Word oficial da {it_code or 'IT'} não está disponível.")
 
-        links=await table_rows(client,token,"grupo_inspecao_itens",{"grupo_inspecao_id":f"eq.{group_id}","select":"processo_item_id,unidades_por_conjunto"})
+        links=await table_rows(
+            client,token,"grupo_inspecao_itens",
+            {
+                "grupo_inspecao_id":f"eq.{group_id}",
+                "select":"processo_item_id,unidades_por_conjunto,processo_itens(*,produtos(*))"
+            }
+        )
         items=[]
         product_photo_refs=[]
         for link in links:
-            item_rows=await table_rows(client,token,"processo_itens",{"id":f"eq.{link.get('processo_item_id')}","select":"*","limit":"1"})
-            if not item_rows: continue
-            item=item_rows[0]
-            prod_rows=await table_rows(client,token,"produtos",{"id":f"eq.{item.get('produto_id')}","select":"*","limit":"1"})
-            product=prod_rows[0] if prod_rows else {}
+            raw_item=link.get("processo_itens") or {}
+            if not raw_item: continue
+            item=dict(raw_item)
+            product=item.pop("produtos",{}) or {}
             item["produto"]=product
             item["unidades_por_conjunto"]=link.get("unidades_por_conjunto")
             items.append(item)
