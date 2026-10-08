@@ -1353,9 +1353,9 @@ export default function App() {
     setMessage(pendencias.length
       ? 'Inspeção finalizada em modo de teste, mesmo com campos pendentes.'
       : 'Inspeção finalizada. Agora defina a retenção das amostras.')
+    void prepareInspectionWord(selectedInspectionId)
     await loadApp()
     await openInspection(selectedInspectionId)
-    void prepareInspectionWord(selectedInspectionId)
   }
 
   async function prepareInspectionWord(id:string) {
