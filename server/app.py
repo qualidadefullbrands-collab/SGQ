@@ -96,8 +96,41 @@ async def patch_execution(client,token,execution_id,payload):
 
 @app.get("/health")
 async def health():
-    bundled=sorted(p.stem for p in TEMPLATE_DIR.glob("IT*.docx")) if TEMPLATE_DIR.exists() else []
-    return {"status":"ok","service":"sgq-docs","inspection_templates":bundled,"template_count":len(bundled)}
+    bundled=sorted(TEMPLATE_DIR.glob("IT*.docx")) if TEMPLATE_DIR.exists() else []
+    template_tests={}
+    minimal={
+        "inspection":{"numero":"SELF-TEST","status":"em_andamento","resultado":"pendente","nivel_inspecao":"I","tamanho_amostra":1,"total_inspecionado":0,"total_nao_conforme":0},
+        "process":{"codigo":"FST00000","cliente":"Teste técnico"},
+        "items":[],
+        "checklist":[],
+        "check_results":[],
+        "dim_params":[],
+        "dim_configs":[],
+        "dim_results":[],
+        "tests":[],
+        "test_results":[],
+        "photos":[],
+        "inspector_name":"SGQ",
+    }
+    for path in bundled:
+        try:
+            generated=generate_inspection(path.read_bytes(),minimal)
+            # Abre novamente o resultado para validar que o pacote DOCX gerado é íntegro.
+            from docx import Document
+            from io import BytesIO
+            Document(BytesIO(generated))
+            template_tests[path.stem]={"ok":True,"bytes":len(generated)}
+        except Exception as exc:
+            template_tests[path.stem]={"ok":False,"error":str(exc)}
+    ok=len(bundled)==8 and all(x.get("ok") for x in template_tests.values())
+    return {
+        "status":"ok" if ok else "degraded",
+        "service":"sgq-docs",
+        "inspection_templates":[p.stem for p in bundled],
+        "template_count":len(bundled),
+        "template_tests":template_tests,
+        "generator_ok":ok,
+    }
 
 @app.get("/generate/{execution_id}")
 async def generate_document(execution_id:str,authorization:str|None=Header(default=None)):
