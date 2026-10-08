@@ -149,6 +149,22 @@ app.MapGet("/", () => Results.Ok(new
     service = "sgq-api"
 }));
 
+app.MapGet("/health/word", async (IHttpClientFactory factory) =>
+{
+    try
+    {
+        var sw=System.Diagnostics.Stopwatch.StartNew();
+        var res=await factory.CreateClient("supabase").GetAsync($"{auditDocsUrl}/self-test");
+        var body=await res.Content.ReadAsStringAsync();
+        sw.Stop();
+        return Results.Content(body,"application/json",Encoding.UTF8,(int)res.StatusCode);
+    }
+    catch(Exception e)
+    {
+        return Results.Json(new {status="error",service="sgq-word",error=e.Message},statusCode:500);
+    }
+});
+
 app.MapGet("/api/auditorias/bootstrap", async (HttpRequest request,IHttpClientFactory factory)=>
 {
     try
