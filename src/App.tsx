@@ -349,6 +349,7 @@ export default function App() {
   const [assistantLoading, setAssistantLoading] = useState(false)
   const [assistantText, setAssistantText] = useState('')
   const [assistantQuestion, setAssistantQuestion] = useState('')
+  const [sampleNcDraft, setSampleNcDraft] = useState('0')
   const [itVersions, setItVersions] = useState<ItVersion[]>([])
   const [groups, setGroups] = useState<Group[]>([])
   const [samples, setSamples] = useState<Sample[]>([])
@@ -750,6 +751,7 @@ export default function App() {
     }
 
     setDetail(next)
+    setSampleNcDraft(String(next.total_nao_conforme ?? 0))
     setFinalObservation(next.observacoes ?? '')
     setInternalObservation(next.observacao_interna ?? '')
     const retention:Record<string,{retain:boolean;qty:string;address:string;photoFile:File|null;photoPreview:string}>={}
@@ -876,44 +878,49 @@ export default function App() {
     await openInspection(created.data.id)
   }
 
-  async function recordUnit(conforme: boolean) {
-    if (!detail || !selectedInspectionId) return
-    const before={total:Number(detail.total_inspecionado ?? 0),ok:Number(detail.total_conforme ?? 0),nc:Number(detail.total_nao_conforme ?? 0)}
-    setDetail((d:any)=>d?{
-      ...d,
-      total_inspecionado:before.total+1,
-      total_conforme:before.ok+(conforme?1:0),
-      total_nao_conforme:before.nc+(conforme?0:1),
-    }:d)
-
-    const result=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/unidades`,{
-      conforme,severidade:null,descricao:null,itemId:null,checklistId:null,
-    })
-    if (result.error) {
-      setDetail((d:any)=>d?{...d,total_inspecionado:before.total,total_conforme:before.ok,total_nao_conforme:before.nc}:d)
-      return setError(result.error.message || 'Falha ao registrar unidade.')
-    }
-    setDetail((d:any)=>d?{
-      ...d,
-      total_inspecionado:result.data?.total ?? before.total+1,
-      total_conforme:result.data?.total_conforme ?? before.ok+(conforme?1:0),
-      total_nao_conforme:result.data?.total_nao_conforme ?? before.nc+(conforme?0:1),
-    }:d)
-    if (result.data?.re_atingido) {
-      setMessage(`Limite de rejeição atingido: ${result.data.total_nao_conforme} NC para Re ${result.data.limite_rejeicao}.`)
-    }
+  function isDedicatedDimensionalCheck(item:any) {
+    return String(item?.grupo ?? '').trim().toLowerCase()==='dimensional'
   }
 
-  async function saveChecklist(checkId: string, result: string) {
+  function checklistScopeQuantity(item:any) {
+    return isDedicatedDimensionalCheck(item) ? 10 : Number(detail?.tamanho_amostra ?? 0)
+  }
+
+  function setChecklistNcDraft(checkId:string,value:number) {
+    setDetail((d:any)=>{
+      if(!d) return d
+      const previous=(d.checklistResults ?? []).find((x:any)=>x.checklist_id===checkId)
+      const others=(d.checklistResults ?? []).filter((x:any)=>x.checklist_id!==checkId)
+      return {...d,checklistResults:[...others,{...(previous ?? {}),checklist_id:checkId,quantidade_nc:value}]}
+    })
+  }
+
+  async function saveChecklist(checkId: string, result: string, quantityNc?:number) {
     if (!selectedInspectionId || !detail) return
+    const item=detail.checklist?.find((x:any)=>x.id===checkId)
     const previous=(detail.checklistResults ?? []).find((x:any)=>x.checklist_id===checkId)
-    const automatic=detail.checklist?.find((x:any)=>x.id===checkId)?.classificacao_sugerida ?? null
-    const optimistic={...(previous ?? {}),checklist_id:checkId,inspecao_id:selectedInspectionId,resultado:result,severidade_confirmada:result==='nao_conforme'?automatic:null}
+    const automatic=item?.classificacao_sugerida ?? null
+    const scopeQty=checklistScopeQuantity(item)
+    const ncQty=result==='nao_conforme'
+      ? Math.min(Math.max(Number(quantityNc ?? previous?.quantidade_nc ?? 1) || 1,1),Math.max(scopeQty,1))
+      : 0
+    const optimistic={
+      ...(previous ?? {}),
+      checklist_id:checkId,
+      inspecao_id:selectedInspectionId,
+      resultado:result,
+      quantidade_avaliada:result==='nao_aplicavel'?0:scopeQty,
+      quantidade_nc:ncQty,
+      severidade_confirmada:result==='nao_conforme'?automatic:null
+    }
     setDetail((d:any)=>{
       const others=(d.checklistResults ?? []).filter((x:any)=>x.checklist_id!==checkId)
       return {...d,checklistResults:[...others,optimistic]}
     })
-    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/checklist/${checkId}`,{resultado:result})
+    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/checklist/${checkId}`,{
+      resultado:result,
+      quantidadeNc:ncQty,
+    })
     if (saved.error) {
       setDetail((d:any)=>{
         const others=(d.checklistResults ?? []).filter((x:any)=>x.checklist_id!==checkId)
@@ -924,9 +931,41 @@ export default function App() {
     }
     setDetail((d:any)=>{
       const others=(d.checklistResults ?? []).filter((x:any)=>x.checklist_id!==checkId)
-      return {...d,checklistResults:[...others,{...optimistic,severidade_confirmada:saved.data?.severidade ?? optimistic.severidade_confirmada}]}
+      return {
+        ...d,
+        total_inspecionado:saved.data?.total_inspecionado ?? d.total_inspecionado,
+        total_nao_conforme:saved.data?.total_nao_conforme ?? d.total_nao_conforme,
+        total_conforme:Math.max(Number(saved.data?.total_inspecionado ?? d.total_inspecionado ?? 0)-Number(saved.data?.total_nao_conforme ?? d.total_nao_conforme ?? 0),0),
+        checklistResults:[...others,{
+          ...optimistic,
+          quantidade_avaliada:saved.data?.quantidade_avaliada ?? optimistic.quantidade_avaliada,
+          quantidade_nc:saved.data?.quantidade_nc ?? optimistic.quantidade_nc,
+          severidade_confirmada:saved.data?.severidade ?? optimistic.severidade_confirmada,
+        }]
+      }
     })
+    if(saved.data?.total_nao_conforme!=null) setSampleNcDraft(String(saved.data.total_nao_conforme))
+    if(saved.data?.reconciliacao_nc_necessaria) {
+      setMessage('Há NC em mais de uma verificação. Confirme abaixo a quantidade de unidades NC únicas usada no Ac/Re para evitar dupla contagem.')
+    }
   }
+
+  async function saveUniqueNcSummary() {
+    if(!selectedInspectionId || !detail) return
+    const qty=Math.max(0,Math.floor(Number(sampleNcDraft)||0))
+    const max=Number(detail.tamanho_amostra ?? 0)
+    if(max>0 && qty>max) return setError(`NC únicas não pode ultrapassar a amostra de ${max} unidades.`)
+    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/amostragem/resumo`,{totalNaoConforme:qty})
+    if(saved.error) return setError(saved.error.message)
+    setDetail((d:any)=>d?{
+      ...d,
+      total_nao_conforme:saved.data?.total_nao_conforme ?? qty,
+      total_conforme:saved.data?.total_conforme ?? Math.max(Number(d.total_inspecionado ?? 0)-qty,0),
+    }:d)
+    setSampleNcDraft(String(saved.data?.total_nao_conforme ?? qty))
+    setMessage('Quantidade de unidades NC únicas atualizada para o cálculo Ac/Re.')
+  }
+
   async function saveInternalObservation() {
     if (!selectedInspectionId || !canWrite) return
     const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/observacao-interna`,{
@@ -993,9 +1032,7 @@ export default function App() {
     const c=rows.filter((x:any)=>x.conforme===true).length
     let decision='Pendente'
     if (rows.length===10) {
-      if (detail?.limite_rejeicao != null && nc >= Number(detail.limite_rejeicao)) decision='Reprovado'
-      else if (detail?.limite_aceitacao != null && nc <= Number(detail.limite_aceitacao)) decision='Aprovado'
-      else decision='Revisar'
+      decision=nc>0?'Reprovado':'Aprovado'
     }
     return { total:rows.length, nc, c, decision }
   }
@@ -1137,6 +1174,10 @@ export default function App() {
           instrucao:item.instrucao,
           resultado:r?.resultado ?? 'pendente',
           severidade:r?.severidade_confirmada ?? null,
+          quantidade_avaliada:r?.quantidade_avaliada ?? 0,
+          quantidade_nc:r?.quantidade_nc ?? 0,
+          escopo:isDedicatedDimensionalCheck(item)?'dimensional_10':'amostra_total',
+          quantidade_esperada:isDedicatedDimensionalCheck(item)?10:Number(detail.tamanho_amostra ?? 0),
         }
       }),
       nao_conformidades:(detail.ncs ?? []).map((n:any)=>({
@@ -1185,14 +1226,16 @@ export default function App() {
   function localAssistantText(question='') {
     const context:any=buildInspectionAssistantContext() ?? {}
     const plan:any=context.plano ?? {}
+    const fullChecks=(context.verificacoes ?? []).filter((x:any)=>x.escopo==='amostra_total')
+    const fullDone=fullChecks.filter((x:any)=>x.resultado!=='pendente' && (x.resultado==='nao_aplicavel' || Number(x.quantidade_avaliada ?? 0)>=Number(plan.amostra_prevista ?? 0)))
     const pendingChecks=(context.verificacoes ?? []).filter((x:any)=>x.resultado==='pendente')
     const pendingDims=(context.dimensionais ?? []).filter((x:any)=>!x.nao_aplicavel && Number(x.resumo?.total ?? 0)<10)
     const pendingTests=(context.testes ?? []).filter((x:any)=>x.resultado==='pendente')
-    const remaining=Math.max(Number(plan.amostra_prevista ?? 0)-Number(plan.inspecionado ?? 0),0)
     const steps:string[]=[]
-    if (remaining>0) steps.push(`Amostragem: faltam ${remaining} unidade(s) para completar ${plan.amostra_prevista ?? 0}.`)
+    if (fullChecks.length && fullDone.length<fullChecks.length) steps.push(`Verificações da amostra: ${fullDone.length}/${fullChecks.length} critério(s) concluído(s) sobre a amostra de ${plan.amostra_prevista ?? 0} unidades.`)
+    else if(fullChecks.length) steps.push(`Verificações da amostra: cobertura concluída para ${plan.amostra_prevista ?? 0} unidades.`)
     if (pendingChecks.length) steps.push(`Verificações: ${pendingChecks.length} item(ns) da IT ainda estão pendentes.`)
-    if (pendingDims.length) steps.push(`Dimensionais: ${pendingDims.length} parâmetro(s) ainda não têm as 10 medições exigidas.`)
+    if (pendingDims.length) steps.push(`Dimensionais: ${pendingDims.length} parâmetro(s) ainda não têm exatamente 10 medições.`)
     if (pendingTests.length) steps.push(`Testes: ${pendingTests.length} teste(s) ainda estão pendentes.`)
     if (Number(plan.re ?? 0)>0 && Number(plan.nao_conformes ?? 0)>=Number(plan.re)) steps.push('Atenção: o limite de rejeição registrado no plano já foi atingido.')
     if (!steps.length) steps.push('Os registros principais estão preenchidos. Revise evidências, conclusão e retenção antes do encerramento.')
@@ -1242,7 +1285,14 @@ export default function App() {
       },
       verificacoes:(detail.checklist ?? []).map((item:any)=>{
         const r=detail.checklistResults?.find((x:any)=>x.checklist_id===item.id)
-        return {item:item.requisito,resultado:r?.resultado??'pendente',classe:r?.severidade_confirmada??null}
+        return {
+          item:item.requisito,
+          resultado:r?.resultado??'pendente',
+          classe:r?.severidade_confirmada??null,
+          quantidade_nc:r?.quantidade_nc??0,
+          quantidade_avaliada:r?.quantidade_avaliada??0,
+          escopo:isDedicatedDimensionalCheck(item)?'dimensional_10':'amostra_total',
+        }
       }),
       nao_conformidades:(detail.ncs ?? []).map((n:any)=>({descricao:n.descricao,severidade:n.severidade})),
       dimensionais:(detail.items ?? []).flatMap((link:any)=>
@@ -1931,38 +1981,70 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <h2>Plano de amostragem</h2>
               <span className="pill">Nível {detail.nivel_inspecao} · código {detail.codigo_amostragem || '—'}</span>
             </div>
+            <div className="sampling-guidance">
+              <strong>A amostra é avaliada por critério, não por 80 cliques.</strong>
+              <span>Verificações visuais, olfativas e funcionais usam a amostra total de {detail.tamanho_amostra || 0} unidades. As análises dimensionais usam exatamente 10 medições por parâmetro.</span>
+            </div>
             <div className="plan-grid">
               <div><small>Lote estatístico</small><strong>{detail.tamanho_lote?.toLocaleString('pt-BR') || '—'}</strong></div>
               <div><small>Amostra prevista</small><strong>{detail.tamanho_amostra || '—'}</strong></div>
-              <div><small>Inspecionado</small><strong>{detail.total_inspecionado || 0}</strong></div>
-              <div><small>NC</small><strong>{detail.total_nao_conforme || 0}</strong></div>
+              <div><small>Amostra coberta</small><strong>{detail.total_inspecionado || 0}</strong></div>
+              <div className="nc-summary-control">
+                <small>NC únicas p/ Ac-Re</small>
+                <input
+                  type="number"
+                  min={0}
+                  max={detail.tamanho_amostra || undefined}
+                  value={sampleNcDraft}
+                  onChange={(e)=>setSampleNcDraft(e.target.value)}
+                  onBlur={()=>void saveUniqueNcSummary()}
+                />
+              </div>
               <div><small>Ac</small><strong>{detail.limite_aceitacao ?? '—'}</strong></div>
               <div><small>Re</small><strong>{detail.limite_rejeicao ?? '—'}</strong></div>
               <div><small>Caixas recebidas</small><strong>{detail.caixas_recebidas ?? '—'}</strong></div>
               <div><small>Caixas a avaliar</small><strong>{detail.caixas_avaliar ?? '—'}</strong></div>
             </div>
-            {detail.status!=='concluida' && (
-              <div className="sampling-actions">
-                <button className="success-button" disabled={(detail.total_inspecionado ?? 0)>=(detail.tamanho_amostra ?? 0)} onClick={()=>recordUnit(true)}><CheckCircle2 size={18}/> Unidade conforme</button>
-                <button className="danger" disabled={(detail.total_inspecionado ?? 0)>=(detail.tamanho_amostra ?? 0)} onClick={()=>recordUnit(false)}>Unidade NC</button>
-              </div>
-            )}
+            <small className="field-hint">NC por verificação é registrada abaixo. “NC únicas” evita contar duas vezes a mesma peça quando ela falha em mais de um critério.</small>
             {!!detail.limite_rejeicao && detail.total_nao_conforme>=detail.limite_rejeicao && <div className="alert error">Limite de rejeição atingido. Você pode encerrar ou continuar a inspeção; a decisão ficará registrada.</div>}
           </section>
 
           <section id="sec-verificacoes" className="panel section-card">
-            <div className="section-title"><div><h2>Verificações</h2><span className="section-note">Toque em C, NC ou NA. A classificação da NC vem automaticamente da IT.</span></div></div>
+            <div className="section-title"><div><h2>Verificações</h2><span className="section-note">C/NC/NA resume o critério. Quando houver NC, informe quantas unidades da amostra falharam naquele critério.</span></div></div>
             <div className="checklist compact-checklist">
               {(detail.checklist ?? []).map((item:any)=>{
                 const r=detail.checklistResults?.find((x:any)=>x.checklist_id===item.id)
                 const automatic=item.classificacao_sugerida
+                const dimensionalScope=isDedicatedDimensionalCheck(item)
+                const scopeQty=dimensionalScope?10:Number(detail.tamanho_amostra ?? 0)
                 return (
                   <div className="check-row" key={item.id}>
-                    <div className="check-copy"><b>{item.ordem}. {item.requisito}</b><span>{item.instrucao}</span>{automatic && <small>NC: {automatic==='critico'?'Crítico':automatic==='grave'?'Grave':'Tolerável'} · definido pela IT</small>}</div>
-                    <div className="tri-buttons quick">
-                      <button type="button" className={r?.resultado==='conforme'?'selected ok':''} onClick={()=>saveChecklist(item.id,'conforme')}>C</button>
-                      <button type="button" className={r?.resultado==='nao_conforme'?'selected bad':''} onClick={()=>saveChecklist(item.id,'nao_conforme')}>NC</button>
-                      <button type="button" className={r?.resultado==='nao_aplicavel'?'selected':''} onClick={()=>saveChecklist(item.id,'nao_aplicavel')}>NA</button>
+                    <div className="check-copy">
+                      <b>{item.ordem}. {item.requisito}</b>
+                      <span>{item.instrucao}</span>
+                      <small className="verification-scope">{dimensionalScope ? 'Escopo: resumo das 10 medições dimensionais' : `Escopo: ${scopeQty} unidades da amostra`}</small>
+                      {automatic && <small>NC: {automatic==='critico'?'Crítico':automatic==='grave'?'Grave':'Tolerável'} · definido pela IT</small>}
+                    </div>
+                    <div className="check-actions-stack">
+                      <div className="tri-buttons quick">
+                        <button type="button" className={r?.resultado==='conforme'?'selected ok':''} onClick={()=>saveChecklist(item.id,'conforme')}>C</button>
+                        <button type="button" className={r?.resultado==='nao_conforme'?'selected bad':''} onClick={()=>saveChecklist(item.id,'nao_conforme',Number(r?.quantidade_nc ?? 1))}>NC</button>
+                        <button type="button" className={r?.resultado==='nao_aplicavel'?'selected':''} onClick={()=>saveChecklist(item.id,'nao_aplicavel')}>NA</button>
+                      </div>
+                      {r?.resultado==='nao_conforme' && (
+                        <label className="nc-quantity">
+                          <span>Qtd. NC</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={scopeQty || undefined}
+                            value={r?.quantidade_nc ?? 1}
+                            onChange={(e)=>setChecklistNcDraft(item.id,Math.max(1,Number(e.target.value)||1))}
+                            onBlur={(e)=>void saveChecklist(item.id,'nao_conforme',Number(e.target.value))}
+                          />
+                          <em>/ {scopeQty || '—'}</em>
+                        </label>
+                      )}
                     </div>
                   </div>
                 )
@@ -2257,7 +2339,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
 
             <div className="assistant-disclaimer">
-              A IA orienta com base nos dados registrados e na IT vinculada. Amostragem, Ac/Re e decisão final continuam controlados pelo SGQ e pelo inspetor.
+              A IA orienta com base nos dados registrados e na IT vinculada. Verificações usam a amostra total; dimensionais usam 10 medições. Ac/Re usa “NC únicas” para não duplicar a mesma peça em critérios diferentes.
             </div>
           </aside>
         </div>
