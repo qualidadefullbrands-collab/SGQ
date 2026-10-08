@@ -203,14 +203,7 @@ function boxDistributionTotals(row:any) {
 }
 
 function updateBoxDistributionField(row:any,key:string,value:string) {
-  const next={...row,[key]:value}
-  const totals=boxDistributionTotals(next)
-  if (totals.groups.length) {
-    next.quantidade=String(totals.units)
-    next.caixasRecebidas=String(totals.boxes)
-    next.caixasInspecionadas=String(boxesToInspect(totals.boxes))
-  }
-  return next
+  return {...row,[key]:value}
 }
 
 function applyBoxGroupsToSku(base:any, groups:any[]|null|undefined) {
@@ -296,16 +289,17 @@ const LOT_CODES = [
 ]
 const SAMPLE_SIZE: Record<string,number> = { A:2,B:3,C:5,D:8,E:13,F:20,G:32,H:50,J:80,K:125,L:200,M:315,N:500,P:800,Q:1250,R:2000 }
 const AC_RE_15: Record<string,{ac:number;re:number}> = {
+  A:{ac:0,re:1},B:{ac:0,re:1},C:{ac:0,re:1},D:{ac:0,re:1},E:{ac:0,re:1},
   F:{ac:1,re:2},G:{ac:1,re:2},H:{ac:2,re:3},J:{ac:3,re:4},K:{ac:5,re:6},
-  L:{ac:7,re:8},M:{ac:10,re:11},N:{ac:14,re:15},P:{ac:21,re:22}
+  L:{ac:7,re:8},M:{ac:10,re:11},N:{ac:14,re:15},P:{ac:21,re:22},
+  Q:{ac:21,re:22},R:{ac:21,re:22}
 }
 function samplingPlan(lot:number, level:string) {
   if (!lot) return { code:'', sample:0, ac:null as number|null, re:null as number|null }
-  if (lot < 281) return { code:'100%', sample:lot, ac:0, re:1 }
   const row=LOT_CODES.find((x)=>lot>=x.min&&lot<=x.max)
   const code=row ? String((row as any)[level] ?? row.I) : ''
-  const sample=SAMPLE_SIZE[code] ?? 0
-  if (level.startsWith('S')) return { code, sample, ac:null, re:null }
+  const planned=SAMPLE_SIZE[code] ?? 0
+  const sample=Math.min(planned,lot)
   const rule=AC_RE_15[code]
   return { code, sample, ac:rule?.ac ?? null, re:rule?.re ?? null }
 }
@@ -481,6 +475,14 @@ export default function App() {
       return
     }
     loadApp()
+  }, [userId])
+
+  useEffect(() => {
+    if (!userId) return
+    const wake=()=>{ void fetch('https://app-sgq-docs.onrender.com/ready',{method:'GET',mode:'cors'}).catch(()=>{}) }
+    wake()
+    const timer=window.setInterval(wake,8*60*1000)
+    return ()=>window.clearInterval(timer)
   }, [userId])
 
   useEffect(() => {
@@ -981,6 +983,11 @@ export default function App() {
   }
 
 
+  function usesMeasureReference(param:any) {
+    return !String(param?.nome ?? '').trim().toLowerCase().includes('peso')
+  }
+
+
   async function saveDimConfig(itemId:string, param:any, patch:any) {
     if (!selectedInspectionId) return
     const current = getDimConfig(itemId,param.id) ?? {}
@@ -999,7 +1006,7 @@ export default function App() {
       desvioMenos:deviation,
       desvioMais:deviation,
       especificacaoDesvio:null,
-      tipoReferencia:next.tipo_referencia || param.tipo_referencia || null,
+      tipoReferencia:usesMeasureReference(param) ? (next.tipo_referencia || param.tipo_referencia || null) : null,
     })
     if (saved.error || !saved.data) return setError(saved.error?.message ?? 'Falha ao salvar configuração dimensional.')
     setDetail((d:any)=>{
@@ -1310,20 +1317,27 @@ export default function App() {
     const result=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/conclusao-assistida`,{payload})
     setAiLoading(false)
     const data=result.data
-    if (result.error || data?.error || !data?.text) {
+    const buildSafeConclusion=()=>{
+      const checks=(detail.checklist ?? [])
+      const results=(detail.checklistResults ?? [])
+      const answered=checks.filter((x:any)=>results.some((r:any)=>r.checklist_id===x.id && r.resultado && r.resultado!=='pendente')).length
+      const pending=Math.max(checks.length-answered,0)
       const nc=Number(detail.total_nao_conforme ?? 0)
-      const inspected=Number(detail.total_inspecionado ?? 0)
-      const sample=Number(detail.tamanho_amostra ?? 0)
       const re=detail.limite_rejeicao==null?null:Number(detail.limite_rejeicao)
-      const decision=re!=null && nc>=re ? 'O limite de rejeição foi atingido.' : 'O limite de rejeição não foi atingido.'
-      const pending=(detail.checklist ?? []).filter((x:any)=>!(detail.checklistResults ?? []).some((r:any)=>r.checklist_id===x.id)).length
-      let text=`Inspeção com ${inspected}/${sample} unidade(s) registradas e ${nc} unidade(s) não conforme(s). ${decision}`
-      if (pending) text+=` Permanecem ${pending} verificação(ões) sem registro.`
-      setFinalObservation(text)
-      setMessage('Conclusão gerada em modo local porque a IA externa não respondeu.')
+      if(answered===0) return 'Conclusão técnica pendente. A inspeção ainda não possui registros suficientes para uma conclusão auditável.'
+      if(pending>0) return `Conclusão técnica pendente de complementação. Há ${pending} verificação${pending===1?'':'es'} da IT ainda sem resultado registrado.`
+      if(re!=null && nc>=re) return `A inspeção foi concluída com ocorrência de não conformidades em nível de rejeição do plano aplicável. Recomenda-se tratativa da Qualidade antes da liberação do lote.`
+      if(nc>0) return `A inspeção foi concluída com ${nc} unidade${nc===1?'':'s'} não conforme${nc===1?'':'s'}, dentro do limite de aceitação registrado para o plano aplicável.`
+      return 'A inspeção foi concluída sem não conformidades registradas nos critérios avaliados.'
+    }
+    if (result.error || data?.error || !data?.text) {
+      setFinalObservation(buildSafeConclusion())
+      setMessage('Conclusão estruturada com os dados registrados na inspeção.')
       return
     }
-    setFinalObservation(String(data.text))
+    const aiText=String(data.text).trim()
+    const lowQuality=/\b0\s*\/\s*\d+\b|unidade\(s\) registradas|verifica[cç][aã]o\(ões\)/i.test(aiText)
+    setFinalObservation(lowQuality ? buildSafeConclusion() : aiText)
   }
 
 
@@ -1341,6 +1355,19 @@ export default function App() {
       : 'Inspeção finalizada. Agora defina a retenção das amostras.')
     await loadApp()
     await openInspection(selectedInspectionId)
+    void prepareInspectionWord(selectedInspectionId)
+  }
+
+  async function prepareInspectionWord(id:string) {
+    try {
+      const session=await supabase.auth.getSession()
+      const token=session.data.session?.access_token
+      if (!token) return
+      await fetch(`${apiUrl}/api/inspecoes/${id}/laudo?preparar=true`,{
+        method:'POST',
+        headers:{Authorization:`Bearer ${token}`},
+      })
+    } catch {}
   }
 
   async function saveRetention() {
@@ -1558,7 +1585,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   async function downloadInspectionWord() {
     if (!detail || !selectedInspectionId) return
     setError('')
-    setMessage('Gerando Word a partir do modelo oficial da IT…')
+    setMessage('Gerando Word…')
     const session=await supabase.auth.getSession()
     const token=session.data.session?.access_token
     if (!token) return setError('Sua sessão expirou. Entre novamente no SGQ.')
@@ -1871,7 +1898,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                         <label>Lote<input value={row.lote} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,lote:e.target.value}:r))}/></label>
                         <label>Material<input value={row.material} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,material:e.target.value}:r))}/></label>
                         <label>Capacidade<input value={row.capacidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,capacidade:e.target.value}:r))}/></label>
-                        <label>Quantidade total recebida<input type="number" step="0.01" value={row.quantidade} readOnly={boxDistributionTotals(row).groups.length>0} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/>{boxDistributionTotals(row).groups.length>0 && <small className="field-hint">Calculada automaticamente pela distribuição das caixas.</small>}</label>
+                        <label>Quantidade total recebida<input type="number" step="0.01" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/></label>
                         <label>Caixas recebidas<input type="number" step="0.01" value={row.caixasRecebidas} onChange={(e)=>{
                           const received=e.target.value
                           const calc=received ? String(boxesToInspect(Number(received))) : ''
@@ -1879,7 +1906,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                         }}/></label>
                         <label>Caixas inspecionadas<input type="number" step="0.01" value={row.caixasInspecionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasInspecionadas:e.target.value}:r))}/><small className="field-hint">Sugerido pela tabela da IT; pode ser alterado.</small></label>
                         <div className="span-2 box-distribution-editor">
-                          <div className="field-label"><span>Distribuição das caixas</span><small>Separe caixas padrão, fracionada e retirada no laboratório.</small></div>
+                          <div className="field-label"><span>Distribuição das caixas</span></div>
                           <div className="distribution-grid">
                             <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasPadrao} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasPadrao',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesPadrao || row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...updateBoxDistributionField(r,'unidadesPadrao',e.target.value),quantidadePorCaixa:e.target.value}:r))}/></label></div>
                             <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasFracionadas',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'unidadesFracionadas',e.target.value):r))}/></label></div>
@@ -1981,10 +2008,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <h2>Plano de amostragem</h2>
               <span className="pill">Nível {detail.nivel_inspecao} · código {detail.codigo_amostragem || '—'}</span>
             </div>
-            <div className="sampling-guidance">
-              <strong>A amostra é avaliada por critério, não por 80 cliques.</strong>
-              <span>Verificações visuais, olfativas e funcionais usam a amostra total de {detail.tamanho_amostra || 0} unidades. As análises dimensionais usam exatamente 10 medições por parâmetro.</span>
-            </div>
             <div className="plan-grid">
               <div><small>Lote estatístico</small><strong>{detail.tamanho_lote?.toLocaleString('pt-BR') || '—'}</strong></div>
               <div><small>Amostra prevista</small><strong>{detail.tamanho_amostra || '—'}</strong></div>
@@ -2005,7 +2028,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <div><small>Caixas recebidas</small><strong>{detail.caixas_recebidas ?? '—'}</strong></div>
               <div><small>Caixas a avaliar</small><strong>{detail.caixas_avaliar ?? '—'}</strong></div>
             </div>
-            <small className="field-hint">NC por verificação é registrada abaixo. “NC únicas” evita contar duas vezes a mesma peça quando ela falha em mais de um critério.</small>
             {!!detail.limite_rejeicao && detail.total_nao_conforme>=detail.limite_rejeicao && <div className="alert error">Limite de rejeição atingido. Você pode encerrar ou continuar a inspeção; a decisão ficará registrada.</div>}
           </section>
 
@@ -2096,7 +2118,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
                         {!cfg.nao_aplicavel && <>
                           <div className="dim-config-grid">
-                            <label>Referência da medida
+                            {usesMeasureReference(p) && <label>Referência da medida
                               <select value={cfg.tipo_referencia ?? p.tipo_referencia ?? ''} onChange={(e)=>saveDimConfig(item.id,p,{tipo_referencia:e.target.value})} disabled={detail.status==='concluida'}>
                                 <option value="">Selecionar</option>
                                 <option value="interno">Interno</option>
@@ -2107,7 +2129,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                                 <option value="especificacao_cliente">Especificação do cliente</option>
                                 <option value="outro">Outro</option>
                               </select>
-                            </label>
+                            </label>}
                             <label>Valor especificado
                               <input type="number" step="any" defaultValue={cfg.valor_nominal ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{valor_nominal:e.target.value})} disabled={detail.status==='concluida'}/>
                             </label>
@@ -2642,7 +2664,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <label>Descrição<input value={row.nome} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,nome:e.target.value}:x)})}/></label>
                   <label>Lote<input value={row.lote} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,lote:e.target.value}:x)})}/></label>
                   <label>Quantidade recebida<input type="number" step="0.01" value={row.quantidade} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,quantidade:e.target.value}:x)})}/></label>
-                  <label>Caixas recebidas<input type="number" step="1" value={row.caixasRecebidas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasRecebidas:e.target.value}:x)})}/></label>
+                  <label>Caixas recebidas<input type="number" step="1" value={row.caixasRecebidas} onChange={(e)=>{
+                    const received=e.target.value
+                    const suggested=received ? String(boxesToInspect(Number(received))) : ''
+                    setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasRecebidas:received,caixasInspecionadas:suggested}:x)})
+                  }}/></label>
                   <label>Caixas inspecionadas<input type="number" step="1" value={row.caixasInspecionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasInspecionadas:e.target.value}:x)})}/></label>
                 </div>
                 <div className="distribution-grid compact">
