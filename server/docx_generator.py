@@ -268,7 +268,10 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                     if "Nível" in cell.text or "Especial" in cell.text:
                         set_cell(cell,_fill_choice_text(cell.text,{"I":"Nível I","II":"Nível II","III":"Nível III","S1":"Especial S1","S2":"Especial S2","S3":"Especial S3","S4":"Especial S4"}.get(level,level)),8)
             if len(cells)>=2 and _norm(cells[0].text)=="quantidade amostrada":
-                set_cell(cells[1],inspection.get("tamanho_amostra") or inspection.get("total_inspecionado") or "",8,bold=True,center=True)
+                sampled=inspection.get("total_inspecionado")
+                if sampled is None:
+                    sampled=inspection.get("tamanho_amostra")
+                set_cell(cells[1],sampled if sampled is not None else "",8,bold=True,center=True)
             if len(cells)>=4 and _norm(cells[2].text)=="caixas avaliadas":
                 set_cell(cells[3],inspection.get("caixas_avaliar") or "",8,bold=True,center=True)
 
@@ -327,21 +330,25 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                         unit=hit.get("unidade") or cfg.get("unidade") or param.get("unidade") or ""
                         set_cell(cell,f"{seq}. {value} {unit}".strip(),7.5)
 
-    any_dim_nc=any(x.get("conforme") is False for x in dim_results)
+    evaluated_dim=[x for x in dim_results if x.get("conforme") is not None]
+    dim_choice=""
+    if evaluated_dim:
+        dim_choice="REPROVADO" if any(x.get("conforme") is False for x in evaluated_dim) else "APROVADO"
     for table in doc.tables:
         for row in table.rows:
             if row.cells and _norm(row.cells[0].text)=="resultado dimensional":
                 for cell in row.cells[1:]:
-                    set_cell(cell,_fill_choice_text(cell.text,"REPROVADO" if any_dim_nc else "APROVADO"),8,bold=True)
+                    set_cell(cell,_fill_choice_text(cell.text,dim_choice),8,bold=True)
 
     final_result=str(inspection.get("resultado") or "").lower()
+    final_choice="APROVADO" if final_result=="aprovado" else "REPROVADO" if final_result=="reprovado" else ""
     for table in doc.tables:
         for row in table.rows:
             if not row.cells: continue
             label=_norm(row.cells[0].text)
             if label=="resultado final":
                 for cell in row.cells[1:]:
-                    set_cell(cell,_fill_choice_text(cell.text,"REPROVADO" if final_result=="reprovado" else "APROVADO"),8,bold=True)
+                    set_cell(cell,_fill_choice_text(cell.text,final_choice),8,bold=True)
             elif label=="inspecionado por" and len(row.cells)>=2:
                 set_cell(row.cells[1],inspector,8)
                 if len(row.cells)>=4: set_cell(row.cells[3],fmt_date(inspection.get("data_inspecao")),8)

@@ -1179,7 +1179,7 @@ export default function App() {
     setMessage(pendencias.length
       ? 'Inspeção finalizada em modo de teste, mesmo com campos pendentes.'
       : 'Inspeção finalizada. Agora defina a retenção das amostras.')
-    void prepareInspectionWord(selectedInspectionId)
+    if (detail.it_versao_id) void prepareInspectionWord(selectedInspectionId)
     await loadApp()
     await openInspection(selectedInspectionId)
   }
@@ -1411,21 +1411,32 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   async function downloadInspectionWord() {
     if (!detail || !selectedInspectionId) return
     setError('')
+    if (!detail.it_versao_id) {
+      setMessage('')
+      return setError('Esta inspeção não possui IT vinculada. Para gerar o Word oficial, vincule uma IT com modelo Word.')
+    }
     setMessage('Gerando Word…')
     const session=await supabase.auth.getSession()
     const token=session.data.session?.access_token
     if (!token) return setError('Sua sessão expirou. Entre novamente no SGQ.')
 
-    const response=await fetch(`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo`,{
-      method:'POST',
-      headers:{Authorization:`Bearer ${token}`},
-    })
+    let response:Response
+    try {
+      response=await fetch(`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo`,{
+        method:'POST',
+        headers:{Authorization:`Bearer ${token}`},
+      })
+    } catch {
+      setMessage('')
+      return setError('O serviço de geração do Word não respondeu. Tente novamente em alguns segundos.')
+    }
     if (!response.ok) {
       let msg='Não foi possível gerar o Word pelo modelo oficial da IT.'
       try {
         const body=await response.json()
         msg=body?.detail || body?.error?.message || body?.message || msg
       } catch {}
+      setMessage('')
       return setError(msg)
     }
 
