@@ -1593,3 +1593,25 @@ input,select,textarea,button{font-size:15px}
   .compact-checklist .check-row{grid-template-columns:1fr}
   .inspection-quick-nav{top:128px}
 }
+
+
+/* ===== Inspection UX v4: sample-by-criterion ===== */
+.sampling-guidance{
+  display:flex;flex-direction:column;gap:4px;margin:0 0 14px;padding:12px 14px;
+  border:1px solid #cfe0eb;border-radius:10px;background:#f4f9fc;color:#36576d
+}
+.sampling-guidance strong{font-size:13px;color:#21465e}
+.sampling-guidance span{font-size:12px;line-height:1.45}
+.nc-summary-control{display:flex!important;flex-direction:column;align-items:flex-start!important;gap:4px}
+.nc-summary-control input{width:92px;min-height:38px;padding:7px 9px;font-size:18px;font-weight:800}
+.check-actions-stack{display:flex;align-items:center;gap:12px}
+.nc-quantity{display:flex;align-items:center;gap:7px;white-space:nowrap;font-size:11px;color:#475467}
+.nc-quantity span{font-weight:800}
+.nc-quantity input{width:72px;min-height:40px;padding:7px 8px;text-align:center;font-weight:800}
+.nc-quantity em{font-style:normal;color:#667085}
+.verification-scope{color:#1769aa!important;font-weight:700}
+@media(max-width:760px){
+  .check-actions-stack{align-items:stretch;flex-direction:column}
+  .nc-quantity{justify-content:flex-end}
+  .nc-summary-control input{width:100%}
+}
