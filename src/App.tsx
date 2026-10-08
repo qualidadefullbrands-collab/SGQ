@@ -221,6 +221,22 @@ function applyBoxGroupsToSku(base:any, groups:any[]|null|undefined) {
   return next
 }
 
+function retentionQuantityFromText(value:string|null|undefined) {
+  const text=String(value ?? '').replace(/\s+/g,' ').trim()
+  if (!text) return null
+  const patterns=[
+    /(?:reter|retida|retido|reten[cç][aã]o|laborat[oó]rio)[^0-9]{0,30}(\d+(?:[.,]\d+)?)/i,
+    /(\d+(?:[.,]\d+)?)\s*(?:un\.?|unidades?)?[^.]{0,45}(?:reter|retida|retido|reten[cç][aã]o|laborat[oó]rio)/i,
+  ]
+  for (const pattern of patterns) {
+    const match=text.match(pattern)
+    if (!match) continue
+    const qty=Number(String(match[1]).replace(',','.'))
+    if (Number.isFinite(qty) && qty>0) return qty
+  }
+  return null
+}
+
 function zplText(value:string|null|undefined,max=54) {
   return String(value ?? '').replace(/[\^~\r\n]/g,' ').replace(/\s+/g,' ').trim().slice(0,max)
 }
@@ -363,6 +379,7 @@ export default function App() {
   })
   const [skuRows, setSkuRows] = useState([emptySku()])
   const productSearchTimers = useRef<Record<number,number>>({})
+  const loadAppRequest = useRef<Promise<void> | null>(null)
   const [editingInspectionData, setEditingInspectionData] = useState<any>(null)
   const [retentionSuggestion, setRetentionSuggestion] = useState<{quantidade:number|null;fonte:string|null}>({quantidade:null,fonte:null})
 
@@ -515,29 +532,38 @@ export default function App() {
 
 
   async function loadApp() {
-    setError('')
-    const loaded=await apiGet<any>('/api/app/bootstrap')
-    if (loaded.error || !loaded.data) {
-      setError(loaded.error?.message || 'Falha ao carregar o SGQ.')
-      return
+    if (loadAppRequest.current) return loadAppRequest.current
+    const request=(async()=>{
+      setError('')
+      const loaded=await apiGet<any>('/api/app/bootstrap')
+      if (loaded.error || !loaded.data) {
+        setError(loaded.error?.message || 'Falha ao carregar o SGQ.')
+        return
+      }
+      const data=loaded.data
+      if (!data.profile) {
+        setError('Seu usuário ainda não possui perfil liberado no SGQ.')
+        return
+      }
+      setProfile(data.profile as Profile)
+      setProcesses((data.processes ?? []) as ProcessRow[])
+      setInspections((data.inspections ?? []) as InspectionRow[])
+      setItVersions((data.itVersions ?? []) as ItVersion[])
+      setGroups((data.groups ?? []) as Group[])
+      setSamples((data.samples ?? []).map((s:any)=>({...s,saldo:Number(s.saldo ?? 0)})))
+      setCounts(data.counts ?? {
+        processos:(data.processes ?? []).length,
+        inspecoes:(data.inspections ?? []).length,
+        amostras:(data.samples ?? []).length,
+        laudos:0,
+      })
+    })()
+    loadAppRequest.current=request
+    try {
+      await request
+    } finally {
+      if (loadAppRequest.current===request) loadAppRequest.current=null
     }
-    const data=loaded.data
-    if (!data.profile) {
-      setError('Seu usuário ainda não possui perfil liberado no SGQ.')
-      return
-    }
-    setProfile(data.profile as Profile)
-    setProcesses((data.processes ?? []) as ProcessRow[])
-    setInspections((data.inspections ?? []) as InspectionRow[])
-    setItVersions((data.itVersions ?? []) as ItVersion[])
-    setGroups((data.groups ?? []) as Group[])
-    setSamples((data.samples ?? []).map((s:any)=>({...s,saldo:Number(s.saldo ?? 0)})))
-    setCounts(data.counts ?? {
-      processos:(data.processes ?? []).length,
-      inspecoes:(data.inspections ?? []).length,
-      amostras:(data.samples ?? []).length,
-      laudos:0,
-    })
   }
 
   async function signIn(e: React.FormEvent) {
@@ -790,10 +816,9 @@ export default function App() {
       const existing=(next.retained as any[]).find((x:any)=>x.produto_id===item?.produto_id)
       retention[item.id]={retain:!existing,qty:'',address:'',photoFile:null,photoPreview:''}
     }
-    const suggestion=await apiGet<any>(`/api/inspecoes/${id}/retencao-sugestao`)
-    const suggestedQty=Number(suggestion.data?.quantidade ?? 0)
-    if (suggestedQty>0) {
-      setRetentionSuggestion({quantidade:suggestedQty,fonte:String(suggestion.data?.fonte ?? 'observacao_interna')})
+    const suggestedQty=retentionQuantityFromText(next.observacao_interna)
+    if (suggestedQty!=null) {
+      setRetentionSuggestion({quantidade:suggestedQty,fonte:'observacao_interna'})
       for (const key of Object.keys(retention)) retention[key].qty=String(suggestedQty)
     } else setRetentionSuggestion({quantidade:null,fonte:null})
     setRetentionRows(retention)
@@ -834,8 +859,7 @@ export default function App() {
     setEditingInspectionData(null)
     const p=saved.data?.plano
     setMessage(`Dados atualizados. Plano recalculado: ${p?.codigo ?? '—'} · ${p?.amostra ?? 0} un. · Ac/Re ${p?.ac ?? '—'}/${p?.re ?? '—'}.`)
-    await loadApp()
-    await openInspection(selectedInspectionId)
+    await Promise.all([loadApp(),openInspection(selectedInspectionId)])
   }
   async function createInspection(e: React.FormEvent) {
     e.preventDefault()
@@ -904,8 +928,7 @@ export default function App() {
 
     setMessage(`Inspeção ${created.data.numero} iniciada.`)
     resetNewInspection()
-    await loadApp()
-    await openInspection(created.data.id)
+    await Promise.all([loadApp(),openInspection(created.data.id)])
   }
 
   function isDedicatedDimensionalCheck(item:any) {
@@ -1179,21 +1202,7 @@ export default function App() {
     setMessage(pendencias.length
       ? 'Inspeção finalizada em modo de teste, mesmo com campos pendentes.'
       : 'Inspeção finalizada. Agora defina a retenção das amostras.')
-    if (detail.it_versao_id) void prepareInspectionWord(selectedInspectionId)
-    await loadApp()
-    await openInspection(selectedInspectionId)
-  }
-
-  async function prepareInspectionWord(id:string) {
-    try {
-      const session=await supabase.auth.getSession()
-      const token=session.data.session?.access_token
-      if (!token) return
-      await fetch(`${apiUrl}/api/inspecoes/${id}/laudo?preparar=true`,{
-        method:'POST',
-        headers:{Authorization:`Bearer ${token}`},
-      })
-    } catch {}
+    await Promise.all([loadApp(),openInspection(selectedInspectionId)])
   }
 
   async function saveRetention() {
@@ -1223,8 +1232,7 @@ export default function App() {
     const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/retencao`,{motivoSemRetencao:null,itens})
     if (saved.error) return setError(saved.error.message)
     setMessage(`${saved.data?.retidos ?? itens.length} amostra(s) enviada(s) ao estoque usando a foto principal já definida na inspeção.`)
-    await loadApp()
-    await openInspection(selectedInspectionId)
+    await Promise.all([loadApp(),openInspection(selectedInspectionId)])
   }
 
   async function structureItVersion(itVersionId:string, openReview=true) {
@@ -1452,7 +1460,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
     a.click()
     setTimeout(()=>URL.revokeObjectURL(href),1500)
     setMessage('Word preenchido no modelo oficial da IT e armazenado no SGQ.')
-    await loadApp()
   }
 
   if (!sessionReady) return <div className="center-screen">Carregando SGQ…</div>
