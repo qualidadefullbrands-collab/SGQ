@@ -94,8 +94,22 @@ async def patch_execution(client,token,execution_id,payload):
         raise HTTPException(status_code=502,detail=f"Falha ao atualizar auditoria: {r.text[:240]}")
     return r.json()
 
+@app.get("/ready")
+async def ready():
+    return {"status":"ok","service":"sgq-docs"}
+
 @app.get("/health")
 async def health():
+    bundled=sorted(TEMPLATE_DIR.glob("IT*.docx")) if TEMPLATE_DIR.exists() else []
+    return {
+        "status":"ok",
+        "service":"sgq-docs",
+        "template_count":len(bundled),
+        "inspection_templates":[p.stem for p in bundled],
+    }
+
+@app.get("/self-test")
+async def self_test():
     bundled=sorted(TEMPLATE_DIR.glob("IT*.docx")) if TEMPLATE_DIR.exists() else []
     template_tests={}
     minimal={
