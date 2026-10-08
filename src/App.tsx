@@ -337,12 +337,7 @@ export default function App() {
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
   const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string;productId:string;isProductId:boolean}>>([])
   const [pendingModal, setPendingModal] = useState<string[]>([])
-  const [aiLoading, setAiLoading] = useState(false)
-  const [assistantOpen, setAssistantOpen] = useState(false)
   const [inspectionChatOpen, setInspectionChatOpen] = useState(false)
-  const [assistantLoading, setAssistantLoading] = useState(false)
-  const [assistantText, setAssistantText] = useState('')
-  const [assistantQuestion, setAssistantQuestion] = useState('')
   const [sampleNcDraft, setSampleNcDraft] = useState('0')
   const [itVersions, setItVersions] = useState<ItVersion[]>([])
   const [groups, setGroups] = useState<Group[]>([])
@@ -1182,208 +1177,6 @@ export default function App() {
     await openInspection(selectedInspectionId)
   }
 
-  function buildInspectionAssistantContext() {
-    if (!detail) return null
-    return {
-      identificacao:{
-        inspecao:detail.numero,
-        processo:formatFst(detail.grupos_inspecao?.processos?.codigo),
-        cliente:detail.grupos_inspecao?.processos?.cliente,
-        grupo:detail.grupos_inspecao?.nome,
-        it:{
-          codigo:detail.it_versoes?.instrucoes_trabalho?.codigo,
-          titulo:detail.it_versoes?.instrucoes_trabalho?.titulo,
-          versao:detail.it_versoes?.versao,
-        },
-      },
-      plano:{
-        lote_estatistico:detail.tamanho_lote,
-        nivel:detail.nivel_inspecao,
-        codigo_amostragem:detail.codigo_amostragem,
-        amostra_prevista:detail.tamanho_amostra,
-        inspecionado:detail.total_inspecionado,
-        nao_conformes:detail.total_nao_conforme,
-        ac:detail.limite_aceitacao,
-        re:detail.limite_rejeicao,
-        caixas_recebidas:detail.caixas_recebidas,
-        caixas_avaliar:detail.caixas_avaliar,
-      },
-      produtos:(detail.items ?? []).map((link:any)=>({
-        codigo:link.processo_itens?.produtos?.sku,
-        descricao:link.processo_itens?.produtos?.nome,
-        lote:link.processo_itens?.lote,
-        quantidade:link.processo_itens?.quantidade,
-        caixas_recebidas:link.processo_itens?.caixas_recebidas,
-        caixas_inspecionadas:link.processo_itens?.caixas_inspecionadas,
-      })),
-      verificacoes:(detail.checklist ?? []).map((item:any)=>{
-        const r=detail.checklistResults?.find((x:any)=>x.checklist_id===item.id)
-        return {
-          ordem:item.ordem,
-          requisito:item.requisito,
-          instrucao:item.instrucao,
-          resultado:r?.resultado ?? 'pendente',
-          severidade:r?.severidade_confirmada ?? null,
-          quantidade_avaliada:r?.quantidade_avaliada ?? 0,
-          quantidade_nc:r?.quantidade_nc ?? 0,
-          escopo:isDedicatedDimensionalCheck(item)?'dimensional_10':'amostra_total',
-          quantidade_esperada:isDedicatedDimensionalCheck(item)?10:Number(detail.tamanho_amostra ?? 0),
-        }
-      }),
-      nao_conformidades:(detail.ncs ?? []).map((n:any)=>({
-        descricao:n.descricao,
-        severidade:n.severidade,
-        checklist_id:n.checklist_id,
-        produto_id:n.processo_item_id,
-        foto_registrada:!!n.foto_storage_path,
-      })),
-      dimensionais:(detail.items ?? []).flatMap((link:any)=>
-        (detail.params ?? []).map((p:any)=>{
-          const cfg=getDimConfig(link.processo_itens.id,p.id)
-          return {
-            produto:link.processo_itens?.produtos?.sku,
-            parametro:p.nome,
-            nao_aplicavel:!!cfg?.nao_aplicavel,
-            unidade:cfg?.unidade ?? p.unidade ?? null,
-            valor_nominal:cfg?.valor_nominal ?? null,
-            minimo:cfg?.minimo_aceitavel ?? null,
-            maximo:cfg?.maximo_aceitavel ?? null,
-            equipamento:cfg?.equipamento ?? null,
-            codigo_equipamento:cfg?.codigo_equipamento ?? null,
-            tipo_referencia:cfg?.tipo_referencia ?? p.tipo_referencia ?? null,
-            resumo:dimensionSummary(link.processo_itens.id,p.id),
-          }
-        })
-      ),
-      testes:(detail.tests ?? []).map((t:any)=>{
-        const r=detail.testResults?.find((x:any)=>x.teste_id===t.id)
-        return {
-          teste:t.nome,
-          procedimento:t.procedimento,
-          criterio:t.criterio_aprovacao,
-          resultado:r?.resultado ?? 'pendente',
-        }
-      }),
-      fotos:{
-        gerais:(detail.photos ?? []).filter((p:any)=>!p.nc_id).length,
-        nc:(detail.photos ?? []).filter((p:any)=>!!p.nc_id).length,
-      },
-      observacao_interna:detail.observacao_interna ?? internalObservation ?? '',
-      conclusao_atual:finalObservation,
-    }
-  }
-
-  function localAssistantText(question='') {
-    const context:any=buildInspectionAssistantContext() ?? {}
-    const plan:any=context.plano ?? {}
-    const fullChecks=(context.verificacoes ?? []).filter((x:any)=>x.escopo==='amostra_total')
-    const fullDone=fullChecks.filter((x:any)=>x.resultado!=='pendente' && (x.resultado==='nao_aplicavel' || Number(x.quantidade_avaliada ?? 0)>=Number(plan.amostra_prevista ?? 0)))
-    const pendingChecks=(context.verificacoes ?? []).filter((x:any)=>x.resultado==='pendente')
-    const pendingDims=(context.dimensionais ?? []).filter((x:any)=>!x.nao_aplicavel && Number(x.resumo?.total ?? 0)<10)
-    const pendingTests=(context.testes ?? []).filter((x:any)=>x.resultado==='pendente')
-    const steps:string[]=[]
-    if (fullChecks.length && fullDone.length<fullChecks.length) steps.push(`Verificações da amostra: ${fullDone.length}/${fullChecks.length} critério(s) concluído(s) sobre a amostra de ${plan.amostra_prevista ?? 0} unidades.`)
-    else if(fullChecks.length) steps.push(`Verificações da amostra: cobertura concluída para ${plan.amostra_prevista ?? 0} unidades.`)
-    if (pendingChecks.length) steps.push(`Verificações: ${pendingChecks.length} item(ns) da IT ainda estão pendentes.`)
-    if (pendingDims.length) steps.push(`Dimensionais: ${pendingDims.length} parâmetro(s) ainda não têm exatamente 10 medições.`)
-    if (pendingTests.length) steps.push(`Testes: ${pendingTests.length} teste(s) ainda estão pendentes.`)
-    if (Number(plan.re ?? 0)>0 && Number(plan.nao_conformes ?? 0)>=Number(plan.re)) steps.push('Atenção: o limite de rejeição registrado no plano já foi atingido.')
-    if (!steps.length) steps.push('Os registros principais estão preenchidos. Revise evidências, conclusão e retenção antes do encerramento.')
-    return (question ? `Pergunta: ${question}
-
-` : '') + steps.join('\n')
-  }
-
-  async function runInspectionAssistant(mode:'analisar'|'pergunta') {
-    if (!detail || !selectedInspectionId) return
-    if (mode==='pergunta' && !assistantQuestion.trim()) return
-    setAssistantLoading(true)
-    setError('')
-    const result=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/assistente`,{
-      mode,
-      question:mode==='pergunta'?assistantQuestion.trim():'',
-      context:buildInspectionAssistantContext(),
-    })
-    setAssistantLoading(false)
-    const data=result.data
-    if (result.error || data?.error || !(data?.answer ?? data?.text)) {
-      setAssistantText(localAssistantText(mode==='pergunta'?assistantQuestion.trim():''))
-      if (mode==='pergunta') setAssistantQuestion('')
-      return
-    }
-    setAssistantText(String(data?.answer ?? data?.text ?? ''))
-    if (mode==='pergunta') setAssistantQuestion('')
-  }
-
-
-  async function generateConclusionWithAI() {
-    if (!detail || !selectedInspectionId) return
-    setAiLoading(true)
-    setError('')
-    const payload={
-      resultado_atual:detail.resultado,
-      processo:formatFst(detail.grupos_inspecao?.processos?.codigo),
-      cliente:detail.grupos_inspecao?.processos?.cliente,
-      inspecao:detail.numero,
-      amostragem:{
-        lote:detail.tamanho_lote,
-        prevista:detail.tamanho_amostra,
-        inspecionada:detail.total_inspecionado,
-        nao_conformes:detail.total_nao_conforme,
-        ac:detail.limite_aceitacao,
-        re:detail.limite_rejeicao,
-      },
-      verificacoes:(detail.checklist ?? []).map((item:any)=>{
-        const r=detail.checklistResults?.find((x:any)=>x.checklist_id===item.id)
-        return {
-          item:item.requisito,
-          resultado:r?.resultado??'pendente',
-          classe:r?.severidade_confirmada??null,
-          quantidade_nc:r?.quantidade_nc??0,
-          quantidade_avaliada:r?.quantidade_avaliada??0,
-          escopo:isDedicatedDimensionalCheck(item)?'dimensional_10':'amostra_total',
-        }
-      }),
-      nao_conformidades:(detail.ncs ?? []).map((n:any)=>({descricao:n.descricao,severidade:n.severidade})),
-      dimensionais:(detail.items ?? []).flatMap((link:any)=>
-        (detail.params ?? []).map((p:any)=>({
-          produto:link.processo_itens?.produtos?.nome,
-          parametro:p.nome,
-          resumo:dimensionSummary(link.processo_itens.id,p.id),
-        }))
-      ),
-      testes:(detail.tests ?? []).map((t:any)=>{
-        const r=detail.testResults?.find((x:any)=>x.teste_id===t.id)
-        return {teste:t.nome,resultado:r?.resultado??'pendente'}
-      }),
-    }
-    const result=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/conclusao-assistida`,{payload})
-    setAiLoading(false)
-    const data=result.data
-    const buildSafeConclusion=()=>{
-      const checks=(detail.checklist ?? [])
-      const results=(detail.checklistResults ?? [])
-      const answered=checks.filter((x:any)=>results.some((r:any)=>r.checklist_id===x.id && r.resultado && r.resultado!=='pendente')).length
-      const pending=Math.max(checks.length-answered,0)
-      const nc=Number(detail.total_nao_conforme ?? 0)
-      const re=detail.limite_rejeicao==null?null:Number(detail.limite_rejeicao)
-      if(answered===0) return 'Conclusão técnica pendente. A inspeção ainda não possui registros suficientes para uma conclusão auditável.'
-      if(pending>0) return `Conclusão técnica pendente de complementação. Há ${pending} verificação${pending===1?'':'es'} da IT ainda sem resultado registrado.`
-      if(re!=null && nc>=re) return `A inspeção foi concluída com ocorrência de não conformidades em nível de rejeição do plano aplicável. Recomenda-se tratativa da Qualidade antes da liberação do lote.`
-      if(nc>0) return `A inspeção foi concluída com ${nc} unidade${nc===1?'':'s'} não conforme${nc===1?'':'s'}, dentro do limite de aceitação registrado para o plano aplicável.`
-      return 'A inspeção foi concluída sem não conformidades registradas nos critérios avaliados.'
-    }
-    if (result.error || data?.error || !data?.text) {
-      setFinalObservation(buildSafeConclusion())
-      setMessage('Conclusão estruturada com os dados registrados na inspeção.')
-      return
-    }
-    const aiText=String(data.text).trim()
-    const lowQuality=/\b0\s*\/\s*\d+\b|unidade\(s\) registradas|verifica[cç][aã]o\(ões\)/i.test(aiText)
-    setFinalObservation(lowQuality ? buildSafeConclusion() : aiText)
-  }
-
-
   async function finishInspection(result: 'aprovado' | 'reprovado') {
     if (!detail || !selectedInspectionId) return
     const finished=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/concluir`,{
@@ -2018,22 +1811,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <a href="#sec-resultado">Resultado</a>
           </nav>
 
-          <section className="inspection-assistant-strip">
-            <div className="assistant-strip-copy">
-              <Sparkles size={17}/>
-              <div>
-                <strong>IA assistida</strong>
-                <span>Acompanha o que já foi registrado e orienta o próximo passo sem alterar decisões ou cálculos.</span>
-              </div>
-            </div>
-            <button className="secondary small" type="button" onClick={()=>{
-              setAssistantOpen(true)
-              if (!assistantText) void runInspectionAssistant('analisar')
-            }}>
-              <MessageCircle size={15}/> Abrir assistente
-            </button>
-          </section>
-
           <section id="sec-dados" className="panel section-card internal-note-panel">
             <div className="section-title"><h2>Observação interna</h2></div>
             <textarea
@@ -2307,11 +2084,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
               <div className="section-title conclusion-title">
                 <label>Observação / conclusão</label>
-                <button className="secondary small" type="button" onClick={generateConclusionWithAI} disabled={aiLoading}>
-                  {aiLoading ? 'Gerando…' : 'Gerar com IA'}
-                </button>
               </div>
-              <textarea value={finalObservation} onChange={(e)=>setFinalObservation(e.target.value)} rows={5} placeholder="A conclusão gerada pela IA permanece totalmente editável."/>
+              <textarea value={finalObservation} onChange={(e)=>setFinalObservation(e.target.value)} rows={5} placeholder="Registre a conclusão da inspeção."/>
               <div className="result-actions">
                 <button className="success-button" onClick={()=>finishInspection('aprovado')}>Aprovar inspeção</button>
                 <button className="danger" onClick={()=>finishInspection('reprovado')}>Reprovar inspeção</button>
@@ -2368,46 +2142,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             if (selectedInspectionId) await openInspection(selectedInspectionId)
           }}
         />
-      )}
-
-      {assistantOpen && tab==='execucao' && detail && (
-        <div className="modal-backdrop assistant-backdrop" onClick={()=>setAssistantOpen(false)}>
-          <aside className="inspection-assistant-panel" onClick={(e)=>e.stopPropagation()}>
-            <div className="assistant-panel-head">
-              <div>
-                <span className="eyebrow">IA ASSISTIDA</span>
-                <h2>Assistente da inspeção</h2>
-                <p>{detail.numero} · {detail.it_versoes?.instrucoes_trabalho?.codigo || 'IT'}</p>
-              </div>
-              <button className="close" type="button" onClick={()=>setAssistantOpen(false)}>×</button>
-            </div>
-
-            <div className="assistant-actions">
-              <button className="primary" type="button" disabled={assistantLoading} onClick={()=>runInspectionAssistant('analisar')}>
-                <Sparkles size={16}/>{assistantLoading?'Analisando…':'Analisar andamento'}
-              </button>
-            </div>
-
-            <div className="assistant-answer">
-              {assistantLoading && <div className="assistant-loading">Lendo o estado atual da inspeção…</div>}
-              {!assistantLoading && assistantText && <div className="assistant-text">{assistantText}</div>}
-              {!assistantLoading && !assistantText && <div className="assistant-empty">Abra a análise para receber orientação sobre pendências e próximo passo.</div>}
-            </div>
-
-            <div className="assistant-question">
-              <label>Pergunte sobre esta inspeção
-                <textarea rows={3} value={assistantQuestion} onChange={(e)=>setAssistantQuestion(e.target.value)} placeholder="Ex.: o que ainda falta antes de finalizar?"/>
-              </label>
-              <button className="secondary wide" type="button" disabled={assistantLoading || !assistantQuestion.trim()} onClick={()=>runInspectionAssistant('pergunta')}>
-                <MessageCircle size={15}/> Perguntar
-              </button>
-            </div>
-
-            <div className="assistant-disclaimer">
-              A IA orienta com base nos registros da inspeção. A decisão final permanece com o inspetor.
-            </div>
-          </aside>
-        </div>
       )}
 
       {tab==='its' && (
