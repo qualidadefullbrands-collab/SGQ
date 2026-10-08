@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, MessageCircle, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, X } from 'lucide-react'
+import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { apiGet, apiPost, apiPut, apiUrl, supabase } from './lib/supabase'
 import AuditoriasPage from './auditorias/AuditoriasPage'
-import InspectionChat from './full-inspection/InspectionChat'
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
 type ItVersion = {
@@ -337,7 +336,6 @@ export default function App() {
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
   const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string;productId:string;isProductId:boolean}>>([])
   const [pendingModal, setPendingModal] = useState<string[]>([])
-  const [inspectionChatOpen, setInspectionChatOpen] = useState(false)
   const [sampleNcDraft, setSampleNcDraft] = useState('0')
   const [itVersions, setItVersions] = useState<ItVersion[]>([])
   const [groups, setGroups] = useState<Group[]>([])
@@ -1777,9 +1775,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
               <button className="secondary" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados</button>
-              <button className="secondary" type="button" onClick={()=>setInspectionChatOpen(true)}>
-                <MessageCircle size={16}/> Modo chat
-              </button>
               {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
@@ -2122,19 +2117,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </section>
       )}
 
-      {inspectionChatOpen && tab==='execucao' && detail && userId && (
-        <InspectionChat
-          inspectionId={detail.id}
-          detail={detail}
-          onClose={()=>{
-            setInspectionChatOpen(false)
-            if (selectedInspectionId) void openInspection(selectedInspectionId)
-          }}
-          onChanged={async()=>{
-            if (selectedInspectionId) await openInspection(selectedInspectionId)
-          }}
-        />
-      )}
 
       {tab==='its' && (
         <section className="workspace">
