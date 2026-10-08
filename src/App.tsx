@@ -473,14 +473,6 @@ export default function App() {
   }, [userId])
 
   useEffect(() => {
-    if (!userId) return
-    const wake=()=>{ void fetch('https://app-sgq-docs.onrender.com/ready',{method:'GET',mode:'cors'}).catch(()=>{}) }
-    wake()
-    const timer=window.setInterval(wake,8*60*1000)
-    return ()=>window.clearInterval(timer)
-  }, [userId])
-
-  useEffect(() => {
     const token = new URLSearchParams(window.location.search).get('amostra')
     if (!token || !samples.length) return
     const found = samples.find((s) => s.qr_token === token)
