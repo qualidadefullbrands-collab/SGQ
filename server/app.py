@@ -1,5 +1,6 @@
 from __future__ import annotations
-import os, base64, urllib.parse
+import os, base64, urllib.parse, re
+from pathlib import Path
 from datetime import datetime, timezone
 import httpx
 from fastapi import FastAPI, Header, HTTPException
@@ -59,6 +60,28 @@ async def storage_upload(client,token,bucket,path,data,content_type):
         raise HTTPException(status_code=502,detail=f"Falha ao salvar relatório: {r.text[:300]}")
     return r.json()
 
+TEMPLATE_DIR=Path(__file__).resolve().parent / "templates"
+
+def it_template_key(code:str|None)->str:
+    digits="".join(re.findall(r"\d+",str(code or "")))
+    if not digits: return ""
+    return f"IT{int(digits):03d}"
+
+def bundled_it_template(code:str|None)->bytes|None:
+    key=it_template_key(code)
+    if not key: return None
+    path=TEMPLATE_DIR / f"{key}.docx"
+    return path.read_bytes() if path.exists() else None
+
+async def patch_it_version(client,token,version_id,payload):
+    r=await client.patch(
+        f"{SUPABASE_URL}/rest/v1/it_versoes",
+        headers={**rest_headers(token),"Prefer":"return=minimal"},
+        params={"id":f"eq.{version_id}"},
+        json=payload,
+    )
+    return r.status_code<300
+
 async def patch_execution(client,token,execution_id,payload):
     h={**rest_headers(token),"Prefer":"return=representation"}
     r=await client.patch(
@@ -73,7 +96,8 @@ async def patch_execution(client,token,execution_id,payload):
 
 @app.get("/health")
 async def health():
-    return {"status":"ok","service":"sgq-docs"}
+    bundled=sorted(p.stem for p in TEMPLATE_DIR.glob("IT*.docx")) if TEMPLATE_DIR.exists() else []
+    return {"status":"ok","service":"sgq-docs","inspection_templates":bundled,"template_count":len(bundled)}
 
 @app.get("/generate/{execution_id}")
 async def generate_document(execution_id:str,authorization:str|None=Header(default=None)):
@@ -169,10 +193,45 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
         process=processes[0] if processes else {}
 
         versions=await table_rows(client,token,"it_versoes",{"id":f"eq.{version_id}","select":"*","limit":"1"})
-        if not versions or not versions[0].get("arquivo_storage_path"):
-            raise HTTPException(status_code=409,detail="A IT vinculada não possui modelo Word disponível.")
+        if not versions:
+            raise HTTPException(status_code=409,detail="Versão da IT vinculada não encontrada.")
         version=versions[0]
-        template_bytes=await storage_download(client,token,"it-documentos",version["arquivo_storage_path"])
+
+        instruction_rows=await table_rows(
+            client,token,"instrucoes_trabalho",
+            {"id":f"eq.{version.get('instrucao_trabalho_id')}","select":"codigo,titulo","limit":"1"}
+        )
+        instruction=instruction_rows[0] if instruction_rows else {}
+        it_code=instruction.get("codigo") or ""
+        template_bytes=None
+
+        storage_path=version.get("arquivo_storage_path")
+        if storage_path:
+            try:
+                template_bytes=await storage_download(client,token,"it-documentos",storage_path)
+            except HTTPException:
+                template_bytes=None
+
+        if not template_bytes:
+            template_bytes=bundled_it_template(it_code)
+            if not template_bytes:
+                raise HTTPException(status_code=409,detail=f"Modelo Word oficial da {it_code or 'IT'} não está disponível.")
+
+            # Auto-repara o cadastro/Storage quando o usuário atual possui permissão.
+            key=it_template_key(it_code)
+            target=f"modelos/{key}-02-2026.docx"
+            try:
+                await storage_upload(
+                    client,token,"it-documentos",target,template_bytes,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+                await patch_it_version(client,token,version_id,{
+                    "arquivo_storage_path":target,
+                    "arquivo_nome":f"{key} - Modelo Oficial 02-2026.docx",
+                    "arquivo_mime":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                })
+            except HTTPException:
+                pass
 
         links=await table_rows(client,token,"grupo_inspecao_itens",{"grupo_inspecao_id":f"eq.{group_id}","select":"processo_item_id,unidades_por_conjunto"})
         items=[]
