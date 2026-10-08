@@ -250,39 +250,21 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
         )
         instruction=instruction_rows[0] if instruction_rows else {}
         it_code=instruction.get("codigo") or ""
-        template_bytes=None
-
-        storage_path=version.get("arquivo_storage_path")
-        if storage_path:
-            try:
-                template_bytes=await storage_download(client,token,"it-documentos",storage_path)
-            except HTTPException:
-                template_bytes=None
-
+        # Os modelos oficiais já acompanham o serviço. Evita uma leitura remota a cada laudo.
+        template_bytes=bundled_it_template(it_code)
         if not template_bytes:
-            template_bytes=bundled_it_template(it_code)
-            if not template_bytes:
-                raise HTTPException(status_code=409,detail=f"Modelo Word oficial da {it_code or 'IT'} não está disponível.")
-
-            # Auto-repara o cadastro/Storage quando o usuário atual possui permissão.
-            key=it_template_key(it_code)
-            target=f"modelos/{key}-02-2026.docx"
-            try:
-                await storage_upload(
-                    client,token,"it-documentos",target,template_bytes,
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-                await patch_it_version(client,token,version_id,{
-                    "arquivo_storage_path":target,
-                    "arquivo_nome":f"{key} - Modelo Oficial 02-2026.docx",
-                    "arquivo_mime":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                })
-            except HTTPException:
-                pass
+            storage_path=version.get("arquivo_storage_path")
+            if storage_path:
+                try:
+                    template_bytes=await storage_download(client,token,"it-documentos",storage_path)
+                except HTTPException:
+                    template_bytes=None
+        if not template_bytes:
+            raise HTTPException(status_code=409,detail=f"Modelo Word oficial da {it_code or 'IT'} não está disponível.")
 
         links=await table_rows(client,token,"grupo_inspecao_itens",{"grupo_inspecao_id":f"eq.{group_id}","select":"processo_item_id,unidades_por_conjunto"})
         items=[]
-        product_photos=[]
+        product_photo_refs=[]
         for link in links:
             item_rows=await table_rows(client,token,"processo_itens",{"id":f"eq.{link.get('processo_item_id')}","select":"*","limit":"1"})
             if not item_rows: continue
@@ -294,11 +276,7 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
             items.append(item)
             photo_path=product.get("foto_principal_path")
             if photo_path:
-                try:
-                    data=await storage_download(client,token,"produto-fotos",photo_path)
-                    product_photos.append({"bytes":data,"caption":f"Foto principal - {product.get('sku') or ''} {product.get('nome') or ''}".strip()})
-                except HTTPException:
-                    pass
+                product_photo_refs.append((photo_path,f"Foto principal - {product.get('sku') or ''} {product.get('nome') or ''}".strip()))
 
         checklist,check_results,dim_params,dim_configs,dim_results,tests,test_results,photo_rows=await __import__("asyncio").gather(
             table_rows(client,token,"it_checklist",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
@@ -327,8 +305,12 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
                 photos.append({"bytes":data,"caption":p.get("legenda") or ""})
             except HTTPException:
                 pass
-        if not photos:
-            photos.extend(product_photos)
+        if not photos and product_photo_refs:
+            jobs=[storage_download(client,token,"produto-fotos",path) for path,_ in product_photo_refs]
+            downloaded=await __import__("asyncio").gather(*jobs,return_exceptions=True)
+            for data,(_,caption) in zip(downloaded,product_photo_refs):
+                if isinstance(data,(bytes,bytearray)):
+                    photos.append({"bytes":bytes(data),"caption":caption})
 
         payload={
             "inspection":inspection,
