@@ -150,13 +150,16 @@ async def self_test():
             template_tests[path.stem]={"ok":True,"bytes":len(generated)}
         except Exception as exc:
             template_tests[path.stem]={"ok":False,"error":str(exc)}
-    ok=len(bundled)==8 and all(x.get("ok") for x in template_tests.values())
+    safe_example=storage_safe_filename("498206 - INS-2026-7AF23981 - Laudo de Inspeção.docx","laudo-inspecao.docx")
+    storage_key_ok=bool(re.fullmatch(r"[A-Za-z0-9._-]+",safe_example))
+    ok=len(bundled)==8 and all(x.get("ok") for x in template_tests.values()) and storage_key_ok
     return {
         "status":"ok" if ok else "degraded",
         "service":"sgq-docs",
         "inspection_templates":[p.stem for p in bundled],
         "template_count":len(bundled),
         "template_tests":template_tests,
+        "storage_key_test":{"ok":storage_key_ok,"example":safe_example},
         "generator_ok":ok,
     }
 
@@ -268,15 +271,23 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
         )
         instruction=instruction_rows[0] if instruction_rows else {}
         it_code=instruction.get("codigo") or ""
-        # Os modelos oficiais já acompanham o serviço. Evita uma leitura remota a cada laudo.
-        template_bytes=bundled_it_template(it_code)
+        # A versão publicada no SGQ é a fonte oficial. O modelo embarcado fica apenas como fallback técnico.
+        template_bytes=None
+        version_storage_path=version.get("arquivo_storage_path")
+        version_file_name=str(version.get("arquivo_nome") or "")
+        version_mime=str(version.get("arquivo_mime") or "")
+        version_is_docx=(
+            version_file_name.lower().endswith(".docx")
+            or "officedocument.wordprocessingml.document" in version_mime.lower()
+        )
+        if version_storage_path and version_is_docx:
+            try:
+                template_bytes=await storage_download(client,token,"it-documentos",version_storage_path)
+            except HTTPException as exc:
+                print(f"[generate-inspection] falha ao ler modelo publicado {version_storage_path}: {exc.detail}")
+                template_bytes=None
         if not template_bytes:
-            storage_path=version.get("arquivo_storage_path")
-            if storage_path:
-                try:
-                    template_bytes=await storage_download(client,token,"it-documentos",storage_path)
-                except HTTPException:
-                    template_bytes=None
+            template_bytes=bundled_it_template(it_code)
         if not template_bytes:
             raise HTTPException(status_code=409,detail=f"Modelo Word oficial da {it_code or 'IT'} não está disponível.")
 
@@ -353,6 +364,7 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
             client,token,"laudos",storage_path,docx,
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
+        print(f"[generate-inspection] inspection={inspection_id} it={it_code} storage={storage_path} bytes={len(docx)}")
 
         now=datetime.now(timezone.utc).isoformat()
         existing=await table_rows(client,token,"laudos",{"inspecao_id":f"eq.{inspection_id}","select":"id","limit":"1"})
