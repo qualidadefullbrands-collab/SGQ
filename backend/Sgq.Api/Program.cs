@@ -136,6 +136,12 @@ app.MapGet("/health", () => Results.Ok(new
     utc = DateTimeOffset.UtcNow
 }));
 
+app.MapGet("/", () => Results.Ok(new
+{
+    status = "ok",
+    service = "sgq-api"
+}));
+
 app.MapGet("/api/auditorias/bootstrap", async (HttpRequest request,IHttpClientFactory factory)=>
 {
     try
