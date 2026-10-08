@@ -1323,25 +1323,144 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
         var userId=await CurrentUserId(client,token);
 
         var checkRows=await RestAsync(client,token,HttpMethod.Get,"it_checklist",
-            $"select=classificacao_sugerida&id=eq.{Uri.EscapeDataString(checkId)}&limit=1");
+            $"select=classificacao_sugerida,grupo&id=eq.{Uri.EscapeDataString(checkId)}&limit=1");
         var (check,checkFound)=FirstRow(checkRows);
-        var automaticSeverity=checkFound && check!.Value.TryGetProperty("classificacao_sugerida",out var cs) && cs.ValueKind==JsonValueKind.String
+        if(!checkFound) return Results.Json(Error("Verificação não encontrada."),statusCode:404);
+
+        var automaticSeverity=check!.Value.TryGetProperty("classificacao_sugerida",out var cs) && cs.ValueKind==JsonValueKind.String
             ? cs.GetString() : null;
+        var group=check.Value.TryGetProperty("grupo",out var gp)&&gp.ValueKind==JsonValueKind.String?gp.GetString()??"": "";
+        var dimensionalSummary=string.Equals(group.Trim(),"Dimensional",StringComparison.OrdinalIgnoreCase);
+
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=tamanho_amostra,total_nao_conforme&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inspection,inspectionFound)=FirstRow(insRows);
+        if(!inspectionFound) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var sample=inspection!.Value.TryGetProperty("tamanho_amostra",out var sm)&&sm.ValueKind==JsonValueKind.Number?sm.GetInt32():0;
+        var currentUniqueNc=inspection.Value.TryGetProperty("total_nao_conforme",out var unc)&&unc.ValueKind==JsonValueKind.Number?unc.GetInt32():0;
+
+        var result=(input.Resultado??"").Trim();
+        if(result is not ("conforme" or "nao_conforme" or "nao_aplicavel"))
+            return Results.Json(Error("Resultado de verificação inválido."),statusCode:400);
+
+        var scopeQty=dimensionalSummary?10:sample;
+        var evaluated=result=="nao_aplicavel"?0:scopeQty;
+        var ncQty=result=="nao_conforme"?Math.Max(input.QuantidadeNc??1,1):0;
+        if(scopeQty>0 && ncQty>scopeQty)
+            return Results.Json(Error($"A quantidade NC não pode ultrapassar {scopeQty} nesta verificação."),statusCode:400);
 
         await RestAsync(client,token,HttpMethod.Post,"inspecao_checklist_resultados",
             "on_conflict=inspecao_id,checklist_id",
             new {
                 inspecao_id=id,
                 checklist_id=checkId,
-                resultado=input.Resultado,
-                severidade_confirmada=input.Resultado=="nao_conforme"?automaticSeverity:null,
+                resultado=result,
+                quantidade_avaliada=evaluated,
+                quantidade_nc=ncQty,
+                severidade_confirmada=result=="nao_conforme"?automaticSeverity:null,
                 registrado_por=userId,
                 registrado_em=DateTimeOffset.UtcNow
             },"resolution=merge-duplicates,return=minimal");
-        return Results.Ok(new { data=new { ok=true,resultado=input.Resultado,severidade=automaticSeverity },error=(object?)null });
+
+        // A cobertura da amostra é controlada pelas verificações não dimensionais.
+        // Dimensionais têm escopo próprio e fixo de 10 medições por parâmetro.
+        JsonElement? activeChecks=null;
+        // O it_versao_id é obtido separadamente para manter a consulta explícita e simples.
+        var versionRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=it_versao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (versionInspection,vFound)=FirstRow(versionRows);
+        var itVersionId=vFound?versionInspection!.Value.GetProperty("it_versao_id").GetString():null;
+        if(!string.IsNullOrWhiteSpace(itVersionId))
+        {
+            activeChecks=await RestAsync(client,token,HttpMethod.Get,"it_checklist",
+                $"select=id,grupo&it_versao_id=eq.{Uri.EscapeDataString(itVersionId!)}&ativo=eq.true");
+        }
+
+        var allResults=await RestAsync(client,token,HttpMethod.Get,"inspecao_checklist_resultados",
+            $"select=checklist_id,resultado,quantidade_avaliada,quantidade_nc&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+        var resultById=new Dictionary<string,JsonElement>(StringComparer.OrdinalIgnoreCase);
+        if(allResults is {ValueKind:JsonValueKind.Array})
+            foreach(var row in allResults.Value.EnumerateArray())
+                if(row.TryGetProperty("checklist_id",out var ci)&&ci.ValueKind==JsonValueKind.String&&ci.GetString() is string cid)
+                    resultById[cid]=row;
+
+        var fullSampleChecks=new List<string>();
+        if(activeChecks is {ValueKind:JsonValueKind.Array})
+            foreach(var row in activeChecks.Value.EnumerateArray())
+            {
+                var idEl=row.GetProperty("id").GetString();
+                var g=row.TryGetProperty("grupo",out var ge)&&ge.ValueKind==JsonValueKind.String?ge.GetString()??"":"";
+                if(!string.Equals(g.Trim(),"Dimensional",StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(idEl))
+                    fullSampleChecks.Add(idEl!);
+            }
+
+        var complete=fullSampleChecks.Count>0 && fullSampleChecks.All(cid=>
+        {
+            if(!resultById.TryGetValue(cid,out var rr)) return false;
+            var rv=rr.TryGetProperty("resultado",out var re)&&re.ValueKind==JsonValueKind.String?re.GetString():"";
+            if(rv=="nao_aplicavel") return true;
+            var q=rr.TryGetProperty("quantidade_avaliada",out var qa)&&qa.ValueKind==JsonValueKind.Number?qa.GetInt32():0;
+            return (rv=="conforme"||rv=="nao_conforme") && q>=sample;
+        });
+
+        var ncRows=resultById
+            .Where(kv=>fullSampleChecks.Contains(kv.Key,StringComparer.OrdinalIgnoreCase))
+            .Select(kv=>kv.Value)
+            .Where(rr=>rr.TryGetProperty("resultado",out var rs)&&rs.ValueKind==JsonValueKind.String&&rs.GetString()=="nao_conforme")
+            .Select(rr=>rr.TryGetProperty("quantidade_nc",out var qn)&&qn.ValueKind==JsonValueKind.Number?qn.GetInt32():0)
+            .Where(x=>x>0)
+            .ToList();
+
+        var reconciliation=ncRows.Count>1;
+        var uniqueNc=ncRows.Count switch
+        {
+            0 => 0,
+            1 => ncRows[0],
+            _ => Math.Max(currentUniqueNc,ncRows.Max())
+        };
+        var inspected=complete?sample:0;
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {
+                total_inspecionado=inspected,
+                total_nao_conforme=uniqueNc,
+                total_conforme=Math.Max(inspected-uniqueNc,0)
+            },"return=minimal");
+
+        return Results.Ok(new { data=new {
+            ok=true,resultado=result,severidade=automaticSeverity,
+            quantidade_avaliada=evaluated,quantidade_nc=ncQty,
+            amostra_completa=complete,total_inspecionado=inspected,total_nao_conforme=uniqueNc,
+            reconciliacao_nc_necessaria=reconciliation
+        },error=(object?)null });
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao salvar checklist.",e.Message),statusCode:500);}
+});
+
+app.MapPut("/api/inspecoes/{id}/amostragem/resumo", async (string id,SampleSummaryRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var rows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=tamanho_amostra,total_inspecionado&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inspection,found)=FirstRow(rows);
+        if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var sample=inspection!.Value.TryGetProperty("tamanho_amostra",out var sm)&&sm.ValueKind==JsonValueKind.Number?sm.GetInt32():0;
+        var inspected=inspection.Value.TryGetProperty("total_inspecionado",out var ti)&&ti.ValueKind==JsonValueKind.Number?ti.GetInt32():0;
+        if(input.TotalNaoConforme<0 || (sample>0 && input.TotalNaoConforme>sample))
+            return Results.Json(Error($"NC únicas deve ficar entre 0 e {sample}."),statusCode:400);
+
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {
+                total_nao_conforme=input.TotalNaoConforme,
+                total_conforme=Math.Max(inspected-input.TotalNaoConforme,0)
+            },"return=minimal");
+        return Results.Ok(new {data=new {total_nao_conforme=input.TotalNaoConforme,total_conforme=Math.Max(inspected-input.TotalNaoConforme,0)},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao atualizar resumo da amostragem.",e.Message),statusCode:500);}
 });
 
 app.MapPut("/api/inspecoes/{id}/observacao-interna", async (string id,InternalNoteRequest input,HttpRequest request,IHttpClientFactory factory)=>
@@ -1405,6 +1524,7 @@ app.MapPut("/api/inspecoes/{id}/dimensionais/{itemId}/{paramId}/{seq:int}", asyn
 {
     try
     {
+        if(seq<1 || seq>10) return Results.Json(Error("As análises dimensionais usam exatamente 10 medições por parâmetro."),statusCode:400);
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         var cfgRows=await RestAsync(client,token,HttpMethod.Get,"inspecao_dimensional_configuracoes",
@@ -1910,12 +2030,35 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
     try
     {
         var token=Token(request);
-        var msg=new HttpRequestMessage(HttpMethod.Get,$"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}");
-        msg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
-        var res=await factory.CreateClient("supabase").SendAsync(msg);
-        var bytes=await res.Content.ReadAsByteArrayAsync();
+        var client=factory.CreateClient("supabase");
+        HttpResponseMessage? res=null;
+        byte[] bytes=[];
+        var delays=new[]{2000,4000,6000,8000,10000,12000};
+
+        for(var attempt=0;attempt<delays.Length;attempt++)
+        {
+            using var msg=new HttpRequestMessage(HttpMethod.Get,$"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}");
+            msg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
+            res=await client.SendAsync(msg);
+            bytes=await res.Content.ReadAsByteArrayAsync();
+
+            var transient=(int)res.StatusCode is 502 or 503 or 504;
+            if(!transient || attempt==delays.Length-1) break;
+
+            res.Dispose();
+            res=null;
+            await Task.Delay(delays[attempt]);
+        }
+
+        if(res is null)
+            return Results.Json(Error("Serviço de documentos indisponível.","Não foi possível iniciar o gerador de Word."),statusCode:503);
+
         if(!res.IsSuccessStatusCode)
+        {
+            if((int)res.StatusCode is 502 or 503 or 504)
+                return Results.Json(Error("O gerador de Word demorou para iniciar.","O Render estava em cold start. Tente novamente; o serviço já recebeu a solicitação de ativação."),statusCode:503);
             return Results.Text(Encoding.UTF8.GetString(bytes),"application/json",statusCode:(int)res.StatusCode);
+        }
 
         var contentType=res.Content.Headers.ContentType?.ToString()
             ?? "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -2512,6 +2655,11 @@ public sealed class ChecklistResultRequest
 {
     public string? Resultado { get; set; }
     public string? Severidade { get; set; }
+    public int? QuantidadeNc { get; set; }
+}
+public sealed class SampleSummaryRequest
+{
+    public int TotalNaoConforme { get; set; }
 }
 public sealed class InternalNoteRequest
 {
