@@ -15,7 +15,8 @@ if (string.IsNullOrWhiteSpace(supabaseUrl) || string.IsNullOrWhiteSpace(supabase
 builder.Services.AddHttpClient("supabase", c => c.Timeout = TimeSpan.FromSeconds(75));
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
     .WithOrigins("https://app-sgq.onrender.com", "http://localhost:5173", "http://127.0.0.1:5173")
-    .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
+    .AllowAnyHeader().AllowAnyMethod().AllowCredentials()
+    .SetPreflightMaxAge(TimeSpan.FromHours(12))));
 
 var app = builder.Build();
 app.UseCors();
