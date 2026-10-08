@@ -593,6 +593,49 @@ export default function App() {
     setSkuRows([emptySku()])
   }
 
+  function fillTestInspectionData() {
+    const today=new Date().toISOString().slice(0,10)
+    const suffix=String(Date.now()).slice(-6)
+    setInspection((current)=>({
+      ...current,
+      processoId:'',
+      codigo:suffix,
+      cliente:'CLIENTE TESTE SGQ',
+      notaFiscal:`TESTE-${suffix}`,
+      origem:'China',
+      transporte:'Marítimo',
+      chegadaCd:today,
+      dataInspecao:today,
+      observacaoInterna:'DADOS FICTÍCIOS PARA TESTE. Ex.: 60 un retiradas no laboratório para retenção.',
+    }))
+    setSkuRows([{
+      ...emptySku(),
+      sku:`TESTE-${suffix}`,
+      nome:'EMBALAGEM TESTE SGQ',
+      lote:`LT-${suffix}`,
+      material:'PP',
+      capacidade:'100 ml',
+      quantidade:'6060',
+      quantidadePorCaixa:'136',
+      caixasRecebidas:'46',
+      caixasInspecionadas:'8',
+      caixasPadrao:'44',
+      unidadesPadrao:'136',
+      caixasFracionadas:'1',
+      unidadesFracionadas:'16',
+      caixasLaboratorio:'1',
+      unidadesLaboratorio:'60',
+      unidadesPorConjunto:'1',
+      omieStatus:'',
+      omieMessage:'',
+    }])
+    setMessage(current=>{
+      return inspection.itVersionId
+        ? 'Dados fictícios preenchidos. Revise e crie a inspeção.'
+        : 'Dados fictícios preenchidos. Selecione apenas a IT antes de criar.'
+    })
+  }
+
   function reuseProcess(p: ProcessRow) {
     setInspection((x) => ({
       ...x,
@@ -1811,8 +1854,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <div className="page-title">
             <div><span className="eyebrow">INSPEÇÃO</span><h1>Nova inspeção</h1></div>
             <div className="row-actions">
-              {processes[0] && <button className="secondary" onClick={()=>reuseProcess(processes[0])}><Copy size={16}/> Reutilizar últimos dados gerais</button>}
-              {inspection.processoId && <button className="secondary" onClick={resetNewInspection}>Novo processo</button>}
+              <button className="secondary test-data-button" type="button" onClick={fillTestInspectionData}>Preencher dados fictícios</button>
+              {processes[0] && <button className="secondary" type="button" onClick={()=>reuseProcess(processes[0])}><Copy size={16}/> Reutilizar últimos dados gerais</button>}
+              {inspection.processoId && <button className="secondary" type="button" onClick={resetNewInspection}>Novo processo</button>}
             </div>
           </div>
 
