@@ -1,11 +1,12 @@
 from __future__ import annotations
-import os, base64, urllib.parse
+import os, base64, urllib.parse, re
+from pathlib import Path
 from datetime import datetime, timezone
 import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .docx_generator import generate, file_name
+from .docx_generator import generate, file_name, generate_inspection, inspection_file_name
 
 SUPABASE_URL=os.environ.get("SUPABASE_URL","").rstrip("/")
 SUPABASE_KEY=os.environ.get("SUPABASE_PUBLISHABLE_KEY","")
@@ -59,6 +60,28 @@ async def storage_upload(client,token,bucket,path,data,content_type):
         raise HTTPException(status_code=502,detail=f"Falha ao salvar relatório: {r.text[:300]}")
     return r.json()
 
+TEMPLATE_DIR=Path(__file__).resolve().parent / "templates"
+
+def it_template_key(code:str|None)->str:
+    digits="".join(re.findall(r"\d+",str(code or "")))
+    if not digits: return ""
+    return f"IT{int(digits):03d}"
+
+def bundled_it_template(code:str|None)->bytes|None:
+    key=it_template_key(code)
+    if not key: return None
+    path=TEMPLATE_DIR / f"{key}.docx"
+    return path.read_bytes() if path.exists() else None
+
+async def patch_it_version(client,token,version_id,payload):
+    r=await client.patch(
+        f"{SUPABASE_URL}/rest/v1/it_versoes",
+        headers={**rest_headers(token),"Prefer":"return=minimal"},
+        params={"id":f"eq.{version_id}"},
+        json=payload,
+    )
+    return r.status_code<300
+
 async def patch_execution(client,token,execution_id,payload):
     h={**rest_headers(token),"Prefer":"return=representation"}
     r=await client.patch(
@@ -71,9 +94,57 @@ async def patch_execution(client,token,execution_id,payload):
         raise HTTPException(status_code=502,detail=f"Falha ao atualizar auditoria: {r.text[:240]}")
     return r.json()
 
+@app.get("/ready")
+async def ready():
+    return {"status":"ok","service":"sgq-docs"}
+
 @app.get("/health")
 async def health():
-    return {"status":"ok","service":"sgq-docs"}
+    bundled=sorted(TEMPLATE_DIR.glob("IT*.docx")) if TEMPLATE_DIR.exists() else []
+    return {
+        "status":"ok",
+        "service":"sgq-docs",
+        "template_count":len(bundled),
+        "inspection_templates":[p.stem for p in bundled],
+    }
+
+@app.get("/self-test")
+async def self_test():
+    bundled=sorted(TEMPLATE_DIR.glob("IT*.docx")) if TEMPLATE_DIR.exists() else []
+    template_tests={}
+    minimal={
+        "inspection":{"numero":"SELF-TEST","status":"em_andamento","resultado":"pendente","nivel_inspecao":"I","tamanho_amostra":1,"total_inspecionado":0,"total_nao_conforme":0},
+        "process":{"codigo":"FST00000","cliente":"Teste técnico"},
+        "items":[],
+        "checklist":[],
+        "check_results":[],
+        "dim_params":[],
+        "dim_configs":[],
+        "dim_results":[],
+        "tests":[],
+        "test_results":[],
+        "photos":[],
+        "inspector_name":"SGQ",
+    }
+    for path in bundled:
+        try:
+            generated=generate_inspection(path.read_bytes(),minimal)
+            # Abre novamente o resultado para validar que o pacote DOCX gerado é íntegro.
+            from docx import Document
+            from io import BytesIO
+            Document(BytesIO(generated))
+            template_tests[path.stem]={"ok":True,"bytes":len(generated)}
+        except Exception as exc:
+            template_tests[path.stem]={"ok":False,"error":str(exc)}
+    ok=len(bundled)==8 and all(x.get("ok") for x in template_tests.values())
+    return {
+        "status":"ok" if ok else "degraded",
+        "service":"sgq-docs",
+        "inspection_templates":[p.stem for p in bundled],
+        "template_count":len(bundled),
+        "template_tests":template_tests,
+        "generator_ok":ok,
+    }
 
 @app.get("/generate/{execution_id}")
 async def generate_document(execution_id:str,authorization:str|None=Header(default=None)):
@@ -137,6 +208,163 @@ async def generate_document(execution_id:str,authorization:str|None=Header(defau
             "power_automate_status":"documento_pronto",
             "atualizado_em":now,
         })
+
+        safe_name=urllib.parse.quote(filename)
+        return Response(
+            content=docx,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition":f"attachment; filename*=UTF-8''{safe_name}",
+                "X-SGQ-Storage-Path":storage_path,
+                "X-SGQ-File-Name":filename,
+            },
+        )
+
+
+@app.get("/generate-inspection/{inspection_id}")
+async def generate_inspection_document(inspection_id:str,authorization:str|None=Header(default=None)):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401,detail="Authorization Bearer obrigatório.")
+    token=authorization.split(" ",1)[1].strip()
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        user=await verify_user(client,token)
+        rows=await table_rows(client,token,"inspecoes",{"id":f"eq.{inspection_id}","select":"*","limit":"1"})
+        if not rows: raise HTTPException(status_code=404,detail="Inspeção não encontrada.")
+        inspection=rows[0]
+        group_id=inspection.get("grupo_inspecao_id")
+        version_id=inspection.get("it_versao_id")
+        groups=await table_rows(client,token,"grupos_inspecao",{"id":f"eq.{group_id}","select":"*","limit":"1"})
+        if not groups: raise HTTPException(status_code=409,detail="Grupo da inspeção não encontrado.")
+        group=groups[0]
+        processes=await table_rows(client,token,"processos",{"id":f"eq.{group.get('processo_id')}","select":"*","limit":"1"})
+        process=processes[0] if processes else {}
+
+        versions=await table_rows(client,token,"it_versoes",{"id":f"eq.{version_id}","select":"*","limit":"1"})
+        if not versions:
+            raise HTTPException(status_code=409,detail="Versão da IT vinculada não encontrada.")
+        version=versions[0]
+
+        instruction_rows=await table_rows(
+            client,token,"instrucoes_trabalho",
+            {"id":f"eq.{version.get('instrucao_trabalho_id')}","select":"codigo,titulo","limit":"1"}
+        )
+        instruction=instruction_rows[0] if instruction_rows else {}
+        it_code=instruction.get("codigo") or ""
+        # Os modelos oficiais já acompanham o serviço. Evita uma leitura remota a cada laudo.
+        template_bytes=bundled_it_template(it_code)
+        if not template_bytes:
+            storage_path=version.get("arquivo_storage_path")
+            if storage_path:
+                try:
+                    template_bytes=await storage_download(client,token,"it-documentos",storage_path)
+                except HTTPException:
+                    template_bytes=None
+        if not template_bytes:
+            raise HTTPException(status_code=409,detail=f"Modelo Word oficial da {it_code or 'IT'} não está disponível.")
+
+        links=await table_rows(client,token,"grupo_inspecao_itens",{"grupo_inspecao_id":f"eq.{group_id}","select":"processo_item_id,unidades_por_conjunto"})
+        items=[]
+        product_photo_refs=[]
+        for link in links:
+            item_rows=await table_rows(client,token,"processo_itens",{"id":f"eq.{link.get('processo_item_id')}","select":"*","limit":"1"})
+            if not item_rows: continue
+            item=item_rows[0]
+            prod_rows=await table_rows(client,token,"produtos",{"id":f"eq.{item.get('produto_id')}","select":"*","limit":"1"})
+            product=prod_rows[0] if prod_rows else {}
+            item["produto"]=product
+            item["unidades_por_conjunto"]=link.get("unidades_por_conjunto")
+            items.append(item)
+            photo_path=product.get("foto_principal_path")
+            if photo_path:
+                product_photo_refs.append((photo_path,f"Foto principal - {product.get('sku') or ''} {product.get('nome') or ''}".strip()))
+
+        checklist,check_results,dim_params,dim_configs,dim_results,tests,test_results,photo_rows=await __import__("asyncio").gather(
+            table_rows(client,token,"it_checklist",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
+            table_rows(client,token,"inspecao_checklist_resultados",{"inspecao_id":f"eq.{inspection_id}","select":"*"}),
+            table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
+            table_rows(client,token,"inspecao_dimensional_configuracoes",{"inspecao_id":f"eq.{inspection_id}","select":"*"}),
+            table_rows(client,token,"inspecao_dimensionais",{"inspecao_id":f"eq.{inspection_id}","select":"*","order":"sequencia_amostra.asc"}),
+            table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
+            table_rows(client,token,"inspecao_testes_resultados",{"inspecao_id":f"eq.{inspection_id}","select":"*"}),
+            table_rows(client,token,"inspecao_fotos",{"inspecao_id":f"eq.{inspection_id}","select":"*","order":"criado_em.asc"}),
+        )
+
+        inspector_name=""
+        if inspection.get("responsavel_id"):
+            pr=await table_rows(client,token,"profiles",{"id":f"eq.{inspection.get('responsavel_id')}","select":"nome","limit":"1"})
+            if pr: inspector_name=pr[0].get("nome") or ""
+
+        photos=[]
+        seen=set()
+        for p in photo_rows:
+            path=p.get("storage_path")
+            if not path or path in seen: continue
+            seen.add(path)
+            try:
+                data=await storage_download(client,token,"inspecao-fotos",path)
+                photos.append({"bytes":data,"caption":p.get("legenda") or ""})
+            except HTTPException:
+                pass
+        if not photos and product_photo_refs:
+            jobs=[storage_download(client,token,"produto-fotos",path) for path,_ in product_photo_refs]
+            downloaded=await __import__("asyncio").gather(*jobs,return_exceptions=True)
+            for data,(_,caption) in zip(downloaded,product_photo_refs):
+                if isinstance(data,(bytes,bytearray)):
+                    photos.append({"bytes":bytes(data),"caption":caption})
+
+        payload={
+            "inspection":inspection,
+            "process":process,
+            "group":group,
+            "items":items,
+            "checklist":checklist,
+            "check_results":check_results,
+            "dim_params":dim_params,
+            "dim_configs":dim_configs,
+            "dim_results":dim_results,
+            "tests":tests,
+            "test_results":test_results,
+            "photos":photos,
+            "inspector_name":inspector_name,
+        }
+        docx=generate_inspection(template_bytes,payload)
+        filename=inspection_file_name(process.get("codigo"),inspection.get("numero"))
+        storage_path=f"{inspection_id}/{filename}"
+        await storage_upload(
+            client,token,"laudos",storage_path,docx,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+        now=datetime.now(timezone.utc).isoformat()
+        existing=await table_rows(client,token,"laudos",{"inspecao_id":f"eq.{inspection_id}","select":"id","limit":"1"})
+        report_payload={
+            "inspecao_id":inspection_id,
+            "numero":inspection.get("numero"),
+            "storage_path":storage_path,
+            "gerado_em":now,
+        }
+        if existing:
+            r=await client.patch(
+                f"{SUPABASE_URL}/rest/v1/laudos",
+                headers={**rest_headers(token),"Prefer":"return=minimal"},
+                params={"id":f"eq.{existing[0]['id']}"},
+                json=report_payload,
+            )
+        else:
+            r=await client.post(
+                f"{SUPABASE_URL}/rest/v1/laudos",
+                headers={**rest_headers(token),"Prefer":"return=minimal"},
+                json=report_payload,
+            )
+        if r.status_code>=300:
+            raise HTTPException(status_code=502,detail=f"Falha ao registrar laudo: {r.text[:240]}")
+
+        await client.patch(
+            f"{SUPABASE_URL}/rest/v1/inspecoes",
+            headers={**rest_headers(token),"Prefer":"return=minimal"},
+            params={"id":f"eq.{inspection_id}"},
+            json={"documento_gerado_em":now},
+        )
 
         safe_name=urllib.parse.quote(filename)
         return Response(
