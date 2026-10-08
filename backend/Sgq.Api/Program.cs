@@ -1697,48 +1697,6 @@ app.MapPost("/api/inspecoes/{id}/concluir", async (string id,FinishInspectionReq
     catch(Exception e){return Results.Json(Error("Falha ao concluir inspeção.",e.Message),statusCode:500);}
 });
 
-app.MapPost("/api/inspecoes/{id}/assistente", async (string id,AssistantRequest input,HttpRequest request,IHttpClientFactory factory)=>
-{
-    try
-    {
-        var token=Token(request);
-        var client=factory.CreateClient("supabase");
-        var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/sgq-assistente");
-        ApplyAuth(fn,token);
-        fn.Content=JsonContent.Create(new {mode=input.Mode,question=input.Question??"",context=input.Context});
-        var res=await client.SendAsync(fn);
-        var raw=await res.Content.ReadAsStringAsync();
-        if(!res.IsSuccessStatusCode)
-            return Results.Ok(new {data=(object?)null,error=new {message="A IA assistida não respondeu.",details=raw}});
-        object? data;
-        try{data=JsonSerializer.Deserialize<JsonElement>(raw);}catch{data=new {text=raw};}
-        return Results.Ok(new {data,error=(object?)null});
-    }
-    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
-    catch(Exception e){return Results.Json(Error("Falha ao consultar a IA assistida.",e.Message),statusCode:500);}
-});
-
-app.MapPost("/api/inspecoes/{id}/conclusao-assistida", async (string id,AssistantConclusionRequest input,HttpRequest request,IHttpClientFactory factory)=>
-{
-    try
-    {
-        var token=Token(request);
-        var client=factory.CreateClient("supabase");
-        var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/sgq-conclusao");
-        ApplyAuth(fn,token);
-        fn.Content=new StringContent(input.Payload.GetRawText(),Encoding.UTF8,"application/json");
-        var res=await client.SendAsync(fn);
-        var raw=await res.Content.ReadAsStringAsync();
-        object? data;
-        try{data=JsonSerializer.Deserialize<JsonElement>(raw);}catch{data=new {text=raw};}
-        if(!res.IsSuccessStatusCode)
-            return Results.Ok(new {data,error=new {message="Não foi possível gerar a conclusão com IA.",details=raw}});
-        return Results.Ok(new {data,error=(object?)null});
-    }
-    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
-    catch(Exception e){return Results.Json(Error("Falha ao gerar conclusão assistida.",e.Message),statusCode:500);}
-});
-
 app.MapPost("/api/its/{id}/estruturar", async (string id,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
