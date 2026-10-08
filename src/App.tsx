@@ -2032,7 +2032,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
 
           <section id="sec-verificacoes" className="panel section-card">
-            <div className="section-title"><div><h2>Verificações</h2><span className="section-note">C/NC/NA resume o critério. Quando houver NC, informe quantas unidades da amostra falharam naquele critério.</span></div></div>
+            <div className="section-title"><div><h2>Verificações</h2><span className="section-note">C / NC / NA · informe a quantidade quando houver NC.</span></div></div>
             <div className="checklist compact-checklist">
               {(detail.checklist ?? []).map((item:any)=>{
                 const r=detail.checklistResults?.find((x:any)=>x.checklist_id===item.id)
@@ -2044,7 +2044,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     <div className="check-copy">
                       <b>{item.ordem}. {item.requisito}</b>
                       <span>{item.instrucao}</span>
-                      <small className="verification-scope">{dimensionalScope ? 'Escopo: resumo das 10 medições dimensionais' : `Escopo: ${scopeQty} unidades da amostra`}</small>
                       {automatic && <small>NC: {automatic==='critico'?'Crítico':automatic==='grave'?'Grave':'Tolerável'} · definido pela IT</small>}
                     </div>
                     <div className="check-actions-stack">
@@ -2361,7 +2360,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
 
             <div className="assistant-disclaimer">
-              A IA orienta com base nos dados registrados e na IT vinculada. Verificações usam a amostra total; dimensionais usam 10 medições. Ac/Re usa “NC únicas” para não duplicar a mesma peça em critérios diferentes.
+              A IA orienta com base nos registros da inspeção. A decisão final permanece com o inspetor.
             </div>
           </aside>
         </div>
