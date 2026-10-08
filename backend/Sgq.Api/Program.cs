@@ -93,9 +93,15 @@ async Task<string> CurrentUserId(HttpClient client, string token)
 (string Code, int Sample, int? Ac, int? Re) SamplingPlan(long lot, string level)
 {
     if (lot <= 0) return ("", 0, null, null);
-    if (lot < 281) return ("100%", (int)Math.Min(lot, int.MaxValue), 0, 1);
 
     var rows = new (long Min,long Max,string I,string II,string III,string S1,string S2,string S3,string S4)[] {
+        (2,8,"A","A","B","A","A","A","A"),
+        (9,15,"A","B","C","A","A","A","A"),
+        (16,25,"B","C","D","A","A","B","B"),
+        (26,50,"C","D","E","A","B","B","C"),
+        (51,90,"C","E","F","B","B","C","C"),
+        (91,150,"D","F","G","B","B","C","D"),
+        (151,280,"E","G","H","B","C","D","E"),
         (281,500,"F","H","J","B","C","D","E"),
         (501,1200,"G","J","K","C","C","E","F"),
         (1201,3200,"H","K","L","C","D","E","G"),
@@ -110,8 +116,9 @@ async Task<string> CurrentUserId(HttpClient client, string token)
         ["J"]=80,["K"]=125,["L"]=200,["M"]=315,["N"]=500,["P"]=800,["Q"]=1250,["R"]=2000
     };
     var acre = new Dictionary<string,(int Ac,int Re)> {
+        ["A"]=(0,1),["B"]=(0,1),["C"]=(0,1),["D"]=(0,1),["E"]=(0,1),
         ["F"]=(1,2),["G"]=(1,2),["H"]=(2,3),["J"]=(3,4),["K"]=(5,6),
-        ["L"]=(7,8),["M"]=(10,11),["N"]=(14,15),["P"]=(21,22)
+        ["L"]=(7,8),["M"]=(10,11),["N"]=(14,15),["P"]=(21,22),["Q"]=(21,22),["R"]=(21,22)
     };
     var row = rows.FirstOrDefault(x => lot >= x.Min && lot <= x.Max);
     var code = level switch {
@@ -123,8 +130,8 @@ async Task<string> CurrentUserId(HttpClient client, string token)
         "S4" => row.S4,
         _ => row.I
     };
-    var sample = sizes.TryGetValue(code ?? "", out var s) ? s : 0;
-    if (level.StartsWith("S", StringComparison.OrdinalIgnoreCase)) return (code ?? "", sample, null, null);
+    var planned = sizes.TryGetValue(code ?? "", out var s) ? s : 0;
+    var sample = (int)Math.Min((long)planned, lot);
     return acre.TryGetValue(code ?? "", out var ar) ? (code ?? "", sample, ar.Ac, ar.Re) : (code ?? "", sample, null, null);
 }
 
@@ -877,13 +884,6 @@ app.MapPost("/api/produtos/consultar", async (ProductLookupRequest input,HttpReq
 
 decimal EffectiveReceived(CreateInspectionItem item)
 {
-    if(item.DistribuicaoCaixas is {Count:>0})
-    {
-        var sum=item.DistribuicaoCaixas
-            .Where(x=>x.Caixas>0 && x.Unidades>0)
-            .Sum(x=>x.Caixas*x.Unidades);
-        if(sum>0) return sum;
-    }
     return Math.Max(0m,item.Quantidade);
 }
 
@@ -1231,7 +1231,8 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 caixas_recebidas=totalBoxes>0?(decimal?)totalBoxes:null,
                 caixas_avaliar=totalInspect>0?(decimal?)totalInspect:null,
                 data_inspecao=input.DataInspecao,
-                observacao_interna=string.IsNullOrWhiteSpace(input.ObservacaoInterna)?null:input.ObservacaoInterna.Trim()
+                observacao_interna=string.IsNullOrWhiteSpace(input.ObservacaoInterna)?null:input.ObservacaoInterna.Trim(),
+                documento_gerado_em=(DateTimeOffset?)null
             },"return=minimal");
 
         return Results.Ok(new {data=new {ok=true,plano=new {lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re}},error=(object?)null});
@@ -2037,9 +2038,34 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
     {
         var token=Token(request);
         var client=factory.CreateClient("supabase");
+        var prepare=request.Query.TryGetValue("preparar",out var prepareRaw)
+            && string.Equals(prepareRaw.ToString(),"true",StringComparison.OrdinalIgnoreCase);
+
+        // A completed inspection with an already generated document is served straight from Storage.
+        var cachedRows=await RestAsync(client,token,HttpMethod.Get,"laudos",
+            $"select=numero,storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}&storage_path=not.is.null&limit=1");
+        var (cached,cachedFound)=FirstRow(cachedRows);
+        if(cachedFound)
+        {
+            var path=cached!.Value.TryGetProperty("storage_path",out var sp)&&sp.ValueKind==JsonValueKind.String?sp.GetString():null;
+            if(!string.IsNullOrWhiteSpace(path))
+            {
+                using var cachedMsg=new HttpRequestMessage(HttpMethod.Get,$"{supabaseUrl}/storage/v1/object/authenticated/laudos/{EncodedPath(path!)}");
+                ApplyAuth(cachedMsg,token);
+                var cachedRes=await client.SendAsync(cachedMsg);
+                if(cachedRes.IsSuccessStatusCode)
+                {
+                    if(prepare) return Results.Ok(new {data=new {prepared=true,cached=true},error=(object?)null});
+                    var cachedBytes=await cachedRes.Content.ReadAsByteArrayAsync();
+                    var cachedName=Path.GetFileName(path) ?? $"Inspecao-{id}.docx";
+                    return Results.File(cachedBytes,"application/vnd.openxmlformats-officedocument.wordprocessingml.document",cachedName);
+                }
+            }
+        }
+
         HttpResponseMessage? res=null;
         byte[] bytes=[];
-        var delays=new[]{2000,4000,6000,8000,10000,12000};
+        var delays=new[]{1500,2500,3500,5000,7000};
 
         for(var attempt=0;attempt<delays.Length;attempt++)
         {
@@ -2056,15 +2082,14 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
             await Task.Delay(delays[attempt]);
         }
 
-        if(res is null)
-            return Results.Json(Error("Serviço de documentos indisponível.","Não foi possível iniciar o gerador de Word."),statusCode:503);
-
-        if(!res.IsSuccessStatusCode)
+        if(res is null || !res.IsSuccessStatusCode)
         {
-            if((int)res.StatusCode is 502 or 503 or 504)
-                return Results.Json(Error("O gerador de Word demorou para iniciar.","O Render estava em cold start. Tente novamente; o serviço já recebeu a solicitação de ativação."),statusCode:503);
-            return Results.Text(Encoding.UTF8.GetString(bytes),"application/json",statusCode:(int)res.StatusCode);
+            if(res is not null && (int)res.StatusCode is not (502 or 503 or 504))
+                return Results.Text(Encoding.UTF8.GetString(bytes),"application/json",statusCode:(int)res.StatusCode);
+            return Results.Json(Error("Não foi possível gerar o Word agora.","O serviço de documentos está indisponível."),statusCode:503);
         }
+
+        if(prepare) return Results.Ok(new {data=new {prepared=true,cached=false},error=(object?)null});
 
         var contentType=res.Content.Headers.ContentType?.ToString()
             ?? "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
