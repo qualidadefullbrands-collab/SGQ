@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, base64, urllib.parse, re
+import os, base64, urllib.parse, re, unicodedata
 from pathlib import Path
 from datetime import datetime, timezone
 import httpx
@@ -57,8 +57,22 @@ async def storage_upload(client,token,bucket,path,data,content_type):
     headers={**auth_headers(token),"Content-Type":content_type,"x-upsert":"true"}
     r=await client.post(f"{SUPABASE_URL}/storage/v1/object/{bucket}/{encoded}",headers=headers,content=data)
     if r.status_code>=300:
-        raise HTTPException(status_code=502,detail=f"Falha ao salvar relatório: {r.text[:300]}")
+        print(f"[storage_upload] bucket={bucket} path={path} status={r.status_code} body={r.text[:300]}")
+        status=r.status_code if 400 <= r.status_code < 500 else 502
+        raise HTTPException(status_code=status,detail=f"Falha ao salvar relatório: {r.text[:300]}")
     return r.json()
+
+def storage_safe_filename(name:str|None, fallback:str="documento.docx")->str:
+    raw=str(name or fallback).strip()
+    suffix=Path(raw).suffix.lower()
+    if suffix not in {".docx",".pdf"}:
+        suffix=Path(fallback).suffix.lower() or ".docx"
+    base=raw[:-len(Path(raw).suffix)] if Path(raw).suffix else raw
+    base=unicodedata.normalize("NFKD",base).encode("ascii","ignore").decode("ascii")
+    base=re.sub(r"[^A-Za-z0-9._-]+","-",base).strip(" .-_")
+    if not base:
+        base=Path(fallback).stem or "documento"
+    return f"{base[:160]}{suffix}"
 
 TEMPLATE_DIR=Path(__file__).resolve().parent / "templates"
 
@@ -195,7 +209,7 @@ async def generate_document(execution_id:str,authorization:str|None=Header(defau
         docx=generate(template_bytes,payload)
         filename=file_name(rq,ex["data_avaliacao"])
         uid=user.get("id") or "user"
-        storage_path=f"{uid}/{execution_id}/{filename}"
+        storage_path=f"{uid}/{execution_id}/{storage_safe_filename(filename,'auditoria.docx')}"
         await storage_upload(
             client,token,"auditoria-relatorios",storage_path,docx,
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -233,6 +247,10 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
         inspection=rows[0]
         group_id=inspection.get("grupo_inspecao_id")
         version_id=inspection.get("it_versao_id")
+        if not group_id:
+            raise HTTPException(status_code=409,detail="Esta inspeção não possui grupo vinculado e não pode gerar o Word.")
+        if not version_id:
+            raise HTTPException(status_code=409,detail="Esta inspeção não possui IT vinculada. Vincule uma IT para gerar o Word no modelo oficial.")
         groups=await table_rows(client,token,"grupos_inspecao",{"id":f"eq.{group_id}","select":"*","limit":"1"})
         if not groups: raise HTTPException(status_code=409,detail="Grupo da inspeção não encontrado.")
         group=groups[0]
@@ -329,7 +347,8 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
         }
         docx=generate_inspection(template_bytes,payload)
         filename=inspection_file_name(process.get("codigo"),inspection.get("numero"))
-        storage_path=f"{inspection_id}/{filename}"
+        storage_filename=storage_safe_filename(filename,"laudo-inspecao.docx")
+        storage_path=f"{inspection_id}/{storage_filename}"
         await storage_upload(
             client,token,"laudos",storage_path,docx,
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
