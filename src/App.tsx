@@ -1928,25 +1928,47 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
-          <section className="progress-strip">
-            <ProgressItem done={samplingDone} label="Amostragem"/>
-            <ProgressItem done={checklistDone} label="Verificações"/>
-            <ProgressItem done={dimsDone} label="Dimensionais"/>
-            <ProgressItem done={testsDone} label="Testes"/>
-            <ProgressItem done={detail.status==='concluida'} label="Resultado"/>
-            <ProgressItem done={detail.retencao_decisao!==null} label="Retenção"/>
-          </section>
-          <nav className="inspection-quick-nav">
-            <a href="#sec-dados">Dados</a>
-            <a href="#sec-amostragem">Amostragem</a>
-            <a href="#sec-verificacoes">Verificações</a>
-            <a href="#sec-dimensionais">Dimensionais</a>
-            <a href="#sec-testes">Testes</a>
-            <a href="#sec-fotos">Fotos</a>
-            <a href="#sec-resultado">Resultado</a>
+          <nav id="inspection-stage-nav" className="inspection-stage-tabs" role="tablist" aria-label="Etapas da inspeção">
+            {([
+              ['dados','Dados',true],['amostragem','Amostragem',samplingDone],
+              ['verificacoes','Verificações',checklistDone],['dimensionais','Dimensionais',dimsDone],
+              ['testes','Testes',testsDone],['fotos','Fotos',Boolean(detail.photos?.length)],
+              ['resultado','Resultado',detail.status==='concluida'],
+              ['retencao','Retenção',detail.retencao_decisao!=null],
+            ] as Array<[typeof activeStage,string,boolean]>).map(([key,label,done])=>(
+              <button key={key} type="button" role="tab" aria-selected={activeStage===key}
+                className={'inspection-stage-tab'+(activeStage===key?' active':'')+(done?' done':'')}
+                onClick={()=>selectInspectionStage(key)}>
+                <span className="inspection-stage-dot">{done?'✓':'·'}</span>{label}
+              </button>
+            ))}
           </nav>
+          {detail.status==='aberta' && activeStage!=='dados' && (
+            <div className="inspection-not-started-hint">Esta inspeção ainda não foi iniciada. Revise os dados, selecione uma IT e clique em <strong>Iniciar inspeção</strong> antes de registrar verificações.</div>
+          )}
 
-          <section id="sec-dados" className="panel section-card internal-note-panel">
+          <section id="sec-dados" className={'panel section-card internal-note-panel inspection-stage'+(activeStage==='dados'?'':' inspection-stage-hidden')}>
+            <div className="section-title"><div><h2>Dados iniciais da inspeção</h2><span className="section-note">Informações cadastradas, disponíveis para revisão.</span></div>
+              {canWrite && detail.status!=='concluida' && <button className="secondary small" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados e IT</button>}
+            </div>
+            <div className="inspection-data-summary">
+              <div><small>Processo FST</small><strong>{formatFst(detail.grupos_inspecao?.processos?.codigo)}</strong></div>
+              <div><small>Cliente</small><strong>{detail.grupos_inspecao?.processos?.cliente || '—'}</strong></div>
+              <div><small>Nota fiscal</small><strong>{detail.grupos_inspecao?.processos?.nota_fiscal || '—'}</strong></div>
+              <div><small>Origem / transporte</small><strong>{detail.grupos_inspecao?.processos?.origem || '—'} · {detail.grupos_inspecao?.processos?.transporte || '—'}</strong></div>
+              <div><small>IT / versão</small><strong>{detail.it_versoes?.instrucoes_trabalho?.codigo || 'Não selecionada'} · {detail.it_versoes?.versao || '—'}</strong></div>
+              <div><small>Nível da inspeção</small><strong>{detail.nivel_inspecao || '—'}</strong></div>
+              <div><small>Data da inspeção</small><strong>{formatDateBR(detail.data_inspecao)}</strong></div>
+              <div><small>Itens cadastrados</small><strong>{detail.items?.length || 0}</strong></div>
+            </div>
+            <div className="inspection-initial-items">
+              {(detail.items ?? []).map((link:any)=>(
+                <div key={link.processo_itens.id}><strong>{link.processo_itens.produtos?.sku || 'Sem SKU'}</strong>
+                  <span>{link.processo_itens.produtos?.nome || 'Produto em preenchimento'} · {link.processo_itens.quantidade ?? 0} un.</span></div>
+              ))}
+            </div>
+            {detail.status==='aberta' && <div className="actions"><button className="primary" type="button" onClick={()=>void startSavedInspection()}><Play size={16}/> Iniciar inspeção</button></div>}
+            <div className="section-title"><h3>Observação interna</h3></div>
             <div className="section-title"><h2>Observação interna</h2></div>
             <textarea
               value={internalObservation}
@@ -1959,7 +1981,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {canWrite && <div className="actions"><button className="secondary" type="button" onClick={()=>void saveInternalObservation()}>Salvar</button></div>}
           </section>
 
-          <section id="sec-amostragem" className="panel section-card">
+          <section id="sec-amostragem" className={'panel section-card inspection-stage'+(activeStage==='amostragem'?'':' inspection-stage-hidden')}>
             <div className="section-title">
               <h2>Plano de amostragem</h2>
               <span className="pill">Nível {detail.nivel_inspecao} · código {detail.codigo_amostragem || '—'}</span>
@@ -1987,7 +2009,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {!!detail.limite_rejeicao && detail.total_nao_conforme>=detail.limite_rejeicao && <div className="alert error">Limite de rejeição atingido. Você pode encerrar ou continuar a inspeção; a decisão ficará registrada.</div>}
           </section>
 
-          <section id="sec-verificacoes" className="panel section-card">
+          <section id="sec-verificacoes" className={'panel section-card inspection-stage'+(activeStage==='verificacoes'?'':' inspection-stage-hidden')}>
             <div className="section-title"><div><h2>Verificações</h2><span className="section-note">C / NC / NA · informe a quantidade quando houver NC.</span></div></div>
             <div className="checklist compact-checklist">
               {(detail.checklist ?? []).map((item:any)=>{
@@ -2045,7 +2067,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </section>
 
-          <section id="sec-dimensionais" className="panel section-card">
+          <section id="sec-dimensionais" className={'panel section-card inspection-stage'+(activeStage==='dimensionais'?'':' inspection-stage-hidden')}>
             <div className="section-title">
               <div><h2>Análises dimensionais</h2><span className="section-note">Especificação, instrumento, desvio aceitável e 10 medições por parâmetro.</span></div>
               {detail.dimensionais_finalizados && <span className="pill">Concluído</span>}
@@ -2150,7 +2172,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {detail.status!=='concluida' && !detail.dimensionais_finalizados && <div className="actions"><button className="secondary" onClick={markDimensionalsDone}>Concluir dimensionais</button></div>}
           </section>
 
-          <section id="sec-testes" className="panel section-card">
+          <section id="sec-testes" className={'panel section-card inspection-stage'+(activeStage==='testes'?'':' inspection-stage-hidden')}>
             <div className="section-title"><div><h2>Testes especiais</h2><span className="section-note">Selecione C, NC ou NA. O resultado é salvo automaticamente.</span></div>{detail.testes_finalizados && <span className="pill">Concluído</span>}</div>
             {(detail.tests ?? []).map((test:any)=>{
               const r=detail.testResults?.find((x:any)=>x.teste_id===test.id)
@@ -2172,7 +2194,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {!!detail.tests?.length && <small className="field-hint">Não é necessário concluir manualmente; a seção fica concluída quando todos os testes tiverem resultado.</small>}
           </section>
 
-          <section id="sec-fotos" className="panel section-card">
+          <section id="sec-fotos" className={'panel section-card inspection-stage'+(activeStage==='fotos'?'':' inspection-stage-hidden')}>
             <div className="section-title">
               <div><h2>Fotos da inspeção</h2><span className="section-note">Opcional nesta fase de testes. As fotos continuam concentradas nesta etapa da inspeção.</span></div>
               <span className="pill">{detail.photos?.length ?? 0} enviada(s)</span>
@@ -2213,8 +2235,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </section>
 
-          {detail.status!=='concluida' && (
-            <section id="sec-resultado" className="panel section-card result-panel">
+          {detail.status!=='concluida' && detail.status!=='aberta' && (
+            <section id="sec-resultado" className={'panel section-card result-panel inspection-stage'+(activeStage==='resultado'?'':' inspection-stage-hidden')}>
               <h2>Resultado final</h2>
               <div className="readiness">
                 <span className={samplingDone?'done':''}>Amostragem</span>
@@ -2233,8 +2255,15 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </section>
           )}
 
+          {detail.status==='concluida' && activeStage==='resultado' && (
+            <section className="panel section-card inspection-stage">
+              <div className="section-title"><h2>Resultado final</h2><span className={'result-badge '+detail.resultado}>{statusLabel(detail.resultado)}</span></div>
+              <p>{detail.observacoes || 'Nenhuma observação final registrada.'}</p>
+              <button className="secondary" type="button" onClick={()=>selectInspectionStage('retencao')}>Ver retenção</button>
+            </section>
+          )}
           {detail.status==='concluida' && (
-            <section className="panel section-card retention-panel">
+            <section className={'panel section-card retention-panel inspection-stage'+(activeStage==='retencao'?'':' inspection-stage-hidden')}>
               <div className="section-title">
                 <h2>Retenção após finalização</h2>
                 <span className={'result-badge '+detail.resultado}>{statusLabel(detail.resultado)}</span>
