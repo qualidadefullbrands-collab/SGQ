@@ -320,7 +320,7 @@ function samplingPlan(lot:number, level:string) {
 }
 function statusLabel(value:string|null|undefined) {
   const map:Record<string,string> = {
-    em_andamento:'Em andamento',aberta:'Aberta',concluida:'Concluída',cancelada:'Cancelada',
+    em_andamento:'Em andamento',aberta:'Não iniciada',concluida:'Concluída',cancelada:'Cancelada',
     aprovado:'Aprovado',reprovado:'Reprovado',pendente:'Pendente',
     conforme:'Conforme',nao_conforme:'Não conforme',nao_aplicavel:'Não aplicável'
   }
@@ -346,6 +346,7 @@ export default function App() {
   const [inspections, setInspections] = useState<InspectionRow[]>([])
   const [editingProcess, setEditingProcess] = useState<ProcessRow | null>(null)
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null)
+  const [activeStage, setActiveStage] = useState<'dados'|'amostragem'|'verificacoes'|'dimensionais'|'testes'|'fotos'|'resultado'|'retencao'>('dados')
   const [detail, setDetail] = useState<any>(null)
   const [finalObservation, setFinalObservation] = useState('')
   const [internalObservation, setInternalObservation] = useState('')
@@ -848,6 +849,7 @@ export default function App() {
 
   async function openInspection(id: string) {
     setError('')
+    if(selectedInspectionId!==id) setActiveStage('dados')
     setSelectedInspectionId(id)
     const loaded=await apiGet<any>(`/api/inspecoes/${id}/detalhe`)
     if (loaded.error || !loaded.data?.inspecao) {
@@ -906,7 +908,7 @@ export default function App() {
     setEditingInspectionData({
       codigo:fstDigits(process.codigo),cliente:process.cliente ?? '',notaFiscal:process.nota_fiscal ?? '',origem:process.origem ?? '',transporte:process.transporte ?? '',
       chegadaCd:process.chegada_cd ?? '',dataInspecao:String(detail.data_inspecao ?? '').slice(0,10),inspectionLevel:detail.nivel_inspecao ?? 'I',
-      observacaoInterna:detail.observacao_interna ?? '',itens:rows,
+      observacaoInterna:detail.observacao_interna ?? '',itVersionId:detail.it_versao_id ?? '',itens:rows,
     })
   }
 
@@ -923,7 +925,7 @@ export default function App() {
       notaFiscal:String(editingInspectionData.notaFiscal ?? '').trim() || null,origem:String(editingInspectionData.origem ?? '').trim() || null,
       transporte:String(editingInspectionData.transporte ?? '').trim() || null,chegadaCd:editingInspectionData.chegadaCd || null,
       dataInspecao:editingInspectionData.dataInspecao || null,inspectionLevel:editingInspectionData.inspectionLevel || 'I',
-      observacaoInterna:String(editingInspectionData.observacaoInterna ?? '').trim() || null,itens,
+      observacaoInterna:String(editingInspectionData.observacaoInterna ?? '').trim() || null,itVersionId:editingInspectionData.itVersionId || null,itens,
     })
     if (saved.error) return setError(saved.error.message)
     setEditingInspectionData(null)
@@ -931,14 +933,14 @@ export default function App() {
     setMessage(`Dados atualizados. Plano recalculado: ${p?.codigo ?? '—'} · ${p?.amostra ?? 0} un. · Ac/Re ${p?.ac ?? '—'}/${p?.re ?? '—'}.`)
     await Promise.all([loadApp(),openInspection(selectedInspectionId)])
   }
-  async function createInspection(e: React.FormEvent) {
+  async function createInspection(e: React.FormEvent, iniciar:boolean) {
     e.preventDefault()
     if (!canWrite || !userId) return
     setError('')
     setMessage('')
 
     // Durante construção/testes, a única informação obrigatória para avançar é a IT.
-    if (!inspection.itVersionId) return setError('Selecione a IT aplicável.')
+    if (iniciar && !inspection.itVersionId) return setError('Selecione a IT para iniciar a inspeção.')
 
     const itens:any[]=[]
     for (const row of skuRows) {
@@ -986,7 +988,8 @@ export default function App() {
       transporte:inspection.transporte.trim() || null,
       chegadaCd:inspection.chegadaCd || null,
       dataInspecao:inspection.dataInspecao || null,
-      itVersionId:inspection.itVersionId,
+      itVersionId:inspection.itVersionId || null,
+      iniciar,
       inspectionLevel:inspection.inspectionLevel,
       observacaoInterna:inspection.observacaoInterna.trim() || null,
       itens,
@@ -996,9 +999,31 @@ export default function App() {
       return setError(created.error?.message || 'Falha ao criar inspeção.')
     }
 
-    setMessage(`Inspeção ${created.data.numero} iniciada.`)
+    setMessage(iniciar ? `Inspeção ${created.data.numero} iniciada.` : `Inspeção ${created.data.numero} salva como não iniciada.`)
     resetNewInspection()
-    await Promise.all([loadApp(),openInspection(created.data.id)])
+    if(iniciar) {
+      await Promise.all([loadApp(),openInspection(created.data.id)])
+      setActiveStage('amostragem')
+    } else {
+      await loadApp()
+      setTab('painel')
+    }
+  }
+
+  async function startSavedInspection() {
+    if(!selectedInspectionId || detail?.status!=='aberta') return
+    setError('')
+    const started=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/iniciar`,{})
+    if(started.error) return setError(started.error.message)
+    await Promise.all([loadApp(),openInspection(selectedInspectionId)])
+    setActiveStage('amostragem')
+    setMessage('Inspeção iniciada. Continue a partir da amostragem.')
+  }
+
+  function selectInspectionStage(stage:typeof activeStage) {
+    setActiveStage(stage)
+    const nav=document.getElementById('inspection-stage-nav')
+    if(nav) window.scrollTo({top:Math.max(0,window.scrollY+nav.getBoundingClientRect().top-90),behavior:'smooth'})
   }
 
   function isDedicatedDimensionalCheck(item:any) {
@@ -1128,6 +1153,7 @@ export default function App() {
       desvioMais:deviation,
       especificacaoDesvio:null,
       tipoReferencia:usesMeasureReference(param) ? (next.tipo_referencia || param.tipo_referencia || null) : null,
+      referenciaOutro:next.tipo_referencia==='outro' ? (String(next.referencia_outro ?? '').trim() || null) : null,
     })
     if (saved.error || !saved.data) return setError(saved.error?.message ?? 'Falha ao salvar configuração dimensional.')
     setDetail((d:any)=>{
@@ -1674,6 +1700,16 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
 
           <section className="panel queue">
+            <div className="section-title"><h2>Inspeções não iniciadas</h2><button className="secondary" onClick={()=>setTab('inspecoes')}>Ver todas</button></div>
+            {inspections.filter(i=>i.status==='aberta').slice(0,8).map(i=>(
+              <div className="queue-row" key={i.id}>
+                <div><strong>{i.numero} · {formatFst(i.grupos_inspecao?.processos?.codigo)}</strong><span>{i.grupos_inspecao?.nome || 'Inspeção em preenchimento'} · Rascunho salvo</span></div>
+                <button className="secondary small" onClick={()=>openInspection(i.id)}><Edit3 size={15}/> Abrir rascunho</button>
+              </div>
+            ))}
+            {!inspections.some(i=>i.status==='aberta') && <div className="empty">Nenhuma inspeção não iniciada.</div>}
+          </section>
+          <section className="panel queue">
             <div className="section-title">
               <h2>Inspeções em andamento</h2>
               <button className="secondary" onClick={()=>setTab('inspecoes')}>Ver todas</button>
@@ -1725,7 +1761,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                         </div>
                         <div className="row-actions">
                           {i.resultado && i.resultado!=='pendente' && <span className={'result-badge '+i.resultado}>{statusLabel(i.resultado)}</span>}
-                          <button className="primary small" onClick={()=>openInspection(i.id)}>{i.status==='concluida'?'Abrir':'Continuar'}</button>
+                          <button className="primary small" onClick={()=>openInspection(i.id)}>{i.status==='concluida'?'Abrir':i.status==='aberta'?'Editar / iniciar':'Continuar'}</button>
                           {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection(i)}><Trash2 size={15}/></button>}
                         </div>
                       </div>
@@ -1751,7 +1787,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
-          <form onSubmit={createInspection} className="inspection-form">
+          <form onSubmit={(e)=>void createInspection(e,(e.nativeEvent as SubmitEvent).submitter?.getAttribute('value')==='iniciar')} className="inspection-form">
             <section className="panel section-card">
               <div className="section-title">
                 <h2>Dados gerais</h2>
@@ -1868,7 +1904,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <div><small>Caixas</small><strong>{totalBoxesToInspect?(totalBoxesToInspect+' a inspecionar'):'—'}</strong></div>
             </section>
 
-            <div className="actions"><button className="primary" type="submit">Iniciar e abrir inspeção</button></div>
+            <div className="actions inspection-create-actions">
+              <button className="secondary" type="submit" value="salvar"><FileText size={17}/> Salvar sem iniciar</button>
+              <button className="primary" type="submit" value="iniciar"><Play size={17}/> Iniciar inspeção</button>
+            </div>
           </form>
         </section>
       )}
@@ -1882,7 +1921,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
-              <button className="secondary" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados</button>
+              <button className="secondary" type="button" onClick={()=>{setActiveStage('dados');startEditingInspectionData()}}><Edit3 size={16}/> Editar dados</button>
+              {detail.status==='aberta' && <button className="primary" type="button" onClick={()=>void startSavedInspection()}><Play size={16}/> Iniciar inspeção</button>
               {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
@@ -2045,6 +2085,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                                 <option value="outro">Outro</option>
                               </select>
                             </label>}
+                            {usesMeasureReference(p) && (cfg.tipo_referencia ?? p.tipo_referencia)==='outro' && (
+                              <label className="span-2">Especifique a referência da medida
+                                <input defaultValue={cfg.referencia_outro ?? ''} placeholder="Ex.: gabarito, norma ou instrumento de referência" onBlur={(e)=>saveDimConfig(item.id,p,{referencia_outro:e.target.value})} disabled={detail.status==='concluida'}/>
+                              </label>
+                            )}
                             <label>Valor especificado
                               <input type="number" step="any" defaultValue={cfg.valor_nominal ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{valor_nominal:e.target.value})} disabled={detail.status==='concluida'}/>
                             </label>
@@ -2513,7 +2558,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div></div>
               <label>Data da inspeção<input type="date" value={editingInspectionData.dataInspecao ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,dataInspecao:e.target.value})}/></label>
               <label>Nível de inspeção<select value={editingInspectionData.inspectionLevel ?? 'I'} onChange={(e)=>setEditingInspectionData({...editingInspectionData,inspectionLevel:e.target.value})}><option value="I">Nível I</option><option value="II">Nível II</option><option value="III">Nível III</option><option value="S1">S1</option><option value="S2">S2</option><option value="S3">S3</option><option value="S4">S4</option></select></label>
-              <label className="span-2">Observação interna<textarea rows={3} value={editingInspectionData.observacaoInterna ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,observacaoInterna:e.target.value})}/><small className="field-hint">Uso interno da Qualidade, não disponível no laudo</small></label>
+              <label>IT aplicável<select value={editingInspectionData.itVersionId ?? ''} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}><option value="">Selecionar IT</option>{itVersions.map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}</select></label>
+                  <label className="span-2">Observação interna<textarea rows={3} value={editingInspectionData.observacaoInterna ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,observacaoInterna:e.target.value})}/><small className="field-hint">Uso interno da Qualidade, não disponível no laudo</small></label>
             </div>
             <div className="edit-items-list">
               {(editingInspectionData.itens ?? []).map((row:any,i:number)=>{ const d=boxDistributionTotals(row); return <article className="sku-card compact" key={row.processoItemId || i}>
