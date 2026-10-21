@@ -584,16 +584,16 @@ app.MapGet("/api/inspecoes/{id}/detalhe", async (string id,HttpRequest request,I
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var i=ins!.Value;
         var groupId=i.GetProperty("grupo_inspecao_id").GetString()!;
-        var itId=i.GetProperty("it_versao_id").GetString()!;
+        var itId=i.TryGetProperty("it_versao_id",out var itProp)&&itProp.ValueKind==JsonValueKind.String?itProp.GetString():null;
 
         var itemsTask=RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
             $"select=id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,material,capacidade,quantidade_por_caixa,caixas_recebidas,caixas_inspecionadas,distribuicao_caixas,produtos(id,sku,nome,foto_principal_path))&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
-        var checklistTask=RestAsync(client,token,HttpMethod.Get,"it_checklist",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
+        var checklistTask=string.IsNullOrWhiteSpace(itId) ? Task.FromResult<JsonElement?>(null) : RestAsync(client,token,HttpMethod.Get,"it_checklist",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
         var checkResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_checklist_resultados",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
-        var paramsTask=RestAsync(client,token,HttpMethod.Get,"it_parametros_dimensionais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
+        var paramsTask=string.IsNullOrWhiteSpace(itId) ? Task.FromResult<JsonElement?>(null) : RestAsync(client,token,HttpMethod.Get,"it_parametros_dimensionais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
         var dimResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_dimensionais",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
         var dimConfigsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_dimensional_configuracoes",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
-        var testsTask=RestAsync(client,token,HttpMethod.Get,"it_testes_especiais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
+        var testsTask=string.IsNullOrWhiteSpace(itId) ? Task.FromResult<JsonElement?>(null) : RestAsync(client,token,HttpMethod.Get,"it_testes_especiais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
         var testResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_testes_resultados",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
         var photosTask=RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
         var registersTask=RestAsync(client,token,HttpMethod.Get,"inspecao_registros",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=sequencia.asc");
@@ -912,9 +912,9 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         var client = factory.CreateClient("supabase");
         var userId = await CurrentUserId(client, token);
 
-        // Durante construção/testes, somente a IT é obrigatória para iniciar.
-        if (string.IsNullOrWhiteSpace(input.ItVersionId))
-            return Results.Json(Error("Selecione a IT aplicável."), statusCode: 400);
+        var startNow=input.Iniciar;
+        if(startNow && string.IsNullOrWhiteSpace(input.ItVersionId))
+            return Results.Json(Error("Selecione a IT para iniciar a inspeção."),statusCode:400);
 
         var processCodeRaw = (input.Codigo ?? "").Trim();
         var processCode = string.IsNullOrWhiteSpace(processCodeRaw)
@@ -1079,9 +1079,9 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 }, "return=minimal");
         }
 
-        await RestAsync(client, token, HttpMethod.Post, "grupo_inspecao_its", "",
-            new { grupo_inspecao_id = groupId, it_versao_id = input.ItVersionId, principal = true },
-            "return=minimal");
+        if(!string.IsNullOrWhiteSpace(input.ItVersionId))
+            await RestAsync(client,token,HttpMethod.Post,"grupo_inspecao_its","",
+                new {grupo_inspecao_id=groupId,it_versao_id=input.ItVersionId,principal=true},"return=minimal");
 
         var inspectionNumber = $"INS-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
         var totalBoxesReceived = items.Sum(x => x.CaixasRecebidas);
@@ -1093,7 +1093,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 processo_item_id = firstItemId,
                 grupo_inspecao_id = groupId,
                 it_versao_id = input.ItVersionId,
-                status = "em_andamento",
+                status = startNow ? "em_andamento" : "aberta",
                 resultado = "pendente",
                 tamanho_lote = statisticalLot,
                 tamanho_amostra = plan.Sample,
@@ -1111,7 +1111,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 caixas_avaliar = totalBoxesInspect > 0 ? (decimal?)totalBoxesInspect : null,
                 data_inspecao = inspectionDate,
                 responsavel_id = userId,
-                iniciada_em = DateTimeOffset.UtcNow,
+                iniciada_em = startNow ? DateTimeOffset.UtcNow : (DateTimeOffset?)null,
                 observacao_interna = string.IsNullOrWhiteSpace(input.ObservacaoInterna) ? null : input.ObservacaoInterna.Trim(),
                 parametros_amostragem = new {
                     fonte = "backend_dotnet",
@@ -1132,6 +1132,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 numero = inspectionNumber,
                 processo_id = processId,
                 grupo_inspecao_id = groupId,
+                status = startNow ? "em_andamento" : "aberta",
                 plano = new { codigo = plan.Code, amostra = plan.Sample, ac = plan.Ac, re = plan.Re, lote = statisticalLot }
             },
             error = (object?)null
@@ -1154,10 +1155,12 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=grupo_inspecao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+            $"select=grupo_inspecao_id,status,it_versao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
         var (ins,found)=FirstRow(insRows);
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var groupId=ins!.Value.GetProperty("grupo_inspecao_id").GetString()!;
+        if(ins.Value.GetProperty("status").GetString() is "concluida" or "cancelada")
+            return Results.Json(Error("Esta inspeção não pode ser editada."),statusCode:409);
 
         var groupRows=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
             $"select=processo_id&id=eq.{Uri.EscapeDataString(groupId)}&limit=1");
@@ -1175,6 +1178,17 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
             ["atualizado_em"]=DateTimeOffset.UtcNow
         };
         if(!string.IsNullOrWhiteSpace(processCode)) processUpdate["codigo"]=processCode;
+        if(!string.IsNullOrWhiteSpace(input.ItVersionId))
+        {
+            if(!Guid.TryParse(input.ItVersionId,out _))
+                return Results.Json(Error("Identificador da IT inválido."),statusCode:400);
+            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+                new {it_versao_id=input.ItVersionId},"return=minimal");
+            await RestAsync(client,token,HttpMethod.Post,"grupo_inspecao_its",
+                "on_conflict=grupo_inspecao_id,it_versao_id",
+                new {grupo_inspecao_id=groupId,it_versao_id=input.ItVersionId,principal=true},
+                "resolution=ignore-duplicates,return=minimal");
+        }
         await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(processId)}",processUpdate,"return=minimal");
 
         foreach(var item in input.Itens ?? [])
@@ -1256,6 +1270,32 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao atualizar dados da inspeção.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/inspecoes/{id}/iniciar", async (string id,HttpRequest request,IHttpClientFactory factory) =>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var result=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=status,it_versao_id,grupo_inspecao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (row,found)=FirstRow(result);
+        if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        if(row!.Value.GetProperty("status").GetString()!="aberta")
+            return Results.Json(Error("Inspeção já iniciada ou encerrada."),statusCode:409);
+        var it=row.Value.GetProperty("it_versao_id");
+        if(it.ValueKind!=JsonValueKind.String || string.IsNullOrWhiteSpace(it.GetString()))
+            return Results.Json(Error("Selecione e salve uma IT antes de iniciar."),statusCode:400);
+        var groupId=row.Value.GetProperty("grupo_inspecao_id").GetString()!;
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}&status=eq.aberta",
+            new {status="em_andamento",iniciada_em=DateTimeOffset.UtcNow},"return=minimal");
+        await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",$"id=eq.{Uri.EscapeDataString(groupId)}",
+            new {status="em_inspecao"},"return=minimal");
+        return Results.Ok(new {data=new {ok=true,status="em_andamento"},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao iniciar inspeção.",e.Message),statusCode:500);}
 });
 
 app.MapGet("/api/amostragem/plano", (long lote, string? nivel) =>
@@ -1535,6 +1575,7 @@ app.MapPut("/api/inspecoes/{id}/dimensionais/{itemId}/{paramId}/config", async (
                 maximo_aceitavel=max,
                 especificacao_desvio=autoSpec,
                 tipo_referencia=input.TipoReferencia,
+                referencia_outro=input.TipoReferencia=="outro"?input.ReferenciaOutro:null,
                 atualizado_em=DateTimeOffset.UtcNow
             },"resolution=merge-duplicates,return=representation");
         var (row,found)=FirstRow(saved);
@@ -2693,6 +2734,7 @@ public sealed class DimConfigRequest
     public decimal? DesvioMais { get; set; }
     public string? EspecificacaoDesvio { get; set; }
     public string? TipoReferencia { get; set; }
+    public string? ReferenciaOutro { get; set; }
 }
 public sealed class DimValueRequest
 {
@@ -2711,6 +2753,7 @@ public sealed class FinishInspectionRequest
 
 public class CreateInspectionRequest
 {
+    public bool Iniciar { get; set; } = true;
     public string Codigo { get; set; } = "";
     public string Cliente { get; set; } = "";
     public string? NotaFiscal { get; set; }
