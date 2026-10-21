@@ -1153,7 +1153,7 @@ export default function App() {
       desvioMais:deviation,
       especificacaoDesvio:null,
       tipoReferencia:usesMeasureReference(param) ? (next.tipo_referencia || param.tipo_referencia || null) : null,
-      referenciaOutro:next.tipo_referencia==='outro' ? (String(next.referencia_outro ?? '').trim() || null) : null,
+      referenciaOutro:(next.tipo_referencia || param.tipo_referencia)==='outro' ? (String(next.referencia_outro ?? '').trim() || null) : null,
     })
     if (saved.error || !saved.data) return setError(saved.error?.message ?? 'Falha ao salvar configuração dimensional.')
     setDetail((d:any)=>{
@@ -1921,7 +1921,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
-              <button className="secondary" type="button" onClick={()=>{setActiveStage('dados');startEditingInspectionData()}}><Edit3 size={16}/> Editar dados</button>
+              {detail.status!=='concluida' && canWrite && <button className="secondary" type="button" onClick={()=>{setActiveStage('dados');startEditingInspectionData()}}><Edit3 size={16}/> Editar dados</button>}
               {detail.status==='aberta' && <button className="primary" type="button" onClick={()=>void startSavedInspection()}><Play size={16}/> Iniciar inspeção</button>}
               {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
@@ -1981,7 +1981,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {canWrite && <div className="actions"><button className="secondary" type="button" onClick={()=>void saveInternalObservation()}>Salvar</button></div>}
           </section>
 
-          <section id="sec-amostragem" className={'panel section-card inspection-stage'+(activeStage==='amostragem'?'':' inspection-stage-hidden')}>
+          <section id="sec-amostragem" className={'panel section-card inspection-stage'+(activeStage==='amostragem' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
             <div className="section-title">
               <h2>Plano de amostragem</h2>
               <span className="pill">Nível {detail.nivel_inspecao} · código {detail.codigo_amostragem || '—'}</span>
@@ -2009,7 +2009,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {!!detail.limite_rejeicao && detail.total_nao_conforme>=detail.limite_rejeicao && <div className="alert error">Limite de rejeição atingido. Você pode encerrar ou continuar a inspeção; a decisão ficará registrada.</div>}
           </section>
 
-          <section id="sec-verificacoes" className={'panel section-card inspection-stage'+(activeStage==='verificacoes'?'':' inspection-stage-hidden')}>
+          <section id="sec-verificacoes" className={'panel section-card inspection-stage'+(activeStage==='verificacoes' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
             <div className="section-title"><div><h2>Verificações</h2><span className="section-note">C / NC / NA · informe a quantidade quando houver NC.</span></div></div>
             <div className="checklist compact-checklist">
               {(detail.checklist ?? []).map((item:any)=>{
@@ -2067,7 +2067,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </section>
 
-          <section id="sec-dimensionais" className={'panel section-card inspection-stage'+(activeStage==='dimensionais'?'':' inspection-stage-hidden')}>
+          <section id="sec-dimensionais" className={'panel section-card inspection-stage'+(activeStage==='dimensionais' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
             <div className="section-title">
               <div><h2>Análises dimensionais</h2><span className="section-note">Especificação, instrumento, desvio aceitável e 10 medições por parâmetro.</span></div>
               {detail.dimensionais_finalizados && <span className="pill">Concluído</span>}
@@ -2172,7 +2172,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {detail.status!=='concluida' && !detail.dimensionais_finalizados && <div className="actions"><button className="secondary" onClick={markDimensionalsDone}>Concluir dimensionais</button></div>}
           </section>
 
-          <section id="sec-testes" className={'panel section-card inspection-stage'+(activeStage==='testes'?'':' inspection-stage-hidden')}>
+          <section id="sec-testes" className={'panel section-card inspection-stage'+(activeStage==='testes' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
             <div className="section-title"><div><h2>Testes especiais</h2><span className="section-note">Selecione C, NC ou NA. O resultado é salvo automaticamente.</span></div>{detail.testes_finalizados && <span className="pill">Concluído</span>}</div>
             {(detail.tests ?? []).map((test:any)=>{
               const r=detail.testResults?.find((x:any)=>x.teste_id===test.id)
@@ -2194,7 +2194,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {!!detail.tests?.length && <small className="field-hint">Não é necessário concluir manualmente; a seção fica concluída quando todos os testes tiverem resultado.</small>}
           </section>
 
-          <section id="sec-fotos" className={'panel section-card inspection-stage'+(activeStage==='fotos'?'':' inspection-stage-hidden')}>
+          <section id="sec-fotos" className={'panel section-card inspection-stage'+(activeStage==='fotos' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
             <div className="section-title">
               <div><h2>Fotos da inspeção</h2><span className="section-note">Opcional nesta fase de testes. As fotos continuam concentradas nesta etapa da inspeção.</span></div>
               <span className="pill">{detail.photos?.length ?? 0} enviada(s)</span>
@@ -2236,7 +2236,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
 
           {detail.status!=='concluida' && detail.status!=='aberta' && (
-            <section id="sec-resultado" className={'panel section-card result-panel inspection-stage'+(activeStage==='resultado'?'':' inspection-stage-hidden')}>
+            <section id="sec-resultado" className={'panel section-card result-panel inspection-stage'+(activeStage==='resultado' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
               <h2>Resultado final</h2>
               <div className="readiness">
                 <span className={samplingDone?'done':''}>Amostragem</span>
@@ -2255,6 +2255,13 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </section>
           )}
 
+          {detail.status!=='concluida' && activeStage==='retencao' && detail.status!=='aberta' && (
+            <section className="panel section-card inspection-stage">
+              <h2>Retenção de amostras</h2>
+              <p>A decisão de retenção ficará disponível após a conclusão da inspeção.</p>
+              <button className="secondary" type="button" onClick={()=>selectInspectionStage('resultado')}>Ir para resultado</button>
+            </section>
+          )}
           {detail.status==='concluida' && activeStage==='resultado' && (
             <section className="panel section-card inspection-stage">
               <div className="section-title"><h2>Resultado final</h2><span className={'result-badge '+detail.resultado}>{statusLabel(detail.resultado)}</span></div>
@@ -2613,7 +2620,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 {!!d.groups.length && <small className="field-hint">{d.expression} = {d.units.toLocaleString('pt-BR')} un</small>}
               </article>})}
             </div>
-            <button className="primary wide" type="button" onClick={saveEditingInspectionData}>Salvar e recalcular plano</button>
+            <button className="secondary" type="button" onClick={()=>setEditingInspectionData({...editingInspectionData,itens:[...(editingInspectionData.itens ?? []),{...emptySku(),processoItemId:null}]})}><Plus size={16}/> Adicionar produto à inspeção</button>
+            <button className="primary wide" type="button" onClick={saveEditingInspectionData}>Salvar dados e recalcular plano</button>
           </article>
         </div>
       )}
@@ -2656,6 +2664,4 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 function Metric({ icon: Icon, label, value }: { icon: any; label: string; value: number }) {
   return <article className="metric"><Icon size={22}/><div><strong>{value}</strong><span>{label}</span></div></article>
 }
-function ProgressItem({ done, label }: { done: boolean; label: string }) {
-  return <div className={'progress-item '+(done?'done':'')}><span>{done?'✓':'•'}</span><b>{label}</b></div>
-}
+
