@@ -1210,20 +1210,20 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
                     $"select=id&sku=eq.{Uri.EscapeDataString(sku)}&limit=1");
                 var (existingProduct,foundProduct)=FirstRow(productRows);
-                string productId;
-                if(foundProduct) productId=existingProduct!.Value.GetProperty("id").GetString()!;
+                string newProductId;
+                if(foundProduct) newProductId=existingProduct!.Value.GetProperty("id").GetString()!;
                 else
                 {
                     var productNew=await RestAsync(client,token,HttpMethod.Post,"produtos","select=id",
                         new {sku,nome=name},"return=representation");
                     var (createdProduct,createdProductFound)=FirstRow(productNew);
                     if(!createdProductFound) throw new InvalidOperationException("Não foi possível criar o produto.");
-                    productId=createdProduct!.Value.GetProperty("id").GetString()!;
+                    newProductId=createdProduct!.Value.GetProperty("id").GetString()!;
                 }
                 var quantity=EffectiveReceived(item);
                 var createdItem=await RestAsync(client,token,HttpMethod.Post,"processo_itens","select=id",
                     new {
-                        processo_id=processId,produto_id=productId,
+                        processo_id=processId,produto_id=newProductId,
                         lote=string.IsNullOrWhiteSpace(item.Lote)?null:item.Lote.Trim(),
                         material=string.IsNullOrWhiteSpace(item.Material)?null:item.Material.Trim(),
                         capacidade=string.IsNullOrWhiteSpace(item.Capacidade)?null:item.Capacidade.Trim(),
