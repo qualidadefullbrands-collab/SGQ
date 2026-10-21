@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, Eye, EyeOff, FileDown, FileText, LockKeyhole, LogOut, Mail, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Workflow, X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { apiGet, apiPost, apiPut, apiUrl, supabase } from './lib/supabase'
 import AuditoriasPage from './auditorias/AuditoriasPage'
@@ -336,12 +336,12 @@ export default function App() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [login, setLogin] = useState({ email: '', password: '' })
-  const [firstAccess, setFirstAccess] = useState(false)
   const [forgotPassword, setForgotPassword] = useState(false)
   const [recoveryMode, setRecoveryMode] = useState(new URLSearchParams(window.location.search).get('auth') === 'recovery')
   const [recoveryPassword, setRecoveryPassword] = useState('')
   const [recoveryConfirmation, setRecoveryConfirmation] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const [counts, setCounts] = useState({ processos: 0, inspecoes: 0, amostras: 0, laudos: 0 })
   const [processes, setProcesses] = useState<ProcessRow[]>([])
   const [inspections, setInspections] = useState<InspectionRow[]>([])
@@ -473,15 +473,22 @@ export default function App() {
   }),[samples])
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    let mounted = true
+    supabase.auth.getSession().then(({ data, error: sessionError }) => {
+      if (!mounted) return
+      if (sessionError) setError(authErrorText(sessionError.message))
       setUserId(data.session?.user.id ?? null)
-      setSessionReady(true)
+    }).catch(() => {
+      if (mounted) setError(authErrorText('Failed to fetch'))
+    }).finally(() => {
+      if (mounted) setSessionReady(true)
     })
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return
       if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true)
       setUserId(session?.user.id ?? null)
     })
-    return () => listener.subscription.unsubscribe()
+    return () => { mounted = false; listener.subscription.unsubscribe() }
   }, [])
 
   useEffect(() => {
@@ -572,33 +579,34 @@ export default function App() {
     }
   }
 
-  async function signIn(e: React.FormEvent) {
-    e.preventDefault()
-    setError('')
-    setMessage('')
-    const { error } = await supabase.auth.signInWithPassword(login)
-    if (error) setError(error.message)
+  function authErrorText(value: string) {
+    const normalized = String(value ?? '').toLowerCase()
+    if (/failed to fetch|fetch failed|network|networkerror|load failed|timeout/.test(normalized)) {
+      return 'Não foi possível conectar ao serviço de autenticação. Verifique a conexão e tente novamente em alguns minutos. Se persistir, contate o suporte do SGQ.'
+    }
+    if (/invalid login credentials|invalid credentials/.test(normalized)) return 'E-mail ou senha incorretos.'
+    if (/email not confirmed/.test(normalized)) return 'Confirme seu endereço de e-mail antes de entrar.'
+    if (/rate limit|too many requests|over_email_send_rate_limit/.test(normalized)) return 'Muitas tentativas em pouco tempo. Aguarde alguns minutos e tente novamente.'
+    if (/redirect|not allowed/.test(normalized)) return 'Não foi possível concluir o acesso. Verifique a configuração de autenticação do SGQ com o suporte.'
+    return value || 'O serviço de autenticação não respondeu. Tente novamente.'
   }
 
-  async function createFirstAccess(e: React.FormEvent) {
+  async function signIn(e: React.FormEvent) {
     e.preventDefault()
+    if (authBusy) return
     setError('')
     setMessage('')
-    const normalizedEmail = login.email.trim().toLowerCase()
-    if (normalizedEmail !== 'vanessa.casarin@fullbrands.com.br') {
-      setError('Este primeiro acesso está liberado apenas para o administrador autorizado.')
-      return
-    }
-    const { data, error } = await supabase.auth.signUp({
-      email: normalizedEmail,
-      password: login.password,
-      options: { data: { nome: 'Vanessa Casarin' }, emailRedirectTo: window.location.origin },
-    })
-    if (error) return setError(error.message)
-    if (data.session) setMessage('Acesso administrativo criado.')
-    else {
-      setMessage('Acesso criado. Confirme o e-mail e depois entre no SGQ.')
-      setFirstAccess(false)
+    setAuthBusy(true)
+    try {
+      const { error: signError } = await supabase.auth.signInWithPassword({
+        email: login.email.trim().toLowerCase(),
+        password: login.password,
+      })
+      if (signError) setError(authErrorText(signError.message))
+    } catch {
+      setError(authErrorText('Failed to fetch'))
+    } finally {
+      setAuthBusy(false)
     }
   }
 
@@ -621,12 +629,12 @@ export default function App() {
         redirectTo: window.location.origin + window.location.pathname + '?auth=recovery',
       })
       if (resetError) {
-        setError('Não foi possível solicitar a recuperação: ' + resetError.message)
+        setError(authErrorText(resetError.message))
       } else {
         setMessage('Se este e-mail estiver cadastrado no SGQ, você receberá um link para criar uma nova senha. Confira também a pasta de spam.')
       }
     } catch {
-      setError('Não foi possível solicitar a recuperação. Tente novamente.')
+      setError(authErrorText('Failed to fetch'))
     } finally {
       setAuthBusy(false)
     }
@@ -643,7 +651,7 @@ export default function App() {
     setAuthBusy(true)
     try {
       const { error: updateError } = await supabase.auth.updateUser({ password: recoveryPassword })
-      if (updateError) return setError('Não foi possível atualizar a senha: ' + updateError.message)
+      if (updateError) return setError(authErrorText(updateError.message))
       await supabase.auth.signOut()
       clearRecoveryUrl()
       setRecoveryMode(false)
@@ -653,7 +661,7 @@ export default function App() {
       setLogin(current => ({ ...current, password: '' }))
       setMessage('Senha alterada com sucesso. Entre com sua nova senha.')
     } catch {
-      setError('Não foi possível concluir a redefinição de senha. Solicite um novo link.')
+      setError(authErrorText('Failed to fetch'))
     } finally {
       setAuthBusy(false)
     }
@@ -1527,43 +1535,119 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
   if (!sessionReady) return <div className="center-screen">Carregando SGQ…</div>
 
+
   if (!userId || recoveryMode) {
+    const recovery = recoveryMode
+    const title = recovery ? 'Criar nova senha' : forgotPassword ? 'Recuperar acesso' : 'Acesse o SGQ'
+    const description = recovery
+      ? 'Defina uma senha para continuar com segurança.'
+      : forgotPassword
+        ? 'Informe seu e-mail corporativo para receber as instruções de recuperação.'
+        : 'Entre com suas credenciais para acessar seu ambiente de trabalho.'
+
     return (
-      <main className="login-shell">
-        {recoveryMode ? (
-          <form className="login-card" onSubmit={finishPasswordRecovery}>
-            <div className="brand-mark"><ShieldCheck size={28}/><span>SGQ</span></div>
-            <h1>Definir nova senha</h1>
-            {userId ? (
-              <>
-                <p>Crie uma nova senha para acessar o Sistema SGQ.</p>
-                <label>Nova senha<input type="password" minLength={8} autoComplete="new-password" value={recoveryPassword} onChange={e=>setRecoveryPassword(e.target.value)} required/></label>
-                <label>Confirmar nova senha<input type="password" minLength={8} autoComplete="new-password" value={recoveryConfirmation} onChange={e=>setRecoveryConfirmation(e.target.value)} required/></label>
-              </>
-            ) : <p>Este link de recuperação não está válido ou expirou. Solicite um novo link.</p>}
-            {error && <div className="alert error">{error}</div>}
-            {message && <div className="alert success">{message}</div>}
-            {userId && <button className="primary" type="submit" disabled={authBusy}>{authBusy ? 'Salvando…' : 'Salvar nova senha'}</button>}
-            {!userId && <button className="secondary" type="button" onClick={()=>{clearRecoveryUrl();setRecoveryMode(false);setForgotPassword(true);setError('');setMessage('')}}>Solicitar novo link</button>}
-          </form>
-        ) : (
-          <form className="login-card" onSubmit={forgotPassword ? requestPasswordReset : firstAccess ? createFirstAccess : signIn}>
-            <div className="brand-mark"><ShieldCheck size={28}/><span>SGQ</span></div>
-            <h1>{forgotPassword ? 'Recuperar senha' : firstAccess ? 'Criar primeiro acesso' : 'Qualidade Full Brands'}</h1>
-            <label>E-mail<input type="email" autoComplete="email" value={login.email} onChange={(e)=>setLogin({...login,email:e.target.value})} required/></label>
-            {!forgotPassword && <label>Senha<input type="password" minLength={8} autoComplete={firstAccess ? 'new-password' : 'current-password'} value={login.password} onChange={(e)=>setLogin({...login,password:e.target.value})} required/></label>}
-            {forgotPassword && <p>Informe o e-mail cadastrado para receber um link de redefinição de senha.</p>}
-            {error && <div className="alert error">{error}</div>}
-            {message && <div className="alert success">{message}</div>}
-            <button className="primary" type="submit" disabled={authBusy}>{authBusy ? 'Enviando…' : forgotPassword ? 'Enviar link de recuperação' : firstAccess ? 'Criar acesso' : 'Entrar'}</button>
-            <button className="link-button" type="button" onClick={()=>{setForgotPassword(!forgotPassword);setFirstAccess(false);setError('');setMessage('');setLogin(current=>({...current,password:''}))}}>
-              {forgotPassword ? 'Voltar para login' : 'Esqueci minha senha'}
-            </button>
-            {!forgotPassword && <button className="link-button" type="button" onClick={()=>{setFirstAccess(!firstAccess);setError('');setMessage('');setLogin({email:firstAccess?'':'vanessa.casarin@fullbrands.com.br',password:''})}}>
-              {firstAccess ? 'Voltar para login' : 'Primeiro acesso da Vanessa'}
-            </button>}
-          </form>
-        )}
+      <main className="sgq-auth-shell">
+        <div className="sgq-auth-mesh" aria-hidden="true"/>
+        <header className="sgq-auth-header">
+          <div className="sgq-auth-brand">
+            <span className="sgq-auth-brand-icon"><ShieldCheck size={25} strokeWidth={2.1}/></span>
+            <span><strong>FULLBRANDS</strong><small>Plataforma de Qualidade</small></span>
+          </div>
+          <span className="sgq-auth-header-label"><span/> SISTEMA SGQ</span>
+        </header>
+
+        <div className="sgq-auth-layout">
+          <section className="sgq-auth-editorial" aria-label="Apresentação da plataforma">
+            <span className="sgq-auth-overline">FULLBRANDS / CONTLOG <span>•</span> QUALIDADE INTEGRADA</span>
+            <h1>Qualidade em cada etapa.<span>Controle em cada decisão.</span></h1>
+            <p>Inspeções, auditorias e rastreabilidade reunidas em uma experiência integrada, clara e eficiente.</p>
+            <div className="sgq-auth-visual" aria-hidden="true">
+              <div className="sgq-auth-visual-top"><span className="sgq-auth-visual-dots"><i/><i/><i/></span><span>ECOSSISTEMA DE QUALIDADE</span><span className="sgq-auth-visual-signal"><span/> Integrado</span></div>
+              <div className="sgq-auth-network">
+                <div className="sgq-auth-node sgq-auth-node-source"><PackageSearch size={23}/><span><strong>FullBrands</strong><small>Inspeções</small></span></div>
+                <div className="sgq-auth-network-lines"><span/><span/><span/></div>
+                <div className="sgq-auth-node sgq-auth-node-center"><ShieldCheck size={25}/><strong>SGQ</strong></div>
+                <div className="sgq-auth-network-lines"><span/><span/><span/></div>
+                <div className="sgq-auth-node sgq-auth-node-source"><ClipboardCheck size={23}/><span><strong>Contlog</strong><small>Auditorias</small></span></div>
+              </div>
+              <div className="sgq-auth-visual-bottom"><span><span className="sgq-auth-pulse"/> Processos conectados</span><span>GESTÃO • EVIDÊNCIAS • CONFORMIDADE</span></div>
+            </div>
+            <div className="sgq-auth-features">
+              <span><ClipboardCheck size={17}/> Gestão de auditorias</span>
+              <span><Workflow size={17}/> Rastreabilidade</span>
+              <span><ShieldCheck size={17}/> Conformidade</span>
+            </div>
+          </section>
+
+          <div className="sgq-auth-form-column">
+            <form className="sgq-auth-card" onSubmit={recovery ? finishPasswordRecovery : forgotPassword ? requestPasswordReset : signIn}>
+              <div className="sgq-auth-card-top"><span className="sgq-auth-secure-icon"><LockKeyhole size={18}/></span><span>ACESSO CORPORATIVO</span></div>
+              <h2>{title}</h2>
+              <p className="sgq-auth-description">{description}</p>
+              {recovery ? (
+                userId ? (
+                  <div className="sgq-auth-fields">
+                    <label htmlFor="new-password">Nova senha</label>
+                    <div className="sgq-auth-input-wrap">
+                      <LockKeyhole size={18}/>
+                      <input id="new-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" minLength={8} value={recoveryPassword} onChange={e=>setRecoveryPassword(e.target.value)} placeholder="Mínimo de 8 caracteres" required/>
+                      <button className="sgq-auth-visibility" type="button" aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'} onClick={()=>setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={17}/> : <Eye size={17}/>}</button>
+                    </div>
+                    <label htmlFor="confirm-password">Confirmar nova senha</label>
+                    <div className="sgq-auth-input-wrap">
+                      <LockKeyhole size={18}/>
+                      <input id="confirm-password" type={showPassword ? 'text' : 'password'} autoComplete="new-password" minLength={8} value={recoveryConfirmation} onChange={e=>setRecoveryConfirmation(e.target.value)} placeholder="Digite a senha novamente" required/>
+                    </div>
+                  </div>
+                ) : <div className="sgq-auth-inline-info">Este link de recuperação não está válido ou expirou. Solicite um novo link para continuar.</div>
+              ) : (
+                <div className="sgq-auth-fields">
+                  <label htmlFor="sgq-email">E-mail</label>
+                  <div className="sgq-auth-input-wrap">
+                    <Mail size={18}/>
+                    <input id="sgq-email" type="email" autoComplete="email" value={login.email} onChange={e=>setLogin({...login,email:e.target.value})} placeholder="seu.nome@empresa.com.br" required/>
+                  </div>
+                  {!forgotPassword && (
+                    <>
+                      <div className="sgq-auth-password-label"><label htmlFor="sgq-password">Senha</label><button type="button" className="sgq-auth-inline-link" onClick={()=>{setForgotPassword(true);setError('');setMessage('')}}>Esqueci minha senha</button></div>
+                      <div className="sgq-auth-input-wrap">
+                        <LockKeyhole size={18}/>
+                        <input id="sgq-password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={login.password} onChange={e=>setLogin({...login,password:e.target.value})} placeholder="Digite sua senha" required/>
+                        <button className="sgq-auth-visibility" type="button" aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'} onClick={()=>setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={17}/> : <Eye size={17}/>}</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              {error && <div className="sgq-auth-alert sgq-auth-alert-error" role="alert">{error}</div>}
+              {message && <div className="sgq-auth-alert sgq-auth-alert-success" role="status">{message}</div>}
+              {(!recovery || userId) && (
+                <button className="sgq-auth-submit" type="submit" disabled={authBusy}>
+                  <span>{authBusy ? 'Aguarde…' : recovery ? 'Salvar nova senha' : forgotPassword ? 'Enviar link de recuperação' : 'Entrar no SGQ'}</span>
+                  <ArrowRight size={18}/>
+                </button>
+              )}
+              {(forgotPassword || (recovery && !userId)) && (
+                <button className="sgq-auth-back" type="button" disabled={authBusy} onClick={()=>{
+                  if (recovery) clearRecoveryUrl()
+                  setRecoveryMode(false)
+                  setForgotPassword(false)
+                  setError('')
+                  setMessage('')
+                  setRecoveryPassword('')
+                  setRecoveryConfirmation('')
+                }}><ArrowLeft size={16}/> Voltar ao login</button>
+              )}
+              {recovery && !userId && (
+                <button className="sgq-auth-back" type="button" onClick={()=>{clearRecoveryUrl();setRecoveryMode(false);setForgotPassword(true);setError('');setMessage('')}}>Solicitar novo link de recuperação</button>
+              )}
+              <div className="sgq-auth-card-footer"><LockKeyhole size={14}/><span>Acesso protegido. Seu perfil determina as permissões no sistema.</span></div>
+            </form>
+            <div className="sgq-auth-assistance">Ainda não possui uma conta? <strong>Solicite acesso ao administrador do SGQ.</strong></div>
+          </div>
+        </div>
+
+        <footer className="sgq-auth-footer"><span>© {new Date().getFullYear()} FullBrands · Contlog</span><span>Gestão da Qualidade</span></footer>
       </main>
     )
   }
