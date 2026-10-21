@@ -1922,7 +1922,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
               <button className="secondary" type="button" onClick={()=>{setActiveStage('dados');startEditingInspectionData()}}><Edit3 size={16}/> Editar dados</button>
-              {detail.status==='aberta' && <button className="primary" type="button" onClick={()=>void startSavedInspection()}><Play size={16}/> Iniciar inspeção</button>
+              {detail.status==='aberta' && <button className="primary" type="button" onClick={()=>void startSavedInspection()}><Play size={16}/> Iniciar inspeção</button>}
               {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
