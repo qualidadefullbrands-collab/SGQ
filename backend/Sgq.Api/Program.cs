@@ -1193,7 +1193,54 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
 
         foreach(var item in input.Itens ?? [])
         {
-            if(string.IsNullOrWhiteSpace(item.ProcessoItemId)) continue;
+            if(string.IsNullOrWhiteSpace(item.ProcessoItemId))
+            {
+                var hasData=!string.IsNullOrWhiteSpace(item.Sku)
+                    || !string.IsNullOrWhiteSpace(item.Nome)
+                    || !string.IsNullOrWhiteSpace(item.Lote)
+                    || !string.IsNullOrWhiteSpace(item.Material)
+                    || !string.IsNullOrWhiteSpace(item.Capacidade)
+                    || item.Quantidade>0 || item.CaixasRecebidas>0
+                    || item.CaixasInspecionadas>0 || (item.DistribuicaoCaixas?.Count??0)>0;
+                if(!hasData) continue;
+                var sku=string.IsNullOrWhiteSpace(item.Sku)
+                    ? $"TMP-{Guid.NewGuid().ToString("N")[..10].ToUpperInvariant()}"
+                    : item.Sku.Trim();
+                var name=string.IsNullOrWhiteSpace(item.Nome)?"Produto em preenchimento":item.Nome.Trim();
+                var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
+                    $"select=id&sku=eq.{Uri.EscapeDataString(sku)}&limit=1");
+                var (existingProduct,foundProduct)=FirstRow(productRows);
+                string productId;
+                if(foundProduct) productId=existingProduct!.Value.GetProperty("id").GetString()!;
+                else
+                {
+                    var productNew=await RestAsync(client,token,HttpMethod.Post,"produtos","select=id",
+                        new {sku,nome=name},"return=representation");
+                    var (createdProduct,createdProductFound)=FirstRow(productNew);
+                    if(!createdProductFound) throw new InvalidOperationException("Não foi possível criar o produto.");
+                    productId=createdProduct!.Value.GetProperty("id").GetString()!;
+                }
+                var quantity=EffectiveReceived(item);
+                var createdItem=await RestAsync(client,token,HttpMethod.Post,"processo_itens","select=id",
+                    new {
+                        processo_id=processId,produto_id=productId,
+                        lote=string.IsNullOrWhiteSpace(item.Lote)?null:item.Lote.Trim(),
+                        material=string.IsNullOrWhiteSpace(item.Material)?null:item.Material.Trim(),
+                        capacidade=string.IsNullOrWhiteSpace(item.Capacidade)?null:item.Capacidade.Trim(),
+                        quantidade=quantity,
+                        quantidade_por_caixa=item.QuantidadePorCaixa is >0?item.QuantidadePorCaixa:null,
+                        caixas_recebidas=item.CaixasRecebidas>0?(decimal?)item.CaixasRecebidas:null,
+                        caixas_inspecionadas=item.CaixasInspecionadas>0?(decimal?)item.CaixasInspecionadas:null,
+                        distribuicao_caixas=item.DistribuicaoCaixas is {Count:>0}?item.DistribuicaoCaixas:null
+                    },"return=representation");
+                var (newItem,itemFound)=FirstRow(createdItem);
+                if(!itemFound) throw new InvalidOperationException("Não foi possível adicionar o item à inspeção.");
+                item.ProcessoItemId=newItem!.Value.GetProperty("id").GetString()!;
+                await RestAsync(client,token,HttpMethod.Post,"grupo_inspecao_itens","",
+                    new {grupo_inspecao_id=groupId,processo_item_id=item.ProcessoItemId,
+                        quantidade_componente=quantity,
+                        unidades_por_conjunto=item.UnidadesPorConjunto<=0?1m:item.UnidadesPorConjunto},"return=minimal");
+            }
             var effectiveQuantity=EffectiveReceived(item);
             var productId=(string?)null;
             if(!string.IsNullOrWhiteSpace(item.Sku))
