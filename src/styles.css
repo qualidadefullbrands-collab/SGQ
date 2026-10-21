@@ -1615,3 +1615,94 @@ input,select,textarea,button{font-size:15px}
   .nc-quantity{justify-content:flex-end}
   .nc-summary-control input{width:100%}
 }
+
+
+/* ===== SGQ: inspection workflow v5 ===== */
+.inspection-stage-tabs{
+  position:sticky;top:68px;z-index:14;display:flex;flex-wrap:nowrap;align-items:stretch;
+  gap:5px;width:100%;margin:0 0 18px;padding:7px;border:1px solid #d6e1ea;
+  border-radius:11px;background:rgba(255,255,255,.98);
+  box-shadow:0 4px 16px rgba(14,48,73,.09);
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scroll-padding-inline:12px;
+}
+.inspection-stage-tab{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  flex:1 0 auto;white-space:nowrap;min-width:max-content;min-height:43px;
+  border:0;border-radius:8px;background:transparent;color:#4b6476;
+  padding:9px 13px;font-size:14px;font-weight:750;letter-spacing:0;
+}
+.inspection-stage-tab:hover{background:#eef6fc;color:#145886}
+.inspection-stage-tab.active{background:#eaf4fb;color:#135d92;font-weight:850;box-shadow:inset 0 0 0 1px #cde3f2}
+.inspection-stage-dot{
+  display:inline-grid;place-items:center;flex:0 0 20px;width:20px;height:20px;
+  border-radius:50%;background:#e8eef3;color:#61798c;font-size:13px;font-weight:850
+}
+.inspection-stage-tab.done .inspection-stage-dot{background:#d6f1e2;color:#247b4a}
+.inspection-stage-tab.active .inspection-stage-dot{background:#1674a7;color:#fff}
+.execution .inspection-stage-hidden{display:none!important}
+.execution>.section-card,.execution .inspection-stage{
+  border:1px solid #d7e4ec;border-top:3px solid #87b9d9;
+  box-shadow:0 2px 12px rgba(24,56,80,.045);
+  scroll-margin-top:145px
+}
+.execution .inspection-stage .section-title{padding-bottom:13px;margin-bottom:18px;border-bottom:1px solid #e3ecf2}
+.execution .inspection-stage h2{font-size:21px;letter-spacing:-.02em;font-weight:850;color:#203b51}
+.execution .inspection-stage h3{font-size:17px;color:#25475d}
+.execution .inspection-stage .section-note{font-size:13px;line-height:1.55;color:#647d90}
+.execution .inspection-stage label,.execution .inspection-stage .field-label{font-size:14px;line-height:1.5}
+.execution .inspection-stage input,.execution .inspection-stage textarea,.execution .inspection-stage select{font-size:15px}
+.execution .inspection-stage .field-hint,.execution .inspection-stage .field-status{font-size:12px}
+.execution .inspection-stage .plan-grid small,.execution .inspection-stage .detail-grid small{font-size:12px}
+.execution .inspection-stage .plan-grid strong{font-size:20px}
+.execution .inspection-stage .check-copy b{font-size:15px;line-height:1.5;color:#294154}
+.execution .inspection-stage .check-copy span{font-size:13px;line-height:1.55;color:#60758a}
+.execution .inspection-stage .check-copy small{font-size:12px;line-height:1.4}
+.execution .inspection-stage .test-card p{font-size:14px}
+.execution .inspection-stage .tri-buttons.quick button{min-height:43px;min-width:52px;font-size:14px}
+.execution .inspection-stage .dimension-param{border:1px solid #d9e4ec;border-left:3px solid #94bad5;background:#fcfdff}
+.execution .inspection-stage .dimension-item{margin:18px 0 24px;padding:15px 0;border-top:2px solid #dce7ee}
+.inspection-data-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:10px 0 20px}
+.inspection-data-summary>div{min-width:0;display:flex;flex-direction:column;gap:5px;
+  background:#f6f9fc;border:1px solid #e1eaf0;border-radius:9px;padding:13px}
+.inspection-data-summary small{font-size:11px;text-transform:uppercase;letter-spacing:.045em;font-weight:750;color:#62798b}
+.inspection-data-summary strong{font-size:15px;font-weight:800;color:#243e51;overflow-wrap:anywhere}
+.inspection-initial-items{display:grid;gap:7px;margin-bottom:14px}
+.inspection-initial-items>div{display:flex;flex-wrap:wrap;gap:10px;padding:11px 13px;border:1px solid #e0eaf0;border-radius:8px;background:#fbfcfd;font-size:14px}
+.inspection-initial-items strong{color:#1769aa}
+.inspection-initial-items span{color:#455c6c}
+.inspection-not-started-hint{padding:16px 18px;margin-bottom:14px;border:1px solid #cadfeb;border-radius:10px;background:#f3f8fc;color:#31576b;font-size:14px;line-height:1.65}
+.inspection-create-actions{flex-wrap:wrap}
+.inspection-create-actions button{min-width:180px;font-size:15px;min-height:46px}
+.compact-checklist{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;align-items:stretch}
+.compact-checklist .check-row{
+  display:flex;flex-direction:column;align-items:stretch;justify-content:space-between;
+  gap:16px;min-width:0;padding:16px;border-radius:11px;border:1px solid #d8e4ec;
+  border-top:3px solid #90b9d3;background:white
+}
+.compact-checklist .check-copy{min-width:0;overflow-wrap:anywhere}
+.compact-checklist .check-actions-stack{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+.compact-checklist .tri-buttons.quick{display:flex;width:100%}
+.compact-checklist .tri-buttons.quick button{flex:1;min-width:0;min-height:42px}
+.compact-checklist .nc-quantity{justify-content:flex-start;flex-wrap:wrap}
+@media(max-width:1260px){
+  .compact-checklist{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .inspection-stage-tab{flex:0 0 auto}
+  .inspection-data-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:850px){
+  .compact-checklist{grid-template-columns:1fr}
+  .inspection-data-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .inspection-stage-tabs{top:119px}
+  .execution .inspection-stage .dim-config-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:650px){
+  .inspection-stage-tabs{top:126px;padding:5px}
+  .inspection-stage-tab{padding:9px 11px;font-size:13px}
+  .inspection-data-summary{grid-template-columns:1fr 1fr;gap:8px}
+  .inspection-data-summary>div{padding:10px}
+  .inspection-data-summary strong{font-size:13px}
+  .inspection-create-actions{align-items:stretch}
+  .inspection-create-actions button{width:100%}
+  .execution .inspection-stage .dim-config-grid{grid-template-columns:1fr}
+  .execution .inspection-stage{padding:16px}
+}
