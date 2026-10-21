@@ -337,6 +337,11 @@ export default function App() {
   const [message, setMessage] = useState('')
   const [login, setLogin] = useState({ email: '', password: '' })
   const [firstAccess, setFirstAccess] = useState(false)
+  const [forgotPassword, setForgotPassword] = useState(false)
+  const [recoveryMode, setRecoveryMode] = useState(new URLSearchParams(window.location.search).get('auth') === 'recovery')
+  const [recoveryPassword, setRecoveryPassword] = useState('')
+  const [recoveryConfirmation, setRecoveryConfirmation] = useState('')
+  const [authBusy, setAuthBusy] = useState(false)
   const [counts, setCounts] = useState({ processos: 0, inspecoes: 0, amostras: 0, laudos: 0 })
   const [processes, setProcesses] = useState<ProcessRow[]>([])
   const [inspections, setInspections] = useState<InspectionRow[]>([])
@@ -472,7 +477,8 @@ export default function App() {
       setUserId(data.session?.user.id ?? null)
       setSessionReady(true)
     })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true)
       setUserId(session?.user.id ?? null)
     })
     return () => listener.subscription.unsubscribe()
@@ -593,6 +599,63 @@ export default function App() {
     else {
       setMessage('Acesso criado. Confirme o e-mail e depois entre no SGQ.')
       setFirstAccess(false)
+    }
+  }
+
+  function clearRecoveryUrl() {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('auth')
+    url.hash = ''
+    window.history.replaceState({}, '', url.pathname + url.search)
+  }
+
+  async function requestPasswordReset(e: React.FormEvent) {
+    e.preventDefault()
+    if (authBusy) return
+    setAuthBusy(true)
+    setError('')
+    setMessage('')
+    const email = login.email.trim().toLowerCase()
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + window.location.pathname + '?auth=recovery',
+      })
+      if (resetError) {
+        setError('Não foi possível solicitar a recuperação: ' + resetError.message)
+      } else {
+        setMessage('Se este e-mail estiver cadastrado no SGQ, você receberá um link para criar uma nova senha. Confira também a pasta de spam.')
+      }
+    } catch {
+      setError('Não foi possível solicitar a recuperação. Tente novamente.')
+    } finally {
+      setAuthBusy(false)
+    }
+  }
+
+  async function finishPasswordRecovery(e: React.FormEvent) {
+    e.preventDefault()
+    if (authBusy) return
+    setError('')
+    setMessage('')
+    if (!userId) return setError('Link inválido ou expirado. Solicite outro e-mail de recuperação.')
+    if (recoveryPassword.length < 8) return setError('A nova senha precisa ter pelo menos 8 caracteres.')
+    if (recoveryPassword !== recoveryConfirmation) return setError('As senhas informadas não são iguais.')
+    setAuthBusy(true)
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({ password: recoveryPassword })
+      if (updateError) return setError('Não foi possível atualizar a senha: ' + updateError.message)
+      await supabase.auth.signOut()
+      clearRecoveryUrl()
+      setRecoveryMode(false)
+      setForgotPassword(false)
+      setRecoveryPassword('')
+      setRecoveryConfirmation('')
+      setLogin(current => ({ ...current, password: '' }))
+      setMessage('Senha alterada com sucesso. Entre com sua nova senha.')
+    } catch {
+      setError('Não foi possível concluir a redefinição de senha. Solicite um novo link.')
+    } finally {
+      setAuthBusy(false)
     }
   }
 
@@ -1464,21 +1527,43 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
   if (!sessionReady) return <div className="center-screen">Carregando SGQ…</div>
 
-  if (!userId) {
+  if (!userId || recoveryMode) {
     return (
       <main className="login-shell">
-        <form className="login-card" onSubmit={firstAccess ? createFirstAccess : signIn}>
-          <div className="brand-mark"><ShieldCheck size={28}/><span>SGQ</span></div>
-          <h1>{firstAccess ? 'Criar primeiro acesso' : 'Qualidade Full Brands'}</h1>
-          <label>E-mail<input type="email" value={login.email} onChange={(e)=>setLogin({...login,email:e.target.value})} required/></label>
-          <label>Senha<input type="password" minLength={8} value={login.password} onChange={(e)=>setLogin({...login,password:e.target.value})} required/></label>
-          {error && <div className="alert error">{error}</div>}
-          {message && <div className="alert success">{message}</div>}
-          <button className="primary" type="submit">{firstAccess ? 'Criar acesso' : 'Entrar'}</button>
-          <button className="link-button" type="button" onClick={()=>{setFirstAccess(!firstAccess);setError('');setMessage('');setLogin({email:firstAccess?'':'vanessa.casarin@fullbrands.com.br',password:''})}}>
-            {firstAccess ? 'Voltar para login' : 'Primeiro acesso da Vanessa'}
-          </button>
-        </form>
+        {recoveryMode ? (
+          <form className="login-card" onSubmit={finishPasswordRecovery}>
+            <div className="brand-mark"><ShieldCheck size={28}/><span>SGQ</span></div>
+            <h1>Definir nova senha</h1>
+            {userId ? (
+              <>
+                <p>Crie uma nova senha para acessar o Sistema SGQ.</p>
+                <label>Nova senha<input type="password" minLength={8} autoComplete="new-password" value={recoveryPassword} onChange={e=>setRecoveryPassword(e.target.value)} required/></label>
+                <label>Confirmar nova senha<input type="password" minLength={8} autoComplete="new-password" value={recoveryConfirmation} onChange={e=>setRecoveryConfirmation(e.target.value)} required/></label>
+              </>
+            ) : <p>Este link de recuperação não está válido ou expirou. Solicite um novo link.</p>}
+            {error && <div className="alert error">{error}</div>}
+            {message && <div className="alert success">{message}</div>}
+            {userId && <button className="primary" type="submit" disabled={authBusy}>{authBusy ? 'Salvando…' : 'Salvar nova senha'}</button>}
+            {!userId && <button className="secondary" type="button" onClick={()=>{clearRecoveryUrl();setRecoveryMode(false);setForgotPassword(true);setError('');setMessage('')}}>Solicitar novo link</button>}
+          </form>
+        ) : (
+          <form className="login-card" onSubmit={forgotPassword ? requestPasswordReset : firstAccess ? createFirstAccess : signIn}>
+            <div className="brand-mark"><ShieldCheck size={28}/><span>SGQ</span></div>
+            <h1>{forgotPassword ? 'Recuperar senha' : firstAccess ? 'Criar primeiro acesso' : 'Qualidade Full Brands'}</h1>
+            <label>E-mail<input type="email" autoComplete="email" value={login.email} onChange={(e)=>setLogin({...login,email:e.target.value})} required/></label>
+            {!forgotPassword && <label>Senha<input type="password" minLength={8} autoComplete={firstAccess ? 'new-password' : 'current-password'} value={login.password} onChange={(e)=>setLogin({...login,password:e.target.value})} required/></label>}
+            {forgotPassword && <p>Informe o e-mail cadastrado para receber um link de redefinição de senha.</p>}
+            {error && <div className="alert error">{error}</div>}
+            {message && <div className="alert success">{message}</div>}
+            <button className="primary" type="submit" disabled={authBusy}>{authBusy ? 'Enviando…' : forgotPassword ? 'Enviar link de recuperação' : firstAccess ? 'Criar acesso' : 'Entrar'}</button>
+            <button className="link-button" type="button" onClick={()=>{setForgotPassword(!forgotPassword);setFirstAccess(false);setError('');setMessage('');setLogin(current=>({...current,password:''}))}}>
+              {forgotPassword ? 'Voltar para login' : 'Esqueci minha senha'}
+            </button>
+            {!forgotPassword && <button className="link-button" type="button" onClick={()=>{setFirstAccess(!firstAccess);setError('');setMessage('');setLogin({email:firstAccess?'':'vanessa.casarin@fullbrands.com.br',password:''})}}>
+              {firstAccess ? 'Voltar para login' : 'Primeiro acesso da Vanessa'}
+            </button>}
+          </form>
+        )}
       </main>
     )
   }
