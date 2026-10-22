@@ -1082,7 +1082,36 @@ export default function App() {
   }
   async function createInspection(e: React.FormEvent, iniciar:boolean) {
     e.preventDefault()
-    if (!canWrite || !userId) return
+    if(!canWrite||!userId||inspectionBusy)return
+    if(editingInspectionId||editingProcessId){
+      setInspectionBusy(true)
+      try{
+        if(editingProcessId&&!editingInspectionId){
+          const saved=await apiPut<any>(`/api/processos/${editingProcessId}`,{
+            cliente:inspection.cliente,notaFiscal:inspection.notaFiscal,origem:inspection.origem,
+            transporte:inspection.transporte,chegadaCd:inspection.chegadaCd||null
+          })
+          if(saved.error){setPopupMessage(saved.error.message);return}
+          resetNewInspection();setTab('inspecoes');setMessage('Processo salvo.');void refreshLists();return
+        }
+        const id=editingInspectionId!
+        const itens=skuRows.map(row=>({
+          processoItemId:(row as any).processoItemId??null,sku:row.sku.trim(),nome:row.nome.trim(),
+          lote:row.lote.trim()||null,material:row.material.trim()||null,capacidade:row.capacidade.trim()||null,
+          quantidade:Number(row.quantidade)||0,quantidadePorCaixa:Number(row.quantidadePorCaixa)||null,
+          caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
+          unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,distribuicaoCaixas:boxGroupsFromRow(row)
+        }))
+        const saved=await apiPut<any>(`/api/inspecoes/${id}/dados`,{
+          codigo:inspection.codigo,cliente:inspection.cliente,notaFiscal:inspection.notaFiscal,
+          origem:inspection.origem,transporte:inspection.transporte,chegadaCd:inspection.chegadaCd||null,
+          dataInspecao:inspection.dataInspecao||null,inspectionLevel:inspection.inspectionLevel,
+          itVersionId:inspection.itVersionId||null,observacaoInterna:inspection.observacaoInterna,itens
+        })
+        if(saved.error){setPopupMessage(saved.error.message);return}
+        resetNewInspection();setTab('painel');setMessage('Inspeção salva.');void refreshLists();return
+      }finally{setInspectionBusy(false)}
+    }
     setError('')
     setMessage('')
 
@@ -2160,8 +2189,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </section>
 
             <div className="actions inspection-create-actions">
-              <button className="secondary" type="submit" value="salvar"><FileText size={17}/> Salvar inspeção</button>
-              <button className="primary" type="submit" value="iniciar"><Play size={17}/> Iniciar inspeção</button>
+              <button className="secondary" type="submit" value="salvar" disabled={inspectionBusy}><FileText size={17}/>{inspectionBusy?'Salvando…':'Salvar'}</button>
+              {!editingInspectionId && !editingProcessId && <button className="primary" type="submit" value="iniciar" disabled={inspectionBusy}><Play size={17}/> Iniciar inspeção</button>}
             </div>
           </form>
         </section>
