@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileText, Loader2, MapPin, Mic, MicOff, Send, Sparkles, Upload, X } from 'lucide-react'
+import { ArrowLeft, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileText, Loader2, MapPin, Mic, MicOff, Send, Sparkles, Trash2, Upload, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, supabase } from '../lib/supabase'
 import { AUDIT_DEFINITIONS, getAuditDefinition, type AuditCriterion, type AuditDefinition, type RqCode } from './catalog'
 import './auditorias.css'
@@ -79,6 +79,7 @@ type TemplateRow = {
 
 type Props = {
   profileName?: string | null
+  canDelete?: boolean
 }
 
 const DOCS_URL=((import.meta.env.VITE_API_URL || 'https://app-sgq-api.onrender.com').replace(/\/$/,'') + '/api/auditorias')
@@ -132,7 +133,7 @@ function statusLabel(value:string) {
   return map[value] ?? value
 }
 
-export default function AuditoriasPage({profileName}:Props) {
+export default function AuditoriasPage({profileName,canDelete=false}:Props) {
   const [executions,setExecutions]=useState<AuditExecution[]>([])
   const [templates,setTemplates]=useState<TemplateRow[]>([])
   const [active,setActive]=useState<AuditExecution|null>(null)
@@ -153,6 +154,9 @@ export default function AuditoriasPage({profileName}:Props) {
   const [showChecklist,setShowChecklist]=useState(false)
   const [showFinish,setShowFinish]=useState(false)
   const [notice,setNotice]=useState('')
+  const [deletionCandidate,setDeletionCandidate]=useState<AuditExecution|null>(null)
+  const [deleting,setDeleting]=useState(false)
+  const [deletionError,setDeletionError]=useState('')
   const [historyFilter,setHistoryFilter]=useState<'todas'|'em_andamento'|'concluida'>('todas')
   const [historySearch,setHistorySearch]=useState('')
   const [bootstrapFailed,setBootstrapFailed]=useState(false)
@@ -496,6 +500,48 @@ export default function AuditoriasPage({profileName}:Props) {
     rec.start()
   }
 
+  async function deleteWarehouseInspection(){
+    if(!canDelete||!deletionCandidate||deleting)return
+    setDeleting(true)
+    setDeletionError('')
+    try{
+      const id=deletionCandidate.id
+      const result=await apiPost<{excluida:boolean;id:string}>(`/api/auditorias/${encodeURIComponent(id)}/excluir`,{})
+      if(result.error||!result.data?.excluida){
+        setDeletionError(result.error?.message||'Não foi possível excluir a inspeção. Tente novamente.')
+        return
+      }
+      setExecutions(previous=>previous.filter(row=>row.id!==id))
+      if(active?.id===id){
+        setActive(null)
+        setMessages([]);setAnswers([]);setFindings([]);setObjects([])
+      }
+      setDeletionCandidate(null)
+      setNotice('Inspeção excluída da lista. O histórico e os documentos foram preservados.')
+    }catch{
+      setDeletionError('Não foi possível confirmar a exclusão. Verifique a conexão e tente novamente.')
+    }finally{
+      setDeleting(false)
+    }
+  }
+
+  const deleteDialog=deletionCandidate&&(
+    <div className="audit-modal-backdrop" role="presentation" onClick={()=>{if(!deleting){setDeletionCandidate(null);setDeletionError('')}}}>
+      <div className="audit-modal audit-delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="audit-delete-title" aria-describedby="audit-delete-description" onClick={e=>e.stopPropagation()}>
+        <div className="audit-modal-icon audit-delete-icon"><Trash2 size={24}/></div>
+        <h2 id="audit-delete-title">Excluir inspeção do armazém?</h2>
+        <p id="audit-delete-description">A inspeção <strong>{deletionCandidate.rq_code.replace('RQ','RQ ')} · {deletionCandidate.titulo}</strong> deixará de aparecer nas listas. Seus registros, fotos e documentos serão preservados para rastreabilidade.</p>
+        {deletionError&&<div className="audit-delete-error" role="alert">{deletionError}</div>}
+        <div className="audit-modal-actions">
+          <button type="button" className="secondary" disabled={deleting} onClick={()=>{setDeletionCandidate(null);setDeletionError('')}}>Cancelar</button>
+          <button type="button" className="audit-delete-confirm" disabled={deleting} onClick={()=>void deleteWarehouseInspection()}>
+            {deleting?<Loader2 className="spin" size={17}/>:<Trash2 size={17}/>} {deleting?'Excluindo…':'Excluir inspeção'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
   if (loadingPage) return <section className="audit-center"><Loader2 className="spin"/> Carregando auditorias…</section>
 
   if (!active) {
@@ -579,15 +625,21 @@ export default function AuditoriasPage({profileName}:Props) {
           </div>
           {!bootstrapFailed && !visibleExecutions.length && <div className="audit-empty">{executions.length?'Nenhuma inspeção corresponde ao filtro.':'Nenhuma inspeção deste módulo ainda.'}</div>}
           {visibleExecutions.map((x)=>(
-            <button className="audit-history-row" key={x.id} onClick={()=>openAudit(x.id)}>
-              <div>
-                <strong>{x.rq_code.replace('RQ','RQ ')} · {x.titulo}</strong>
-                <span>{formatDate(x.data_avaliacao)} · {x.responsavel_nome || 'Responsável não informado'}{x.documento_gerado_em?' · Word gerado':''}</span>
-              </div>
-              <span className={'audit-status '+x.status}>{statusLabel(x.status)}</span>
-            </button>
+            <div className="audit-history-entry" key={x.id}>
+              <button type="button" className="audit-history-row" onClick={()=>void openAudit(x.id)}>
+                <div>
+                  <strong>{x.rq_code.replace('RQ','RQ ')} · {x.titulo}</strong>
+                  <span>{formatDate(x.data_avaliacao)} · {x.responsavel_nome || 'Responsável não informado'}{x.documento_gerado_em?' · Word gerado':''}</span>
+                </div>
+                <span className={'audit-status '+x.status}>{statusLabel(x.status)}</span>
+              </button>
+              {canDelete&&<button type="button" className="audit-delete-action" aria-label={'Excluir '+x.rq_code.replace('RQ','RQ ')+' · '+x.titulo} title="Excluir inspeção" onClick={()=>{setDeletionError('');setDeletionCandidate(x)}}>
+                <Trash2 size={17}/>
+              </button>}
+            </div>
           ))}
         </div>
+        {deleteDialog}
       </section>
     )
   }
@@ -603,6 +655,9 @@ export default function AuditoriasPage({profileName}:Props) {
         <div className="audit-progress-mini">
           {definition?.fixedChecklist ? <><b>{progressDone}/{progressTotal}</b><small>itens</small></> : definition?.code==='RQ014' ? <><b>{objects.length}</b><small>equipamentos</small></> : <><b>{findings.length}</b><small>achados</small></>}
         </div>
+        {canDelete&&<button type="button" className="audit-delete-action audit-session-delete" title="Excluir esta inspeção" aria-label="Excluir esta inspeção do armazém" onClick={()=>{setDeletionError('');setDeletionCandidate(active)}}>
+          <Trash2 size={18}/>
+        </button>}
       </div>
 
       {definition?.fixedChecklist && (
@@ -703,7 +758,8 @@ export default function AuditoriasPage({profileName}:Props) {
         </div>
       )}
 
-      {showFinish && (
+      {deleteDialog}
+      {showFinish && !deletionCandidate && (
         <div className="audit-modal-backdrop">
           <div className="audit-modal">
             <div className="audit-modal-icon"><FileText size={24}/></div>
