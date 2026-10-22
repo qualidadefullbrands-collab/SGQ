@@ -612,6 +612,7 @@ app.MapGet("/api/inspecoes/{id}/fotos/links", async (string id,HttpRequest reque
         var client=factory.CreateClient("supabase");
         var photosTask=RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
             $"select=storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+        await photosTask;
         // Signed photo URLs are independent: fetch concurrently with a bounded fan-out.
         var photoUrls=new Dictionary<string,string?>();
         if(photosTask.Result is {ValueKind:JsonValueKind.Array})
