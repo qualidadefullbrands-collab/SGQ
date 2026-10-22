@@ -997,15 +997,22 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         if(requestId!=null)
         {
             var previous=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-                $"select=id,numero,grupo_inspecao_id,status&parametros_amostragem->>request_id=eq.{requestId}&excluido_em=is.null&order=criado_em.asc&limit=1");
+                $"select=id,numero,grupo_inspecao_id,status,parametros_amostragem&parametros_amostragem->>request_id=eq.{requestId}&excluido_em=is.null&order=criado_em.asc");
             var (existing,alreadyCreated)=FirstRow(previous);
             if(alreadyCreated)
+            {
+                var firstParams=existing!.Value.GetProperty("parametros_amostragem");
+                var expected=firstParams.ValueKind==JsonValueKind.Object&&firstParams.TryGetProperty("total_produtos",out var expectedCount)
+                    &&expectedCount.ValueKind==JsonValueKind.Number?expectedCount.GetInt32():1;
+                if(previous is {ValueKind:JsonValueKind.Array}&&previous.Value.GetArrayLength()<expected)
+                    return Results.Json(Error("A gravação anterior não terminou. O SGQ preservou os dados parciais e não duplicará o processo; contate a Qualidade para reconciliação."),statusCode:409);
                 return Results.Ok(new {data=new {
                     id=existing!.Value.GetProperty("id").GetString(),
                     numero=existing.Value.GetProperty("numero").GetString(),
                     grupo_inspecao_id=existing.Value.GetProperty("grupo_inspecao_id").GetString(),
                     replay=true
                 },error=(object?)null});
+            }
         }
         if(startNow && string.IsNullOrWhiteSpace(input.ItVersionId))
             return Results.Json(Error("Selecione a IT para iniciar a inspeção."),statusCode:400);
@@ -1506,15 +1513,20 @@ app.MapPost("/api/inspecoes/{id}/iniciar", async (string id,HttpRequest request,
             {
                 var siblings=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
                     $"select=id,status,parametros_amostragem&parametros_amostragem->>lote_sequencial=eq.{Uri.EscapeDataString(batchId)}&excluido_em=is.null");
+                var preceding=0;
                 if(siblings is {ValueKind:JsonValueKind.Array})
                     foreach(var sibling in siblings.Value.EnumerateArray())
                     {
                         if(!sibling.TryGetProperty("parametros_amostragem",out var metadata)||metadata.ValueKind!=JsonValueKind.Object)continue;
                         var siblingOrder=metadata.TryGetProperty("ordem_produto",out var index)&&index.ValueKind==JsonValueKind.Number?index.GetInt32():0;
+                        if(siblingOrder<order && siblingOrder>0)
+                            preceding++;
                         if(siblingOrder<order && siblingOrder>0
                             && (!sibling.TryGetProperty("status",out var status)||status.GetString()!="concluida"))
                             return Results.Json(Error($"Finalize primeiro o produto {siblingOrder} para iniciar o produto {order}."),statusCode:409);
                     }
+                if(preceding<order-1)
+                    return Results.Json(Error("Não é possível iniciar este produto porque faltam inspeções anteriores na sequência. Solicite revisão do processo."),statusCode:409);
             }
         }
         var started=await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}&status=eq.aberta",
