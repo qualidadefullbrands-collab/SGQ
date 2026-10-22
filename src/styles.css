@@ -1848,3 +1848,19 @@ input,select,textarea,button{font-size:15px}
  .sgq-operational-shell>.alert.success,.sgq-operational-shell .equipment-page>.alert.success{animation:none!important}
  .sgq-operational-shell button{transition:none!important}
 }
+
+
+/* Sequência operacional: um código de produto por inspeção */
+.inspection-sequence-banner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;
+  background:linear-gradient(110deg,#edf6fc,#ffffff);border:1px solid #a7c6da;border-left:4px solid #1678ab;
+  box-shadow:0 3px 15px #164d7020;border-radius:12px;padding:14px 18px;margin:0 0 16px;
+  animation:sgq-enter .22s ease-out both}
+.inspection-sequence-banner>div{display:flex;flex-direction:column;gap:4px}
+.inspection-sequence-banner strong{color:#14577e;font-size:16px}
+.inspection-sequence-banner span{color:#456b83;font-size:13px}
+.inspection-row button:disabled{opacity:.65;cursor:not-allowed;background:#e6eef4;color:#637d8e;border-color:#c6d6e1}
+.inspection-row:has(button:disabled){background:#f7fafc}
+@media(max-width:700px){
+ .inspection-sequence-banner{align-items:stretch}
+ .inspection-sequence-banner .primary{width:100%;justify-content:center;min-height:44px}
+}
