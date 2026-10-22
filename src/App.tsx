@@ -1,5 +1,4 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import {sequentialProductInfo} from './sequence.mjs'
 import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/supabase'
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
@@ -1253,14 +1252,12 @@ export default function App() {
       codigo_amostragem:plan?.codigo??null,criado_em:new Date().toISOString(),
       grupos_inspecao:{
         id:created.data.grupo_inspecao_id||'',nome:skuRows.find(row=>row.nome.trim())?.nome||'Inspeção',
-        tipo:'produto',processo_id:existing?.id||'',processos:processSummary
+        tipo:skuRows.filter(row=>row.sku.trim()||row.nome.trim()).length>1?'kit_componentes':'individual',
+        processo_id:existing?.id||'',processos:processSummary
       }
     }
     setInspections(old=>[provisional,...old.filter(x=>x.id!==provisional.id)])
-    if((created.data?.inspecoes??[]).length>1){
-      setMessage(`${created.data.inspecoes.length} produtos cadastrados em sequência. Finalize um antes de iniciar o próximo.`)
-    }
-    if((created.data?.inspecoes??[]).length<=1)setMessage(iniciar?'Inspeção iniciada.':'Inspeção salva.')
+    setMessage(iniciar?'Inspeção iniciada.':'Inspeção salva.')
     resetNewInspection()
     loadSequence.current++
     if(iniciar){await openInspection(created.data.id);setActiveStage('amostragem')}
@@ -2089,10 +2086,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <div className="process-list">
             {processes.map((p)=>{
               const related=inspections.filter((i)=>i.grupos_inspecao?.processo_id===p.id)
-                .sort((a,b)=>{
-                  const sameBatch=a.parametros_amostragem?.lote_sequencial&&a.parametros_amostragem?.lote_sequencial===b.parametros_amostragem?.lote_sequencial
-                  return sameBatch?Number(a.parametros_amostragem?.ordem_produto||1)-Number(b.parametros_amostragem?.ordem_produto||1):0
-                })
               return (
                 <article className="process-card" key={p.id}>
                   <div className="process-head">
@@ -2108,20 +2101,19 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     </div>
                   </div>
                   <div className="inspection-sublist">
-                    {related.map((i)=>{
-                      const sequence=sequentialProductInfo(i,inspections)
-                      return <div className="inspection-row" key={i.id}>
+                    {related.map((i)=>(
+                      <div className="inspection-row" key={i.id}>
                         <div>
                           <strong>{inspectionDisplay(i)}</strong>
-                          <span>{i.parametros_amostragem?.lote_sequencial?'Produto '+sequence.order+' de '+sequence.total+' · ':''}{sequence.blocked?'Aguardando conclusão do produto '+Number(sequence.previous?.parametros_amostragem?.ordem_produto||1):statusLabel(i.status)} · {i.grupos_inspecao?.nome} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0}</span>
+                          <span>{statusLabel(i.status)} · {i.grupos_inspecao?.nome} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0}</span>
                         </div>
                         <div className="row-actions">
                           {i.resultado && i.resultado!=='pendente' && <span className={'result-badge '+i.resultado}>{statusLabel(i.resultado)}</span>}
-                          <button className="primary small" disabled={sequence.blocked} title={sequence.blocked?'Finalize o produto anterior antes de começar este.':undefined} onClick={()=>openInspection(i.id)}>{sequence.blocked?'Aguardando':i.status==='concluida'?'Abrir':i.status==='aberta'?'Editar / iniciar':'Continuar'}</button>
+                          <button className="primary small" onClick={()=>openInspection(i.id)}>{i.status==='concluida'?'Abrir':i.status==='aberta'?'Editar / iniciar':'Continuar'}</button>
                           {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection(i)}><Trash2 size={15}/></button>}
                         </div>
                       </div>
-                    })}
+                    ))}
                     {!related.length && <span className="muted">Nenhuma inspeção neste processo.</span>}
                   </div>
                 </article>
@@ -2296,15 +2288,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
-          {!!detail.parametros_amostragem?.lote_sequencial && <div className="inspection-sequence-banner">
-            <div><strong>Produto {detail.parametros_amostragem.ordem_produto} de {detail.parametros_amostragem.total_produtos}</strong>
-            <span>{detail.items?.[0]?.processo_itens?.produtos?.sku||detail.parametros_amostragem.produto_codigo||'Código não informado'} · {detail.grupos_inspecao?.nome}</span></div>
-            {detail.status==='concluida'&&(()=>{
-              const next=inspections.find(i=>i.parametros_amostragem?.lote_sequencial===detail.parametros_amostragem.lote_sequencial
-                &&i.parametros_amostragem?.ordem_produto===Number(detail.parametros_amostragem.ordem_produto)+1)
-              return next?<button className="primary" type="button" onClick={()=>void openInspection(next.id)}>Próximo produto <ChevronRight size={17}/></button>:<span>Todos os produtos registrados foram concluídos.</span>
-            })()}
-          </div>}
           <nav id="inspection-stage-nav" className="inspection-stage-tabs" role="tablist" aria-label="Etapas da inspeção">
             {([
               ['dados','Dados',true],['amostragem','Amostragem',samplingDone],
@@ -2449,12 +2432,31 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <div><h2>Análises dimensionais</h2><span className="section-note">Especificação, instrumento, desvio aceitável e 10 medições por parâmetro.</span></div>
               {detail.dimensionais_finalizados && <span className="pill">Concluído</span>}
             </div>
-
-            {(detail.items ?? []).map((link:any)=>{
+            {(detail.items ?? []).length>1 && <div className="dimension-set-navigation">
+              <div className="dimension-set-caption"><strong>Produtos do conjunto</strong><span>{detail.items.length} SKUs · uma única inspeção</span></div>
+              <div className="dimension-set-tabs">
+                {(detail.items??[]).map((entry:any,index:number)=>{
+                  const product=entry.processo_itens
+                  return <button key={product.id} type="button"
+                    onClick={()=>document.getElementById('dim-item-'+product.id)?.scrollIntoView({behavior:'smooth',block:'center'})}>
+                    <span>{index+1}</span>{product.produtos?.sku||'SKU não informado'}
+                  </button>
+                })}
+              </div>
+            </div>}
+            {(detail.items ?? []).map((link:any,index:number)=>{
               const item=link.processo_itens
               return (
-                <div className="dimension-item" key={item.id}>
-                  <h3>{item.produtos?.sku} · {item.produtos?.nome}</h3>
+                <div className="dimension-item" id={'dim-item-'+item.id} key={item.id} role="group"
+                  aria-label={'Dimensionais do produto '+(item.produtos?.sku||index+1)}>
+                  <div className="dimension-product-header">
+                    <span className="dimension-product-number">{String(index+1).padStart(2,'0')}</span>
+                    <div className="dimension-product-identity">
+                      <span className="dimension-product-overline">Produto {index+1} de {detail.items.length} · SKU {item.produtos?.sku||'não informado'}</span>
+                      <h3>{item.produtos?.nome||'Produto sem descrição'}</h3>
+                      <span className="dimension-product-meta">Quantidade: {item.quantidade??'—'} · Lote: {item.lote||'—'} · {(detail.params??[]).length} parâmetros dimensionais</span>
+                    </div>
+                  </div>
                   {(detail.params ?? []).map((p:any)=>{
                     const cfg=getDimConfig(item.id,p.id) ?? {}
                     const summary=dimensionSummary(item.id,p.id)
