@@ -1,0 +1,163 @@
+import {useEffect,useMemo,useState} from 'react'
+import {AlertTriangle,CalendarClock,CheckCircle2,ClipboardCheck,Plus,RefreshCw,Save,SlidersHorizontal,Wrench} from 'lucide-react'
+import {supabase} from '../lib/supabase'
+
+export type Equipment = {
+  id:string; codigo:string; nome:string; tipo:string; fabricante:string|null; modelo:string|null;
+  numero_serie:string|null; patrimonio:string|null; setor:string|null; localizacao:string|null;
+  responsavel:string|null; unidade:string|null; faixa_medicao:string|null; resolucao:string|null;
+  tolerancia:string|null; aplicacoes:string[]; requer_calibracao:boolean; ultima_calibracao:string|null;
+  proxima_calibracao:string|null; certificado_calibracao:string|null; laboratorio_calibracao:string|null;
+  periodicidade_calibracao_meses:number|null; proxima_verificacao:string|null; proxima_manutencao:string|null;
+  estado:'ativo'|'em_manutencao'|'interditado'|'inativo'; observacoes:string|null; dados_origem:Record<string,unknown>
+}
+type EventRow={id:string;equipamento_id:string;tipo:string;data_evento:string;proximo_vencimento:string|null;resultado:string;prestador:string|null;documento_url:string|null;observacoes:string|null}
+type EventDraft={tipo:string;data_evento:string;proximo_vencimento:string;resultado:string;prestador:string;documento_url:string;observacoes:string}
+const blank=():Partial<Equipment>=>({codigo:'',nome:'',tipo:'instrumento',fabricante:'',modelo:'',numero_serie:'',patrimonio:'',setor:'',localizacao:'',responsavel:'',unidade:'',faixa_medicao:'',resolucao:'',tolerancia:'',aplicacoes:[],requer_calibracao:false,ultima_calibracao:null,proxima_calibracao:null,certificado_calibracao:'',laboratorio_calibracao:'',periodicidade_calibracao_meses:null,proxima_verificacao:null,proxima_manutencao:null,estado:'ativo',observacoes:''})
+const newEvent=():EventDraft=>({tipo:'calibracao',data_evento:new Date().toISOString().slice(0,10),proximo_vencimento:'',resultado:'realizado',prestador:'',documento_url:'',observacoes:''})
+const uses=['comprimento','diametro','largura','altura','espessura','massa','volume','temperatura','forca','pressao','outros']
+export function equipmentFit(e:Equipment,paramName:string,unit?:string|null) {
+  if(e.estado!=='ativo') return false
+  if(e.requer_calibracao && (!e.proxima_calibracao || e.proxima_calibracao<new Date().toISOString().slice(0,10))) return false
+  if(e.tipo!=='instrumento' && e.tipo!=='dimensional') return false
+  const name=(paramName||'').toLowerCase()
+  const u=(unit||'').toLowerCase()
+  const kind=/(altura|height)/.test(name)?'altura':/(diametr|diâmetr)/.test(name)?'diametro':/(largura|width)/.test(name)?'largura':/(espess|thickness)/.test(name)?'espessura':/(compriment|length)/.test(name)?'comprimento':/(peso|massa|weight)/.test(name)||['g','kg','mg'].includes(u)?'massa':/(volum|capacity|capacidade)/.test(name)||['ml','l'].includes(u)?'volume':/(temperat|°c)/.test(name)?'temperatura':/(força|force|resistênc)/.test(name)||u==='n'?'forca':/(press)/.test(name)?'pressao':'outros'
+  const lengthFamily=['comprimento','diametro','largura','altura','espessura']
+  return e.aplicacoes.includes(kind) || (lengthFamily.includes(kind) && e.aplicacoes.includes('comprimento'))
+}
+export function useEquipmentList() {
+  const [equipments,setEquipments]=useState<Equipment[]>([])
+  const [busy,setBusy]=useState(false)
+  const refresh=async()=>{
+    setBusy(true)
+    const {data,error}=await supabase.from('sgq_equipamentos').select('*').order('nome')
+    if(!error && data) setEquipments(data as Equipment[])
+    setBusy(false)
+    return error
+  }
+  useEffect(()=>{void refresh()},[])
+  return {equipments,setEquipments,busy,refresh}
+}
+export default function EquipmentPage({canManage,onChanged}:{canManage:boolean;onChanged?:(items:Equipment[])=>void}) {
+  const {equipments,setEquipments,busy,refresh}=useEquipmentList()
+  const [editing,setEditing]=useState<Partial<Equipment>|null>(null)
+  const [selected,setSelected]=useState<string>('')
+  const [events,setEvents]=useState<EventRow[]>([])
+  const [eventDraft,setEventDraft]=useState<EventDraft>(newEvent())
+  const [saving,setSaving]=useState(false)
+  const [search,setSearch]=useState('')
+  const [notice,setNotice]=useState('')
+  const [failure,setFailure]=useState('')
+  const today=new Date().toISOString().slice(0,10)
+  const thirty=new Date(Date.now()+30*86400000).toISOString().slice(0,10)
+  const alerts=useMemo(()=>equipments.filter(e=>e.estado==='ativo'&&e.requer_calibracao&&(!e.proxima_calibracao||e.proxima_calibracao<=thirty)),[equipments,thirty])
+  const shown=useMemo(()=>equipments.filter(e=>[e.nome,e.codigo,e.fabricante,e.localizacao,e.numero_serie].some(s=>String(s||'').toLowerCase().includes(search.toLowerCase()))),[equipments,search])
+  useEffect(()=>{onChanged?.(equipments)},[equipments,onChanged])
+  useEffect(()=>{
+    if(!selected){setEvents([]);return}
+    let valid=true
+    supabase.from('sgq_equipamento_eventos').select('*').eq('equipamento_id',selected).order('data_evento',{ascending:false}).then(({data})=>{if(valid)setEvents((data||[]) as EventRow[])})
+    return()=>{valid=false}
+  },[selected])
+  async function saveEquipment(e:React.FormEvent){
+    e.preventDefault();if(!editing||!canManage)return
+    setFailure('');setNotice('');setSaving(true)
+    const value={...editing,codigo:String(editing.codigo||'').trim().toUpperCase(),nome:String(editing.nome||'').trim(),aplicacoes:editing.aplicacoes||[],dados_origem:editing.dados_origem||{}}
+    const {id:equipmentId,criado_em:ignored,atualizado_em:ignored2,...payload}=value as Equipment & {criado_em?:string;atualizado_em?:string}
+    void ignored;void ignored2
+    const {data,error}=equipmentId
+      ?await supabase.from('sgq_equipamentos').update({...payload,atualizado_em:new Date().toISOString()}).eq('id',equipmentId).select('*').single()
+      :await supabase.from('sgq_equipamentos').insert(payload).select('*').single()
+    setSaving(false)
+    if(error){setFailure(error.message);return}
+    setEquipments(old=>[...(old.filter(x=>x.id!==data.id)),data as Equipment].sort((a,b)=>a.nome.localeCompare(b.nome)))
+    setEditing(null);setSelected(data.id);setNotice('Equipamento salvo.')
+  }
+  async function saveEvent(e:React.FormEvent){
+    e.preventDefault();if(!selected)return
+    setSaving(true);setFailure('');setNotice('')
+    const {data:{user}}=await supabase.auth.getUser()
+    const {data,error}=await supabase.from('sgq_equipamento_eventos').insert({
+      equipamento_id:selected,tipo:eventDraft.tipo,data_evento:eventDraft.data_evento,
+      proximo_vencimento:eventDraft.proximo_vencimento||null,resultado:eventDraft.resultado,
+      prestador:eventDraft.prestador||null,documento_url:eventDraft.documento_url||null,
+      observacoes:eventDraft.observacoes||null,responsavel_id:user?.id
+    }).select('*').single()
+    if(error){setFailure(error.message);setSaving(false);return}
+    setEvents(old=>[data as EventRow,...old])
+    const field=eventDraft.tipo==='calibracao'?'proxima_calibracao':eventDraft.tipo==='verificacao'?'proxima_verificacao':'proxima_manutencao'
+    const last=eventDraft.tipo==='calibracao'?{ultima_calibracao:eventDraft.data_evento}:{}
+    const patch={...last,[field]:eventDraft.proximo_vencimento||null,atualizado_em:new Date().toISOString()}
+    const {data:equipment,error:equipmentError}=await supabase.from('sgq_equipamentos').update(patch).eq('id',selected).select('*').single()
+    if(!equipmentError && equipment) setEquipments(old=>old.map(x=>x.id===selected?equipment as Equipment:x))
+    if(equipmentError)setFailure('Evento salvo; verifique o vencimento no cadastro: '+equipmentError.message)
+    else setNotice('Evento e vencimento atualizados.')
+    setEventDraft(newEvent());setSaving(false)
+  }
+  const field=(label:string,name:keyof Equipment,opts?:{type?:string,placeholder?:string})=>(
+    <label key={name}>{label}<input type={opts?.type||'text'} placeholder={opts?.placeholder} value={String(editing?.[name]??'')} onChange={e=>setEditing(old=>({...old,[name]:e.target.value||null}))}/></label>
+  )
+  return <section className="workspace equipment-page">
+    <div className="page-title"><div><span className="eyebrow">PATRIMÔNIO · CONTROLE METROLÓGICO</span><h1>Equipamentos e instrumentos</h1><p>Disponibilidade, verificações, calibrações e manutenção em um só lugar.</p></div>
+      <div className="row-actions"><button className="secondary" type="button" disabled={busy} onClick={()=>void refresh()}><RefreshCw size={16}/> Atualizar</button>{canManage&&<button className="primary" type="button" onClick={()=>setEditing(blank())}><Plus size={17}/> Cadastrar equipamento</button>}</div></div>
+    {notice&&<div className="alert success" role="status">{notice}</div>}
+    {failure&&<div className="alert error" role="alert">{failure}</div>}
+    <div className="equipment-summary">
+      <div><strong>{equipments.length}</strong><span>Equipamentos cadastrados</span></div>
+      <div><strong>{equipments.filter(e=>e.estado==='ativo').length}</strong><span>Ativos</span></div>
+      <div><strong>{alerts.filter(e=>!e.proxima_calibracao||e.proxima_calibracao<today).length}</strong><span>Calibração pendente/vencida</span></div>
+      <div><strong>{alerts.filter(e=>e.proxima_calibracao&&e.proxima_calibracao>=today).length}</strong><span>Vencem em até 30 dias</span></div>
+    </div>
+    {alerts.length>0&&<div className="equipment-alerts"><AlertTriangle size={17}/><span><strong>Atenção à calibração:</strong> {alerts.map(e=>e.codigo).join(', ')}. Instrumentos vencidos ou sem data não ficam disponíveis para dimensionais.</span></div>}
+    <div className="equipment-toolbar"><SlidersHorizontal size={17}/><input aria-label="Buscar equipamentos" placeholder="Buscar por código, nome, local ou número de série" value={search} onChange={e=>setSearch(e.target.value)}/></div>
+    {!equipments.length&&<div className="panel section-card"><h2>Cadastro preparado</h2><p>A base está vazia. Cadastre instrumentos manualmente ou importe os registros da planilha quando ela estiver acessível. Nenhum equipamento foi inventado.</p></div>}
+    <div className="equipment-list">
+      {shown.map(e=><article key={e.id} className={'equipment-row '+(selected===e.id?'selected':'')}>
+        <div><b>{e.codigo} · {e.nome}</b><span>{[e.tipo,e.fabricante,e.modelo,e.localizacao].filter(Boolean).join(' · ')||'Sem informações complementares'}</span></div>
+        <div><span className={'equipment-status '+(e.estado==='ativo'?'valid':'inactive')}>{e.estado.replaceAll('_',' ')}</span>{e.requer_calibracao&&<small>Calibração: {e.proxima_calibracao||'não informada'}</small>}</div>
+        <div className="equipment-actions"><button className="secondary small" type="button" onClick={()=>setSelected(selected===e.id?'':e.id)}><ClipboardCheck size={15}/> Histórico</button>{canManage&&<button className="secondary small" type="button" onClick={()=>setEditing({...e})}><Wrench size={15}/> Editar</button>}</div>
+      </article>)}
+    </div>
+    {selected&&<div className="panel section-card equipment-history">
+      <div className="section-title"><h2>Histórico do equipamento</h2><button className="secondary small" onClick={()=>setSelected('')} type="button">Fechar</button></div>
+      <div className="equipment-events">{events.length?events.map(e=><div key={e.id}><b>{e.tipo.replaceAll('_',' ')}</b><span>{e.data_evento} · {e.resultado}{e.proximo_vencimento?' · Próximo: '+e.proximo_vencimento:''}</span>{e.documento_url&&<a href={e.documento_url} target="_blank" rel="noreferrer">Certificado / evidência</a>}</div>):<p>Nenhum evento cadastrado.</p>}</div>
+      {canManage&&<form onSubmit={saveEvent} className="equipment-event-form">
+        <h3>Registrar calibração, manutenção ou verificação</h3>
+        <label>Tipo<select value={eventDraft.tipo} onChange={e=>setEventDraft({...eventDraft,tipo:e.target.value})}><option value="calibracao">Calibração</option><option value="verificacao">Verificação de rotina</option><option value="manutencao_preventiva">Manutenção preventiva</option><option value="manutencao_corretiva">Manutenção corretiva</option></select></label>
+        <label>Data<input required type="date" value={eventDraft.data_evento} onChange={e=>setEventDraft({...eventDraft,data_evento:e.target.value})}/></label>
+        <label>Próximo vencimento<input type="date" value={eventDraft.proximo_vencimento} onChange={e=>setEventDraft({...eventDraft,proximo_vencimento:e.target.value})}/></label>
+        <label>Resultado<select value={eventDraft.resultado} onChange={e=>setEventDraft({...eventDraft,resultado:e.target.value})}><option value="realizado">Realizado</option><option value="aprovado">Aprovado</option><option value="reprovado">Reprovado</option><option value="pendente">Pendente</option></select></label>
+        <label>Prestador<input value={eventDraft.prestador} onChange={e=>setEventDraft({...eventDraft,prestador:e.target.value})}/></label>
+        <label>Link do certificado<input type="url" value={eventDraft.documento_url} onChange={e=>setEventDraft({...eventDraft,documento_url:e.target.value})}/></label>
+        <label className="span-2">Observações<textarea rows={2} value={eventDraft.observacoes} onChange={e=>setEventDraft({...eventDraft,observacoes:e.target.value})}/></label>
+        <button className="primary" disabled={saving} type="submit"><Save size={16}/> Registrar evento</button>
+      </form>}
+    </div>}
+    {editing&&<div className="modal-backdrop" onClick={()=>setEditing(null)}><form className="sample-detail inspection-edit-modal equipment-editor" onClick={e=>e.stopPropagation()} onSubmit={saveEquipment}>
+      <button className="close" type="button" onClick={()=>setEditing(null)}>×</button>
+      <h2>{editing.id?'Editar equipamento':'Cadastrar equipamento'}</h2>
+      <div className="form-grid">
+        {field('Código','codigo')}{field('Nome do equipamento','nome')}
+        <label>Categoria<select value={editing.tipo||'instrumento'} onChange={e=>setEditing({...editing,tipo:e.target.value})}><option value="instrumento">Instrumento de medição</option><option value="dimensional">Instrumento dimensional</option><option value="teste">Equipamento de ensaio</option><option value="apoio">Equipamento de apoio (não dimensional)</option></select></label>
+        {field('Fabricante','fabricante')}{field('Modelo','modelo')}{field('Número de série','numero_serie')}{field('Patrimônio','patrimonio')}
+        {field('Setor','setor')}{field('Localização','localizacao')}{field('Responsável','responsavel')}
+        {field('Unidade','unidade')}{field('Faixa de medição','faixa_medicao')}{field('Resolução','resolucao')}{field('Tolerância','tolerancia')}
+        <label>Estado<select value={editing.estado||'ativo'} onChange={e=>setEditing({...editing,estado:e.target.value as Equipment['estado']})}><option value="ativo">Ativo</option><option value="em_manutencao">Em manutenção</option><option value="interditado">Interditado</option><option value="inativo">Inativo</option></select></label>
+        <label className="check-option span-2"><input type="checkbox" checked={!!editing.requer_calibracao} onChange={e=>setEditing({...editing,requer_calibracao:e.target.checked})}/> Exige calibração periódica</label>
+        {field('Última calibração','ultima_calibracao',{type:'date'})}
+        {field('Próxima calibração','proxima_calibracao',{type:'date'})}
+        {field('Próxima verificação','proxima_verificacao',{type:'date'})}
+        {field('Próxima manutenção','proxima_manutencao',{type:'date'})}
+        {field('Laboratório de calibração','laboratorio_calibracao')}
+        {field('Certificado (URL ou número)','certificado_calibracao')}
+        <label>Periodicidade da calibração (meses)<input type="number" min="1" value={editing.periodicidade_calibracao_meses??''} onChange={e=>setEditing({...editing,periodicidade_calibracao_meses:e.target.value?Number(e.target.value):null})}/></label>
+        <div className="span-2 equipment-applications"><b>Aplicações permitidas</b><small>Selecione somente as grandezas que o instrumento pode medir.</small>
+          <div>{uses.map(use=><label className="check-option" key={use}><input type="checkbox" checked={(editing.aplicacoes||[]).includes(use)} onChange={e=>setEditing({...editing,aplicacoes:e.target.checked?[...(editing.aplicacoes||[]),use]:(editing.aplicacoes||[]).filter(u=>u!==use)})}/>{use}</label>)}</div>
+        </div>
+        <label className="span-2">Observações<textarea value={editing.observacoes||''} onChange={e=>setEditing({...editing,observacoes:e.target.value})}/></label>
+      </div>
+      <button type="submit" className="primary wide" disabled={saving||!editing.nome?.trim()||!editing.codigo?.trim()}><CheckCircle2 size={16}/>{saving?'Salvando…':'Salvar equipamento'}</button>
+    </form></div>}
+  </section>
+}
