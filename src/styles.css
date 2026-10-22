@@ -1811,3 +1811,40 @@ input,select,textarea,button{font-size:15px}
  .sgq-operational-shell .compact-checklist{grid-template-columns:1fr}
 }
 @media(max-width:620px){.sgq-operational-shell .topbar>.brand-mark{display:none}.equipment-summary{grid-template-columns:1fr 1fr}.equipment-event-form{grid-template-columns:1fr}.equipment-row{grid-template-columns:1fr}.equipment-actions{grid-column:auto}.sgq-operational-shell .page-title h1{font-size:26px}}
+
+
+/* SGQ refinement · states, motion, hierarchy */
+@keyframes sgq-enter{from{opacity:.55;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+@keyframes sgq-toast{0%{opacity:0;transform:translate(12px,-6px)}9%{opacity:1;transform:translate(0,0)}86%{opacity:1}100%{opacity:0;transform:translate(7px,-3px)}}
+.sgq-operational-shell>.workspace,.sgq-operational-shell .inspection-stage:not(.inspection-stage-hidden){animation:sgq-enter .22s ease-out both}
+.sgq-operational-shell :is(.primary,.secondary,.sgq-side-nav button,.inspection-stage-tab,.metric-button){transition:background-color .18s ease,color .18s ease,border-color .18s ease,box-shadow .18s ease,transform .16s ease}
+.sgq-operational-shell button:not(:disabled):active{transform:scale(.985)}
+.sgq-operational-shell .panel,.sgq-operational-shell .equipment-row,.sgq-operational-shell .process-card{border-color:#a8bece!important}
+.sgq-operational-shell .sku-card{border:1px solid #a9bdcc!important;box-shadow:0 2px 14px rgba(24,53,78,.055);border-radius:12px}
+.sgq-operational-shell .sku-card-head{border-bottom:1px solid #c6d6e1;padding-bottom:11px;margin-bottom:17px}
+.sgq-operational-shell .product-suggestions{position:absolute;z-index:45;left:0;right:0;max-height:280px;overflow-y:auto;background:white;border:1px solid #adc6d5;box-shadow:0 12px 26px #18455f23;border-radius:9px}
+.sgq-operational-shell .product-search-field{position:relative}
+.sgq-operational-shell .product-suggestions button:hover{background:#eaf4fc}
+.sgq-operational-shell>.alert.success,.sgq-operational-shell .equipment-page>.alert.success{
+  position:fixed;top:85px;right:24px;z-index:110;max-width:min(440px,calc(100vw - 34px));width:max-content;
+  padding:14px 18px;border-radius:10px;border:1px solid #83c9a9;background:#e5f6ed;box-shadow:0 9px 32px #0d3d2b28;
+  font-weight:700;font-size:14px;animation:sgq-toast 3.5s ease both
+}
+.sgq-operational-shell .inspection-it-choice{border-left:4px solid #337eae!important;background:#f8fbff}
+.sgq-operational-shell .inspection-it-choice .section-title{margin-bottom:15px}
+.equipment-section-tabs{display:flex;flex-wrap:wrap;gap:8px;border-bottom:1px solid #b7ccd8;padding:0 0 12px;margin:16px 0}
+.equipment-section-tabs button{border:1px solid #afc6d5;border-radius:8px;background:#f5f9fc;color:#3b647e;min-height:42px;padding:9px 14px;font-weight:700}
+.equipment-section-tabs button.active{background:#126f9e;color:#fff;border-color:#126f9e}
+.routine-checklist{padding:14px 16px;background:#f2f9fc;border:1px solid #b3cfde;border-radius:11px;margin:15px 0}
+.routine-checklist h3{margin:0 0 12px;font-size:16px}
+.routine-checklist label{display:flex;align-items:center;gap:10px;padding:8px 0;font-weight:600;font-size:14px}
+.routine-checklist input{width:19px;height:19px;accent-color:#167caa}
+.equipment-source{display:flex;flex-direction:column;gap:5px;border-radius:8px;background:#edf6fb;border:1px solid #b0cbdc;padding:12px}
+.equipment-source span{font-size:14px;font-weight:650}
+.equipment-source small{font-size:12px;color:#557487}
+@media(max-width:740px){.sgq-operational-shell>.alert.success,.sgq-operational-shell .equipment-page>.alert.success{top:80px;right:10px}}
+@media(prefers-reduced-motion:reduce){
+ .sgq-operational-shell>.workspace,.sgq-operational-shell .inspection-stage:not(.inspection-stage-hidden),
+ .sgq-operational-shell>.alert.success,.sgq-operational-shell .equipment-page>.alert.success{animation:none!important}
+ .sgq-operational-shell button{transition:none!important}
+}
