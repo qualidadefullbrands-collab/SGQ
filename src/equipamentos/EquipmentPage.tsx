@@ -70,7 +70,7 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
     if(!equipmentError && equipment) setEquipments(old=>old.map(x=>x.id===selected?equipment as Equipment:x))
     if(equipmentError)setFailure('Evento salvo; verifique o vencimento no cadastro: '+equipmentError.message)
     else setNotice('Evento e vencimento atualizados.')
-    setRoutineChecks([]);setEventDraft(newEvent());setSaving(false)
+    setRoutineChecks([]);setEventDraft(newEvent());setSaving(false);setSection('historico')
   }
   const field=(label:string,name:keyof Equipment,opts?:{type?:string,placeholder?:string})=>(
     <label key={name}>{label}<input type={opts?.type||'text'} placeholder={opts?.placeholder} value={String(editing?.[name]??'')} onChange={e=>setEditing(old=>({...old,[name]:e.target.value||null}))}/></label>
@@ -98,7 +98,7 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
     </div>
     {selected&&<div className="panel section-card equipment-history">
       <div className="section-title"><h2>Histórico do equipamento</h2><button className="secondary small" onClick={()=>setSelected('')} type="button">Fechar</button></div>
-      <div className="equipment-events">{events.length?events.map(e=><div key={e.id}><b>{e.tipo.replaceAll('_',' ')}</b><span>{fmt(e.data_evento)} · {e.resultado}{e.proximo_vencimento?' · Próximo: '+fmt(e.proximo_vencimento):''}</span>{e.documento_url&&<a href={e.documento_url} target="_blank" rel="noreferrer">Certificado / evidência</a>}</div>):<p>Nenhum evento cadastrado.</p>}</div>
+      {section==='historico' && <div className="equipment-events">{events.length?events.map(e=><div key={e.id}><b>{e.tipo.replaceAll('_',' ')}</b><span>{fmt(e.data_evento)} · {e.resultado}{e.proximo_vencimento?' · Próximo: '+fmt(e.proximo_vencimento):''}</span>{e.observacoes&&<small>{e.observacoes}</small>}{e.documento_url&&<a href={e.documento_url} target="_blank" rel="noreferrer">Certificado / evidência</a>}</div>):<p>Nenhum evento cadastrado.</p>}</div>}
       <div className="equipment-section-tabs">
         {([['historico','Histórico'],['rotina','Verificação de rotina'],['manutencao','Manutenção'],['calibracao','Calibração']] as const).map(([k,label])=><button className={section===k?'active':''} type="button" key={k} onClick={()=>{
           setSection(k)
