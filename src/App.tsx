@@ -1791,7 +1791,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <p>{popupMessage}</p><button className="primary" type="button" autoFocus onClick={()=>setPopupMessage('')}>Entendi</button>
         </div>
       </div>}
-      {message && <div className="alert success">{message}</div>
+      {message && <div className="alert success">{message}</div>}
 
       {tab==='painel' && (
         <section className="workspace">
