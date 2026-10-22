@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useState} from 'react'
-import {AlertTriangle,CalendarClock,CheckCircle2,ClipboardCheck,Plus,RefreshCw,Save,SlidersHorizontal,Wrench} from 'lucide-react'
+import {AlertTriangle,CheckCircle2,ClipboardCheck,Plus,RefreshCw,Save,SlidersHorizontal,Wrench} from 'lucide-react'
 import {authClient} from '../lib/supabase'
 import type {Equipment} from './equipmentData'
 
@@ -7,6 +7,7 @@ type EventRow={id:string;equipamento_id:string;tipo:string;data_evento:string;pr
 type EventDraft={tipo:string;data_evento:string;proximo_vencimento:string;resultado:string;prestador:string;documento_url:string;observacoes:string}
 const blank=():Partial<Equipment>=>({codigo:'',nome:'',tipo:'instrumento',fabricante:'',modelo:'',numero_serie:'',patrimonio:'',setor:'',localizacao:'',responsavel:'',unidade:'',faixa_medicao:'',resolucao:'',tolerancia:'',aplicacoes:[],requer_calibracao:false,ultima_calibracao:null,proxima_calibracao:null,certificado_calibracao:'',laboratorio_calibracao:'',periodicidade_calibracao_meses:null,proxima_verificacao:null,proxima_manutencao:null,estado:'ativo',observacoes:''})
 const newEvent=():EventDraft=>({tipo:'calibracao',data_evento:new Date().toISOString().slice(0,10),proximo_vencimento:'',resultado:'realizado',prestador:'',documento_url:'',observacoes:''})
+const fmt=(x:string|null|undefined)=>{if(!x)return '—';const y=x.slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(y)?y.slice(8,10)+'/'+y.slice(5,7)+'/'+y.slice(0,4):x}
 const uses=['comprimento','diametro','largura','altura','espessura','massa','volume','temperatura','forca','pressao','outros']
 export default function EquipmentPage({canManage,equipments,setEquipments,busy,refresh}:{
   canManage:boolean;
@@ -17,11 +18,14 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
 }) {
   const [editing,setEditing]=useState<Partial<Equipment>|null>(null)
   const [selected,setSelected]=useState<string>('')
+  const [section,setSection]=useState<'historico'|'rotina'|'manutencao'|'calibracao'>('historico')
+  const [routineChecks,setRoutineChecks]=useState<string[]>([])
   const [events,setEvents]=useState<EventRow[]>([])
   const [eventDraft,setEventDraft]=useState<EventDraft>(newEvent())
   const [saving,setSaving]=useState(false)
   const [search,setSearch]=useState('')
   const [notice,setNotice]=useState('')
+  useEffect(()=>{if(!notice)return;const timer=window.setTimeout(()=>setNotice(''),3500);return()=>window.clearTimeout(timer)},[notice])
   const [failure,setFailure]=useState('')
   const today=new Date().toISOString().slice(0,10)
   const thirty=new Date(Date.now()+30*86400000).toISOString().slice(0,10)
@@ -55,7 +59,7 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
       equipamento_id:selected,tipo:eventDraft.tipo,data_evento:eventDraft.data_evento,
       proximo_vencimento:eventDraft.proximo_vencimento||null,resultado:eventDraft.resultado,
       prestador:eventDraft.prestador||null,documento_url:eventDraft.documento_url||null,
-      observacoes:eventDraft.observacoes||null,responsavel_id:user?.id
+      observacoes:[eventDraft.observacoes||'',...(eventDraft.tipo==='verificacao'?['Checklist de rotina: '+(routineChecks.length?routineChecks.join('; '):'Não informado')]:[])].filter(Boolean).join(' | ')||null,responsavel_id:user?.id
     }).select('*').single()
     if(error){setFailure(error.message);setSaving(false);return}
     setEvents(old=>[data as EventRow,...old])
@@ -66,7 +70,7 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
     if(!equipmentError && equipment) setEquipments(old=>old.map(x=>x.id===selected?equipment as Equipment:x))
     if(equipmentError)setFailure('Evento salvo; verifique o vencimento no cadastro: '+equipmentError.message)
     else setNotice('Evento e vencimento atualizados.')
-    setEventDraft(newEvent());setSaving(false)
+    setRoutineChecks([]);setEventDraft(newEvent());setSaving(false)
   }
   const field=(label:string,name:keyof Equipment,opts?:{type?:string,placeholder?:string})=>(
     <label key={name}>{label}<input type={opts?.type||'text'} placeholder={opts?.placeholder} value={String(editing?.[name]??'')} onChange={e=>setEditing(old=>({...old,[name]:e.target.value||null}))}/></label>
@@ -87,17 +91,26 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
     {!equipments.length&&<div className="panel section-card"><h2>Cadastro preparado</h2><p>A base está vazia. Cadastre instrumentos manualmente ou importe os registros da planilha quando ela estiver acessível. Nenhum equipamento foi inventado.</p></div>}
     <div className="equipment-list">
       {shown.map(e=><article key={e.id} className={'equipment-row '+(selected===e.id?'selected':'')}>
-        <div><b>{e.codigo} · {e.nome}</b><span>{[e.tipo,e.fabricante,e.modelo,e.localizacao].filter(Boolean).join(' · ')||'Sem informações complementares'}</span></div>
-        <div><span className={'equipment-status '+(e.estado==='ativo'?'valid':'inactive')}>{e.estado.replaceAll('_',' ')}</span>{e.requer_calibracao&&<small>Calibração: {e.proxima_calibracao||'não informada'}</small>}</div>
+        <div><b>{e.codigo} · {e.nome}</b><span>{[String(e.dados_origem?.tipo_controle||'Controle de rotina'),e.localizacao,e.patrimonio].filter(Boolean).join(' · ')}</span></div>
+        <div><span className={'equipment-status '+(e.estado==='ativo'?'valid':'inactive')}>{e.estado.replaceAll('_',' ')}</span>{e.requer_calibracao&&<small>Próxima calibração: {fmt(e.proxima_calibracao)}</small>}</div>
         <div className="equipment-actions"><button className="secondary small" type="button" onClick={()=>setSelected(selected===e.id?'':e.id)}><ClipboardCheck size={15}/> Histórico</button>{canManage&&<button className="secondary small" type="button" onClick={()=>setEditing({...e})}><Wrench size={15}/> Editar</button>}</div>
       </article>)}
     </div>
     {selected&&<div className="panel section-card equipment-history">
       <div className="section-title"><h2>Histórico do equipamento</h2><button className="secondary small" onClick={()=>setSelected('')} type="button">Fechar</button></div>
-      <div className="equipment-events">{events.length?events.map(e=><div key={e.id}><b>{e.tipo.replaceAll('_',' ')}</b><span>{e.data_evento} · {e.resultado}{e.proximo_vencimento?' · Próximo: '+e.proximo_vencimento:''}</span>{e.documento_url&&<a href={e.documento_url} target="_blank" rel="noreferrer">Certificado / evidência</a>}</div>):<p>Nenhum evento cadastrado.</p>}</div>
-      {canManage&&<form onSubmit={saveEvent} className="equipment-event-form">
-        <h3>Registrar calibração, manutenção ou verificação</h3>
-        <label>Tipo<select value={eventDraft.tipo} onChange={e=>setEventDraft({...eventDraft,tipo:e.target.value})}><option value="calibracao">Calibração</option><option value="verificacao">Verificação de rotina</option><option value="manutencao_preventiva">Manutenção preventiva</option><option value="manutencao_corretiva">Manutenção corretiva</option></select></label>
+      <div className="equipment-events">{events.length?events.map(e=><div key={e.id}><b>{e.tipo.replaceAll('_',' ')}</b><span>{fmt(e.data_evento)} · {e.resultado}{e.proximo_vencimento?' · Próximo: '+fmt(e.proximo_vencimento):''}</span>{e.documento_url&&<a href={e.documento_url} target="_blank" rel="noreferrer">Certificado / evidência</a>}</div>):<p>Nenhum evento cadastrado.</p>}</div>
+      <div className="equipment-section-tabs">
+        {([['historico','Histórico'],['rotina','Verificação de rotina'],['manutencao','Manutenção'],['calibracao','Calibração']] as const).map(([k,label])=><button className={section===k?'active':''} type="button" key={k} onClick={()=>{
+          setSection(k)
+          if(k!=='historico')setEventDraft(old=>({...old,tipo:k==='rotina'?'verificacao':k==='calibracao'?'calibracao':'manutencao_preventiva'}))
+        }}>{label}</button>)}
+      </div>
+      {section==='rotina' && <div className="routine-checklist"><h3>Checklist de verificação de rotina</h3>
+        {['Identificação legível e íntegra','Condições físicas e conservação','Funcionamento verificado','Limpeza e armazenamento adequados'].map(label=><label key={label}><input type="checkbox" checked={routineChecks.includes(label)} onChange={e=>setRoutineChecks(old=>e.target.checked?[...old,label]:old.filter(v=>v!==label))}/>{label}</label>)}
+      </div>}
+      {canManage&&section!=='historico'&&<form onSubmit={saveEvent} className="equipment-event-form">
+        <h3>{section==='rotina'?'Registrar verificação de rotina':section==='calibracao'?'Registrar calibração':'Registrar manutenção'}</h3>
+        {section==='manutencao'&&<label>Tipo de manutenção<select value={eventDraft.tipo} onChange={e=>setEventDraft({...eventDraft,tipo:e.target.value})}><option value="manutencao_preventiva">Preventiva</option><option value="manutencao_corretiva">Corretiva</option></select></label>}
         <label>Data<input required type="date" value={eventDraft.data_evento} onChange={e=>setEventDraft({...eventDraft,data_evento:e.target.value})}/></label>
         <label>Próximo vencimento<input type="date" value={eventDraft.proximo_vencimento} onChange={e=>setEventDraft({...eventDraft,proximo_vencimento:e.target.value})}/></label>
         <label>Resultado<select value={eventDraft.resultado} onChange={e=>setEventDraft({...eventDraft,resultado:e.target.value})}><option value="realizado">Realizado</option><option value="aprovado">Aprovado</option><option value="reprovado">Reprovado</option><option value="pendente">Pendente</option></select></label>
@@ -112,7 +125,8 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
       <h2>{editing.id?'Editar equipamento':'Cadastrar equipamento'}</h2>
       <div className="form-grid">
         {field('Código','codigo')}{field('Nome do equipamento','nome')}
-        <label>Categoria<select value={editing.tipo||'instrumento'} onChange={e=>setEditing({...editing,tipo:e.target.value})}><option value="instrumento">Instrumento de medição</option><option value="dimensional">Instrumento dimensional</option><option value="teste">Equipamento de ensaio</option><option value="apoio">Equipamento de apoio (não dimensional)</option></select></label>
+        <label>Finalidade para uso nas inspeções<select value={editing.tipo||'instrumento'} onChange={e=>setEditing({...editing,tipo:e.target.value})}><option value="instrumento">Medição metrológica</option><option value="dimensional">Medição dimensional</option><option value="teste">Ensaio ou teste funcional</option><option value="apoio">Apoio ou conservação (não medir)</option></select></label>
+        {editing.dados_origem?.tipo_controle && <div className="span-2 equipment-source"><b>Controle previsto na L 017</b><span>{String(editing.dados_origem.tipo_controle)}</span><small>Criticidade {String(editing.dados_origem.criticidade||'—')} · classificação original preservada</small></div>}
         {field('Fabricante','fabricante')}{field('Modelo','modelo')}{field('Número de série','numero_serie')}{field('Patrimônio','patrimonio')}
         {field('Setor','setor')}{field('Localização','localizacao')}{field('Responsável','responsavel')}
         {field('Unidade','unidade')}{field('Faixa de medição','faixa_medicao')}{field('Resolução','resolucao')}{field('Tolerância','tolerancia')}
