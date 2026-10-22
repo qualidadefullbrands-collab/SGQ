@@ -1,6 +1,6 @@
 import {useEffect,useMemo,useState} from 'react'
 import {AlertTriangle,CalendarClock,CheckCircle2,ClipboardCheck,Plus,RefreshCw,Save,SlidersHorizontal,Wrench} from 'lucide-react'
-import {supabase} from '../lib/supabase'
+import {authClient} from '../lib/supabase'
 
 export type Equipment = {
   id:string; codigo:string; nome:string; tipo:string; fabricante:string|null; modelo:string|null;
@@ -31,7 +31,7 @@ export function useEquipmentList() {
   const [busy,setBusy]=useState(false)
   const refresh=async()=>{
     setBusy(true)
-    const {data,error}=await supabase.from('sgq_equipamentos').select('*').order('nome')
+    const {data,error}=await authClient.from('sgq_equipamentos').select('*').order('nome')
     if(!error && data) setEquipments(data as Equipment[])
     setBusy(false)
     return error
@@ -57,7 +57,7 @@ export default function EquipmentPage({canManage,onChanged}:{canManage:boolean;o
   useEffect(()=>{
     if(!selected){setEvents([]);return}
     let valid=true
-    supabase.from('sgq_equipamento_eventos').select('*').eq('equipamento_id',selected).order('data_evento',{ascending:false}).then(({data})=>{if(valid)setEvents((data||[]) as EventRow[])})
+    authClient.from('sgq_equipamento_eventos').select('*').eq('equipamento_id',selected).order('data_evento',{ascending:false}).then(({data})=>{if(valid)setEvents((data||[]) as EventRow[])})
     return()=>{valid=false}
   },[selected])
   async function saveEquipment(e:React.FormEvent){
@@ -67,8 +67,8 @@ export default function EquipmentPage({canManage,onChanged}:{canManage:boolean;o
     const {id:equipmentId,criado_em:ignored,atualizado_em:ignored2,...payload}=value as Equipment & {criado_em?:string;atualizado_em?:string}
     void ignored;void ignored2
     const {data,error}=equipmentId
-      ?await supabase.from('sgq_equipamentos').update({...payload,atualizado_em:new Date().toISOString()}).eq('id',equipmentId).select('*').single()
-      :await supabase.from('sgq_equipamentos').insert(payload).select('*').single()
+      ?await authClient.from('sgq_equipamentos').update({...payload,atualizado_em:new Date().toISOString()}).eq('id',equipmentId).select('*').single()
+      :await authClient.from('sgq_equipamentos').insert(payload).select('*').single()
     setSaving(false)
     if(error){setFailure(error.message);return}
     setEquipments(old=>[...(old.filter(x=>x.id!==data.id)),data as Equipment].sort((a,b)=>a.nome.localeCompare(b.nome)))
@@ -77,8 +77,8 @@ export default function EquipmentPage({canManage,onChanged}:{canManage:boolean;o
   async function saveEvent(e:React.FormEvent){
     e.preventDefault();if(!selected)return
     setSaving(true);setFailure('');setNotice('')
-    const {data:{user}}=await supabase.auth.getUser()
-    const {data,error}=await supabase.from('sgq_equipamento_eventos').insert({
+    const {data:{user}}=await authClient.auth.getUser()
+    const {data,error}=await authClient.from('sgq_equipamento_eventos').insert({
       equipamento_id:selected,tipo:eventDraft.tipo,data_evento:eventDraft.data_evento,
       proximo_vencimento:eventDraft.proximo_vencimento||null,resultado:eventDraft.resultado,
       prestador:eventDraft.prestador||null,documento_url:eventDraft.documento_url||null,
@@ -89,7 +89,7 @@ export default function EquipmentPage({canManage,onChanged}:{canManage:boolean;o
     const field=eventDraft.tipo==='calibracao'?'proxima_calibracao':eventDraft.tipo==='verificacao'?'proxima_verificacao':'proxima_manutencao'
     const last=eventDraft.tipo==='calibracao'?{ultima_calibracao:eventDraft.data_evento}:{}
     const patch={...last,[field]:eventDraft.proximo_vencimento||null,atualizado_em:new Date().toISOString()}
-    const {data:equipment,error:equipmentError}=await supabase.from('sgq_equipamentos').update(patch).eq('id',selected).select('*').single()
+    const {data:equipment,error:equipmentError}=await authClient.from('sgq_equipamentos').update(patch).eq('id',selected).select('*').single()
     if(!equipmentError && equipment) setEquipments(old=>old.map(x=>x.id===selected?equipment as Equipment:x))
     if(equipmentError)setFailure('Evento salvo; verifique o vencimento no cadastro: '+equipmentError.message)
     else setNotice('Evento e vencimento atualizados.')
