@@ -1737,8 +1737,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <div className="section-title"><h2>Inspeções não iniciadas</h2><button className="secondary" onClick={()=>setTab('inspecoes')}>Ver todas</button></div>
             {inspections.filter(i=>i.status==='aberta').slice(0,8).map(i=>(
               <div className="queue-row" key={i.id}>
-                <div><strong>{i.numero} · {formatFst(i.grupos_inspecao?.processos?.codigo)}</strong><span>{i.grupos_inspecao?.nome || 'Inspeção em preenchimento'} · Rascunho salvo</span></div>
-                <button className="secondary small" onClick={()=>openInspection(i.id)}><Edit3 size={15}/> Abrir rascunho</button>
+                <div><strong>{inspectionDisplay(i)}</strong><span>{i.grupos_inspecao?.nome || 'Inspeção em preenchimento'} · Não iniciada</span></div>
+                <button className="secondary small" onClick={()=>openInspection(i.id)}><Edit3 size={15}/> Abrir inspeção</button>
               </div>
             ))}
             {!inspections.some(i=>i.status==='aberta') && <div className="empty">Nenhuma inspeção não iniciada.</div>}
@@ -1790,8 +1790,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     {related.map((i)=>(
                       <div className="inspection-row" key={i.id}>
                         <div>
-                          <strong>{i.numero}</strong>
-                          <span>{i.grupos_inspecao?.nome} · {statusLabel(i.status)} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0}</span>
+                          <strong>{inspectionDisplay(i)}</strong>
+                          <span>{statusLabel(i.status)} · {i.grupos_inspecao?.nome} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0}</span>
                         </div>
                         <div className="row-actions">
                           {i.resultado && i.resultado!=='pendente' && <span className={'result-badge '+i.resultado}>{statusLabel(i.resultado)}</span>}
@@ -1815,7 +1815,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <div className="page-title">
             <div><span className="eyebrow">INSPEÇÃO</span><h1>Nova inspeção</h1></div>
             <div className="row-actions">
-              <button className="secondary test-data-button" type="button" onClick={fillTestInspectionData}>Preencher dados fictícios</button>
+              
               {processes[0] && <button className="secondary" type="button" onClick={()=>reuseProcess(processes[0])}><Copy size={16}/> Reutilizar últimos dados gerais</button>}
               {inspection.processoId && <button className="secondary" type="button" onClick={resetNewInspection}>Novo processo</button>}
             </div>
@@ -1829,7 +1829,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
               <div className="form-grid">
                 <label>Processo FST
-  <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>setInspection({...inspection,codigo:e.target.value})} placeholder="Opcional durante testes"/></div>
+  <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>setInspection({...inspection,codigo:e.target.value})} placeholder="Número FST"/></div>
 </label>
                 <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
                 <label>Nota fiscal<input value={inspection.notaFiscal} onChange={(e)=>setInspection({...inspection,notaFiscal:e.target.value})}/></label>
@@ -1939,7 +1939,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </section>
 
             <div className="actions inspection-create-actions">
-              <button className="secondary" type="submit" value="salvar"><FileText size={17}/> Salvar sem iniciar</button>
+              <button className="secondary" type="submit" value="salvar"><FileText size={17}/> Salvar inspeção</button>
               <button className="primary" type="submit" value="iniciar"><Play size={17}/> Iniciar inspeção</button>
             </div>
           </form>
@@ -1950,8 +1950,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <section className="workspace execution">
           <div className="page-title">
             <div>
-              <span className="eyebrow">{formatFst(detail.grupos_inspecao?.processos?.codigo)} · {detail.numero}</span>
-              <h1>{detail.grupos_inspecao?.nome}</h1>
+              <span className="eyebrow">{formatFst(detail.grupos_inspecao?.processos?.codigo)}</span>
+              <h1>{detail.grupos_inspecao?.processos?.cliente || detail.grupos_inspecao?.nome || 'Inspeção'}</h1>
             </div>
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
@@ -1982,7 +1982,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           )}
 
           <section id="sec-dados" className={'panel section-card internal-note-panel inspection-stage'+(activeStage==='dados'?'':' inspection-stage-hidden')}>
-            <div className="section-title"><div><h2>Dados iniciais da inspeção</h2><span className="section-note">Informações cadastradas, disponíveis para revisão.</span></div>
+            <div className="section-title"><div><h2>Dados iniciais da inspeção</h2></div>
               {canWrite && detail.status!=='concluida' && <button className="secondary small" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados e IT</button>}
             </div>
             <div className="inspection-data-summary">
@@ -2044,7 +2044,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
 
           <section id="sec-verificacoes" className={'panel section-card inspection-stage'+(activeStage==='verificacoes' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
-            <div className="section-title"><div><h2>Verificações</h2><span className="section-note">C / NC / NA · informe a quantidade quando houver NC.</span></div></div>
+            <div className="section-title"><div><h2>Verificações</h2></div></div>
             <div className="checklist compact-checklist">
               {(detail.checklist ?? []).map((item:any)=>{
                 const r=detail.checklistResults?.find((x:any)=>x.checklist_id===item.id)
@@ -2225,7 +2225,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               )
             })}
             {!detail.tests?.length && <div className="muted">Sem teste especial estruturado para esta IT.</div>}
-            {!!detail.tests?.length && <small className="field-hint">Não é necessário concluir manualmente; a seção fica concluída quando todos os testes tiverem resultado.</small>}
+            {!!detail.tests?.length && }
           </section>
 
           <section id="sec-fotos" className={'panel section-card inspection-stage'+(activeStage==='fotos' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
