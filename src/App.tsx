@@ -862,7 +862,7 @@ export default function App() {
     if (saved.error) return setError(saved.error.message)
     setEditingProcess(null)
     setMessage('Processo atualizado.')
-    await loadApp()
+    void refreshLists()
   }
 
   async function deleteProcess(p: ProcessRow) {
@@ -979,7 +979,7 @@ export default function App() {
     setEditingInspectionData(null)
     const p=saved.data?.plano
     setMessage(`Dados atualizados. Plano recalculado: ${p?.codigo ?? '—'} · ${p?.amostra ?? 0} un. · Ac/Re ${p?.ac ?? '—'}/${p?.re ?? '—'}.`)
-    await Promise.all([loadApp(),openInspection(selectedInspectionId)])
+    await Promise.all([refreshLists(),openInspection(selectedInspectionId)])
   }
   async function createInspection(e: React.FormEvent, iniciar:boolean) {
     e.preventDefault()
@@ -1387,7 +1387,7 @@ export default function App() {
     setMessage(pendencias.length
       ? 'Inspeção finalizada com pendências registradas.'
       : 'Inspeção finalizada. Agora defina a retenção das amostras.')
-    await Promise.all([loadApp(),openInspection(selectedInspectionId)])
+    await Promise.all([refreshLists(),openInspection(selectedInspectionId)])
   }
 
   async function saveRetention() {
