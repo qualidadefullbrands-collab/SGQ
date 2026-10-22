@@ -819,6 +819,40 @@ export default function App() {
     setMessage('Dados gerais reutilizados. Informe o novo código/produto desta inspeção.')
   }
 
+  async function editInspectionFull(id:string){
+    setError('')
+    const res=await apiGet<any>(`/api/inspecoes/${id}/detalhe`)
+    if(res.error||!res.data?.inspecao){setPopupMessage(res.error?.message||'Falha ao abrir inspeção.');return}
+    const data={...res.data.inspecao,items:res.data.items??[]}
+    const process=data.grupos_inspecao?.processos??{}
+    const items=(data.items??[]).map((link:any)=>{
+      const x=link.processo_itens
+      return applyBoxGroupsToSku({...emptySku(),processoItemId:x.id,sku:x.produtos?.sku??'',
+        nome:x.produtos?.nome??'',lote:x.lote??'',material:x.material??'',capacidade:x.capacidade??'',
+        quantidade:String(x.quantidade??''),quantidadePorCaixa:String(x.quantidade_por_caixa??''),
+        caixasRecebidas:String(x.caixas_recebidas??''),caixasInspecionadas:String(x.caixas_inspecionadas??''),
+        unidadesPorConjunto:String(link.unidades_por_conjunto??1)},x.distribuicao_caixas)
+    })
+    setEditingInspectionId(data.id);setEditingProcessId(null)
+    setInspection({processoId:data.grupos_inspecao?.processo_id??'',codigo:fstDigits(process.codigo),
+      cliente:process.cliente??'',notaFiscal:process.nota_fiscal??'',origem:process.origem??'',
+      transporte:process.transporte??'',chegadaCd:process.chegada_cd??'',
+      dataInspecao:String(data.data_inspecao??'').slice(0,10),
+      itVersionId:data.it_versao_id??'',inspectionLevel:data.nivel_inspecao??'I',
+      observacaoInterna:data.observacao_interna??''})
+    setSkuRows(items.length?items:[emptySku()]);setActiveProductIndex(0);setTab('nova');setMessage('')
+  }
+  function editProcessFull(p:ProcessRow){
+    const candidate=inspections.find(x=>x.grupos_inspecao?.processo_id===p.id&&x.status!=='concluida')
+    if(candidate){void editInspectionFull(candidate.id);return}
+    setEditingInspectionId(null);setEditingProcessId(p.id)
+    setInspection({processoId:p.id,codigo:fstDigits(p.codigo),cliente:p.cliente??'',
+      notaFiscal:p.nota_fiscal??'',origem:p.origem??'',transporte:p.transporte??'',
+      chegadaCd:p.chegada_cd??'',dataInspecao:new Date().toISOString().slice(0,10),
+      itVersionId:'',inspectionLevel:'I',observacaoInterna:''})
+    setSkuRows([emptySku()]);setTab('nova');setMessage('')
+  }
+
   function queueProductSuggestions(index:number, value:string) {
     const old=productSearchTimers.current[index]
     if (old) window.clearTimeout(old)
