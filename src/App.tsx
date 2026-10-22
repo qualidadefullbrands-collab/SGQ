@@ -1948,7 +1948,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 </label>
                 <label className="span-2">Observação interna
                   <textarea rows={3} value={inspection.observacaoInterna} onChange={(e)=>setInspection({...inspection,observacaoInterna:e.target.value})} placeholder="Ex.: 60 un retiradas no laboratório para retenção; caixa fracionada com 16 un."/>
-                  <small className="field-hint">Uso interno da Qualidade, não disponível no laudo</small>
+                  
                 </label>
               </div>
             </section>
@@ -2099,7 +2099,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               placeholder="Ex.: 60 un retiradas no laboratório para retenção."
               disabled={!canWrite}
             />
-            <small className="field-hint">Uso interno da Qualidade, não disponível no laudo</small>
+            
             {canWrite && <div className="actions"><button className="secondary" type="button" onClick={()=>void saveInternalObservation()}>Salvar</button></div>}
           </section>
 
@@ -2324,7 +2324,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
           <section id="sec-fotos" className={'panel section-card inspection-stage'+(activeStage==='fotos' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
             <div className="section-title">
-              <div><h2>Fotos da inspeção</h2><span className="section-note">Opcional nesta fase de testes. As fotos continuam concentradas nesta etapa da inspeção.</span></div>
+              <div><h2>Fotos da inspeção</h2><span className="section-note">Fotografias e identificação visual do produto.</span></div>
               <span className="pill">{detail.photos?.length ?? 0} enviada(s)</span>
             </div>
 
@@ -2624,6 +2624,16 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     <div><small>Registro</small><strong>{selectedSample.codigo}</strong></div>
                   </div>
                   {selectedSample.observacao && <div className="stock-detail-note"><b>Observação</b><span>{selectedSample.observacao}</span></div>}
+                  <div className="stock-inspection-status">
+                    <b>Inspeção de origem</b>
+                    {selectedSample.inspecao_id ? (()=>{const related=inspections.find(i=>i.id===selectedSample.inspecao_id);return related
+                      ? <div><span className={'result-badge '+(related.resultado||'')}>{related.status==='concluida' ? statusLabel(related.resultado) : statusLabel(related.status)}</span>
+                        <strong>{inspectionDisplay(related)}</strong>
+                        <button className="secondary small" type="button" onClick={()=>{setSelectedSample(null);void openInspection(related.id)}}><ClipboardCheck size={15}/> Ver inspeção e relatório</button>
+                      </div>
+                      : <p>Existe um vínculo com inspeção, mas o registro não está disponível nesta listagem.</p>})()
+                    : <p>Registro histórico sem inspeção vinculada. A vinculação será feita quando os registros de origem estiverem disponíveis.</p>}
+                  </div>
                 </div>
 
                 {(selectedSamplePhotoUrl || selectedSampleReport || selectedSample.inspecao_id) && (
@@ -2726,7 +2736,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <label>Data da inspeção<input type="date" value={editingInspectionData.dataInspecao ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,dataInspecao:e.target.value})}/></label>
               <label>Nível de inspeção<select value={editingInspectionData.inspectionLevel ?? 'I'} onChange={(e)=>setEditingInspectionData({...editingInspectionData,inspectionLevel:e.target.value})}><option value="I">Nível I</option><option value="II">Nível II</option><option value="III">Nível III</option><option value="S1">S1</option><option value="S2">S2</option><option value="S3">S3</option><option value="S4">S4</option></select></label>
               <label>IT aplicável<select value={editingInspectionData.itVersionId ?? ''} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}><option value="">Selecionar IT</option>{itVersions.map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}</select></label>
-                  <label className="span-2">Observação interna<textarea rows={3} value={editingInspectionData.observacaoInterna ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,observacaoInterna:e.target.value})}/><small className="field-hint">Uso interno da Qualidade, não disponível no laudo</small></label>
+                  <label className="span-2">Observação interna<textarea rows={3} value={editingInspectionData.observacaoInterna ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,observacaoInterna:e.target.value})}/></label>
             </div>
             <div className="edit-items-list">
               {(editingInspectionData.itens ?? []).map((row:any,i:number)=>{ const d=boxDistributionTotals(row); return <article className="sku-card compact" key={row.processoItemId || i}>
