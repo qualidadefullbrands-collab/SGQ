@@ -1,46 +1,20 @@
 import {useEffect,useMemo,useState} from 'react'
 import {AlertTriangle,CalendarClock,CheckCircle2,ClipboardCheck,Plus,RefreshCw,Save,SlidersHorizontal,Wrench} from 'lucide-react'
 import {authClient} from '../lib/supabase'
+import type {Equipment} from './equipmentData'
 
-export type Equipment = {
-  id:string; codigo:string; nome:string; tipo:string; fabricante:string|null; modelo:string|null;
-  numero_serie:string|null; patrimonio:string|null; setor:string|null; localizacao:string|null;
-  responsavel:string|null; unidade:string|null; faixa_medicao:string|null; resolucao:string|null;
-  tolerancia:string|null; aplicacoes:string[]; requer_calibracao:boolean; ultima_calibracao:string|null;
-  proxima_calibracao:string|null; certificado_calibracao:string|null; laboratorio_calibracao:string|null;
-  periodicidade_calibracao_meses:number|null; proxima_verificacao:string|null; proxima_manutencao:string|null;
-  estado:'ativo'|'em_manutencao'|'interditado'|'inativo'; observacoes:string|null; dados_origem:Record<string,unknown>
-}
 type EventRow={id:string;equipamento_id:string;tipo:string;data_evento:string;proximo_vencimento:string|null;resultado:string;prestador:string|null;documento_url:string|null;observacoes:string|null}
 type EventDraft={tipo:string;data_evento:string;proximo_vencimento:string;resultado:string;prestador:string;documento_url:string;observacoes:string}
 const blank=():Partial<Equipment>=>({codigo:'',nome:'',tipo:'instrumento',fabricante:'',modelo:'',numero_serie:'',patrimonio:'',setor:'',localizacao:'',responsavel:'',unidade:'',faixa_medicao:'',resolucao:'',tolerancia:'',aplicacoes:[],requer_calibracao:false,ultima_calibracao:null,proxima_calibracao:null,certificado_calibracao:'',laboratorio_calibracao:'',periodicidade_calibracao_meses:null,proxima_verificacao:null,proxima_manutencao:null,estado:'ativo',observacoes:''})
 const newEvent=():EventDraft=>({tipo:'calibracao',data_evento:new Date().toISOString().slice(0,10),proximo_vencimento:'',resultado:'realizado',prestador:'',documento_url:'',observacoes:''})
 const uses=['comprimento','diametro','largura','altura','espessura','massa','volume','temperatura','forca','pressao','outros']
-export function equipmentFit(e:Equipment,paramName:string,unit?:string|null) {
-  if(e.estado!=='ativo') return false
-  if(e.requer_calibracao && (!e.proxima_calibracao || e.proxima_calibracao<new Date().toISOString().slice(0,10))) return false
-  if(e.tipo!=='instrumento' && e.tipo!=='dimensional') return false
-  const name=(paramName||'').toLowerCase()
-  const u=(unit||'').toLowerCase()
-  const kind=/(altura|height)/.test(name)?'altura':/(diametr|diâmetr)/.test(name)?'diametro':/(largura|width)/.test(name)?'largura':/(espess|thickness)/.test(name)?'espessura':/(compriment|length)/.test(name)?'comprimento':/(peso|massa|weight)/.test(name)||['g','kg','mg'].includes(u)?'massa':/(volum|capacity|capacidade)/.test(name)||['ml','l'].includes(u)?'volume':/(temperat|°c)/.test(name)?'temperatura':/(força|force|resistênc)/.test(name)||u==='n'?'forca':/(press)/.test(name)?'pressao':'outros'
-  const lengthFamily=['comprimento','diametro','largura','altura','espessura']
-  return e.aplicacoes.includes(kind) || (lengthFamily.includes(kind) && e.aplicacoes.includes('comprimento'))
-}
-export function useEquipmentList() {
-  const [equipments,setEquipments]=useState<Equipment[]>([])
-  const [busy,setBusy]=useState(false)
-  const refresh=async()=>{
-    setBusy(true)
-    const {data,error}=await authClient.from('sgq_equipamentos').select('*').order('nome')
-    if(!error && data) setEquipments(data as Equipment[])
-    setBusy(false)
-    return error
-  }
-  useEffect(()=>{void refresh()},[])
-  return {equipments,setEquipments,busy,refresh}
-}
-export default function EquipmentPage({canManage,onChanged}:{canManage:boolean;onChanged?:(items:Equipment[])=>void}) {
-  const {equipments,setEquipments,busy,refresh}=useEquipmentList()
+export default function EquipmentPage({canManage,equipments,setEquipments,busy,refresh}:{
+  canManage:boolean;
+  equipments:Equipment[];
+  setEquipments:React.Dispatch<React.SetStateAction<Equipment[]>>;
+  busy:boolean;
+  refresh:()=>Promise<any>;
+}) {
   const [editing,setEditing]=useState<Partial<Equipment>|null>(null)
   const [selected,setSelected]=useState<string>('')
   const [events,setEvents]=useState<EventRow[]>([])
@@ -53,7 +27,6 @@ export default function EquipmentPage({canManage,onChanged}:{canManage:boolean;o
   const thirty=new Date(Date.now()+30*86400000).toISOString().slice(0,10)
   const alerts=useMemo(()=>equipments.filter(e=>e.estado==='ativo'&&e.requer_calibracao&&(!e.proxima_calibracao||e.proxima_calibracao<=thirty)),[equipments,thirty])
   const shown=useMemo(()=>equipments.filter(e=>[e.nome,e.codigo,e.fabricante,e.localizacao,e.numero_serie].some(s=>String(s||'').toLowerCase().includes(search.toLowerCase()))),[equipments,search])
-  useEffect(()=>{onChanged?.(equipments)},[equipments,onChanged])
   useEffect(()=>{
     if(!selected){setEvents([]);return}
     let valid=true
