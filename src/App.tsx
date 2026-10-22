@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, X } from 'lucide-react'
-import QRCode from 'qrcode'
 import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/supabase'
-import AuditoriasPage from './auditorias/AuditoriasPage'
-import EquipmentPage, {useEquipmentList,equipmentFit} from './equipamentos/EquipmentPage'
+import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
+
+const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
+const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
 type ItVersion = {
@@ -403,7 +404,7 @@ export default function App() {
   const [stockLoading,setStockLoading]=useState(false)
   const [photoUploadBusy,setPhotoUploadBusy]=useState(false)
   const loadSequence=useRef(0)
-  const {equipments,setEquipments,refresh:refreshEquipments}=useEquipmentList()
+  const {equipments,setEquipments,busy:equipmentBusy,refresh:refreshEquipments}=useEquipmentList()
   const [editingInspectionData, setEditingInspectionData] = useState<any>(null)
   const [retentionSuggestion, setRetentionSuggestion] = useState<{quantidade:number|null;fonte:string|null}>({quantidade:null,fonte:null})
 
@@ -550,7 +551,7 @@ export default function App() {
       return
     }
 
-    QRCode.toDataURL(sampleUrl(selectedSample), { margin: 1, width: 220 }).then((url)=>{
+    import('qrcode').then(({default:QRCode})=>QRCode.toDataURL(sampleUrl(selectedSample), { margin: 1, width: 220 })).then((url)=>{
       if (active) setQrDataUrl(url)
     })
 
@@ -1811,7 +1812,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <button title="Sair" onClick={()=>supabase.auth.signOut()}><LogOut size={18}/></button>
           </div>
         </header>
-        <AuditoriasPage profileName={profile.nome}/>
+        <Suspense fallback={<div className="center-screen">Carregando auditorias…</div>}><AuditoriasPage profileName={profile.nome}/></Suspense>
       </main>
     )
   }
@@ -2503,7 +2504,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
 
-      {tab==='equipamentos' && <EquipmentPage canManage={!!canManageIts} onChanged={setEquipments}/>}
+      {tab==='equipamentos' && <Suspense fallback={<div className="center-screen">Carregando equipamentos…</div>}>
+        <EquipmentPage canManage={!!canManageIts} equipments={equipments}
+          setEquipments={setEquipments} busy={equipmentBusy} refresh={refreshEquipments}/>
+      </Suspense>}
 
       {tab==='its' && (
         <section className="workspace">
