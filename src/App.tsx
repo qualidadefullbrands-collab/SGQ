@@ -338,7 +338,6 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [environment, setEnvironment] = useState<'full' | 'contlog' | null>(null)
   const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos'>('painel')
   const [dashboardView,setDashboardView]=useState<'processos'|'inspecoes'|'estoque'|'concluidas'>('inspecoes')
   const [popupMessage,setPopupMessage]=useState('')
@@ -527,7 +526,6 @@ export default function App() {
   useEffect(() => {
     if (!userId) {
       setProfile(null)
-      setEnvironment(null)
       return
     }
     void loadApp().then(()=>{
@@ -1900,7 +1898,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         ) : (
           <form className="login-card" onSubmit={forgotPassword ? requestPasswordReset : signIn}>
             <div className="brand-mark"><ShieldCheck size={28}/><span>SGQ</span></div>
-            <h1>{forgotPassword ? 'Recuperar senha' : 'Qualidade Full Brands'}</h1>
+            <h1>{forgotPassword ? 'Recuperar senha' : 'SGQ · Qualidade'}</h1>
             <label>E-mail<input type="email" autoComplete="email" value={login.email} onChange={(e)=>setLogin({...login,email:e.target.value})} required/></label>
             {!forgotPassword && <label>Senha<input type="password" autoComplete="current-password" value={login.password} onChange={(e)=>setLogin({...login,password:e.target.value})} required/></label>}
             {forgotPassword && <p>Informe o e-mail cadastrado para receber um link de redefinição de senha.</p>}
@@ -1918,65 +1916,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
   if (!profile) return <div className="center-screen">{error || 'Carregando perfil…'}</div>
 
-  if (!environment) {
-    return (
-      <main className="environment-shell">
-        <section className="environment-picker">
-          <div className="environment-heading">
-            <div className="brand-mark"><ShieldCheck size={26}/><span>SGQ</span></div>
-            <span className="eyebrow">SELECIONE O AMBIENTE</span>
-            <h1>Onde você vai trabalhar?</h1>
-            <p>O mesmo acesso da Qualidade atende os dois ambientes. Você pode trocar a qualquer momento.</p>
-          </div>
-
-          <div className="environment-grid">
-            <button className="environment-card full" onClick={()=>{setTab('painel');setEnvironment('full')}}>
-              <div className="environment-card-icon"><PackageSearch size={30}/></div>
-              <div>
-                <span className="environment-kicker">FULL</span>
-                <h2>Full</h2>
-                <p>Inspeções de recebimento, ITs, laudos e estoque de amostras.</p>
-              </div>
-              <ChevronRight size={24}/>
-            </button>
-
-            <button className="environment-card contlog" onClick={()=>setEnvironment('contlog')}>
-              <div className="environment-card-icon"><ClipboardCheck size={30}/></div>
-              <div>
-                <span className="environment-kicker">CONTLOG</span>
-                <h2>Contlog</h2>
-                <p>Auditorias de campo e preenchimento dos RQs oficiais.</p>
-              </div>
-              <ChevronRight size={24}/>
-            </button>
-          </div>
-
-          <div className="environment-user">
-            <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
-            <button type="button" onClick={()=>supabase.auth.signOut()}><LogOut size={16}/> Sair</button>
-          </div>
-        </section>
-      </main>
-    )
-  }
-
-  if (environment==='contlog') {
-    return (
-      <main className="app-shell environment-app contlog-environment">
-        <header className="topbar environment-topbar">
-          <div className="brand-mark"><ClipboardCheck size={24}/><span>SGQ · CONTLOG</span></div>
-          <div className="environment-badge">Auditorias</div>
-          <div className="userbox">
-            <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
-            <button type="button" onClick={()=>setEnvironment(null)}>Trocar ambiente</button>
-            <button title="Sair" onClick={()=>supabase.auth.signOut()}><LogOut size={18}/></button>
-          </div>
-        </header>
-        <Suspense fallback={<div className="center-screen">Carregando auditorias…</div>}><AuditoriasPage profileName={profile.nome}/></Suspense>
-      </main>
-    )
-  }
-
   const checklistDone = detail ? (detail.checklist?.length ?? 0) === 0 || (detail.checklistResults?.length ?? 0) >= detail.checklist.length : false
   const dimsDone = detail ? (detail.params?.length ?? 0) === 0 || detail.dimensionais_finalizados : false
   const testsDone = detail ? (detail.tests?.length ?? 0) === 0 || !!detail.testes_finalizados : false
@@ -1985,16 +1924,17 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   return (
     <main className="app-shell sgq-operational-shell">
       <aside className="sgq-side-nav">
-        <div className="sgq-side-brand"><ShieldCheck size={23}/><div><b>SGQ</b><small>FullBrands · Qualidade</small></div></div>
+        <div className="sgq-side-brand"><ShieldCheck size={23}/><div><b>SGQ</b><small>Qualidade · Operações</small></div></div>
         <div className="sgq-side-caption">OPERAÇÃO</div>
         <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={18}/> Painel</button>
         <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>setTab('inspecoes')}><ClipboardCheck size={18}/> Inspeções</button>
         <button className={tab==='nova'?'selected':''} onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
         <button className={tab==='estoque'?'selected':''} onClick={()=>setTab('estoque')}><Warehouse size={18}/> Estoque</button>
+        <button className={tab==='auditorias'?'selected':''} onClick={()=>{setTab('auditorias');setError('')}}><ClipboardCheck size={18}/> Inspeções Armazém</button>
         <div className="sgq-side-caption">QUALIDADE</div>
         <button className={tab==='its'?'selected':''} onClick={()=>setTab('its')}><FileText size={18}/> Instruções técnicas</button>
         <button className={tab==='equipamentos'?'selected':''} onClick={()=>{setTab('equipamentos');void refreshEquipments()}}><Wrench size={18}/> Equipamentos</button>
-        <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button onClick={()=>setEnvironment(null)}>Trocar ambiente</button></div>
+        <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button type="button" onClick={()=>void supabase.auth.signOut()}><LogOut size={14}/> Sair</button></div>
       </aside>
       <header className="topbar">
         <div className="brand-mark"><PackageSearch size={24}/><span>SGQ</span></div>
@@ -2004,10 +1944,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <button className={tab==='nova'?'active':''} onClick={()=>setTab('nova')}>Nova inspeção</button>
           <button className={tab==='its'?'active':''} onClick={()=>setTab('its')}>ITs</button>
           <button className={tab==='estoque'?'active':''} onClick={()=>setTab('estoque')}>Estoque</button>
+          <button className={tab==='auditorias'?'active':''} onClick={()=>setTab('auditorias')}>Inspeções Armazém</button>
         </nav>
         <div className="userbox">
           <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
-          <button type="button" onClick={()=>setEnvironment(null)}>Trocar ambiente</button>
           <button title="Sair" onClick={()=>supabase.auth.signOut()}><LogOut size={18}/></button>
         </div>
       </header>
@@ -2020,6 +1960,14 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </div>
       </div>}
       {message && <div className="alert success">{message}</div>}
+
+      {tab==='auditorias' && (
+        <section className="workspace audit-workspace" aria-label="Inspeções Armazém">
+          <Suspense fallback={<div className="audit-center">Carregando inspeções do armazém…</div>}>
+            <AuditoriasPage profileName={profile.nome}/>
+          </Suspense>
+        </section>
+      )}
 
       {tab==='painel' && (
         <section className="workspace">
