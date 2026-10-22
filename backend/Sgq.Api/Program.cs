@@ -1720,20 +1720,11 @@ app.MapPut("/api/inspecoes/{id}/testes/{testId}", async (string id,string testId
             new {inspecao_id=id,teste_id=testId,resultado=input.Resultado,registrado_por=userId,registrado_em=DateTimeOffset.UtcNow},
             "resolution=merge-duplicates,return=minimal");
 
-        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",$"select=it_versao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
-        var (ins,found)=FirstRow(insRows);
-        var complete=false;
-        if(found)
-        {
-            var itId=ins!.Value.GetProperty("it_versao_id").GetString()!;
-            var tests=await RestAsync(client,token,HttpMethod.Get,"it_testes_especiais",$"select=id&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true");
-            var results=await RestAsync(client,token,HttpMethod.Get,"inspecao_testes_resultados",$"select=teste_id&inspecao_id=eq.{Uri.EscapeDataString(id)}");
-            var total=tests is {ValueKind:JsonValueKind.Array}?tests.Value.GetArrayLength():0;
-            var done=results is {ValueKind:JsonValueKind.Array}?results.Value.GetArrayLength():0;
-            complete=total==0 || done>=total;
-            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",new {testes_finalizados=complete},"return=minimal");
-        }
-        return Results.Ok(new {data=new {ok=true,finalizados=complete},error=(object?)null});
+        // Registrar o resultado não conclui automaticamente a etapa; o inspetor decide.
+        // Se uma medição for alterada depois da conclusão, exige nova confirmação.
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+            new {testes_finalizados=false},"return=minimal");
+        return Results.Ok(new {data=new {ok=true,finalizados=false},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao salvar teste.",e.Message),statusCode:500);}
