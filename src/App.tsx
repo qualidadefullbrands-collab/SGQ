@@ -50,6 +50,7 @@ type InspectionRow = {
   nivel_inspecao: string | null
   codigo_amostragem: string | null
   criado_em: string
+  parametros_amostragem?: {lote_sequencial?:string|null;ordem_produto?:number;total_produtos?:number;produto_codigo?:string}|null
   grupos_inspecao?: {
     id: string
     nome: string
@@ -323,6 +324,16 @@ function samplingPlan(lot:number, level:string) {
   const sample=Math.min(planned,lot)
   const rule=AC_RE_15[code]
   return { code, sample, ac:rule?.ac ?? null, re:rule?.re ?? null }
+}
+function sequentialProductInfo(i:InspectionRow,all:InspectionRow[]){
+  const metadata=i.parametros_amostragem
+  const batch=metadata?.lote_sequencial
+  if(!batch)return {blocked:false,order:1,total:1,previous:null as InspectionRow|null}
+  const order=Number(metadata?.ordem_produto||1),total=Number(metadata?.total_produtos||1)
+  const previous=all.filter(x=>x.parametros_amostragem?.lote_sequencial===batch
+    &&Number(x.parametros_amostragem?.ordem_produto||0)<order
+    &&x.status!=='concluida').sort((a,b)=>Number(a.parametros_amostragem?.ordem_produto||0)-Number(b.parametros_amostragem?.ordem_produto||0))[0]||null
+  return {blocked:previous!==null,order,total,previous}
 }
 function statusLabel(value:string|null|undefined) {
   const map:Record<string,string> = {
@@ -1249,7 +1260,10 @@ export default function App() {
       }
     }
     setInspections(old=>[provisional,...old.filter(x=>x.id!==provisional.id)])
-    setMessage(iniciar?'Inspeção iniciada.':'Inspeção salva.')
+    if((created.data?.inspecoes??[]).length>1){
+      setMessage(`${created.data.inspecoes.length} produtos cadastrados em sequência. Finalize um antes de iniciar o próximo.`)
+    }
+    if((created.data?.inspecoes??[]).length<=1)setMessage(iniciar?'Inspeção iniciada.':'Inspeção salva.')
     resetNewInspection()
     loadSequence.current++
     if(iniciar){await openInspection(created.data.id);setActiveStage('amostragem')}
@@ -2074,6 +2088,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <div className="process-list">
             {processes.map((p)=>{
               const related=inspections.filter((i)=>i.grupos_inspecao?.processo_id===p.id)
+                .sort((a,b)=>{
+                  const sameBatch=a.parametros_amostragem?.lote_sequencial&&a.parametros_amostragem?.lote_sequencial===b.parametros_amostragem?.lote_sequencial
+                  return sameBatch?Number(a.parametros_amostragem?.ordem_produto||1)-Number(b.parametros_amostragem?.ordem_produto||1):0
+                })
               return (
                 <article className="process-card" key={p.id}>
                   <div className="process-head">
@@ -2089,19 +2107,20 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     </div>
                   </div>
                   <div className="inspection-sublist">
-                    {related.map((i)=>(
-                      <div className="inspection-row" key={i.id}>
+                    {related.map((i)=>{
+                      const sequence=sequentialProductInfo(i,inspections)
+                      return <div className="inspection-row" key={i.id}>
                         <div>
                           <strong>{inspectionDisplay(i)}</strong>
-                          <span>{statusLabel(i.status)} · {i.grupos_inspecao?.nome} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0}</span>
+                          <span>{i.parametros_amostragem?.lote_sequencial?'Produto '+sequence.order+' de '+sequence.total+' · ':''}{sequence.blocked?'Aguardando conclusão do produto '+Number(sequence.previous?.parametros_amostragem?.ordem_produto||1):statusLabel(i.status)} · {i.grupos_inspecao?.nome} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0}</span>
                         </div>
                         <div className="row-actions">
                           {i.resultado && i.resultado!=='pendente' && <span className={'result-badge '+i.resultado}>{statusLabel(i.resultado)}</span>}
-                          <button className="primary small" onClick={()=>openInspection(i.id)}>{i.status==='concluida'?'Abrir':i.status==='aberta'?'Editar / iniciar':'Continuar'}</button>
+                          <button className="primary small" disabled={sequence.blocked} title={sequence.blocked?'Finalize o produto anterior antes de começar este.':undefined} onClick={()=>openInspection(i.id)}>{sequence.blocked?'Aguardando':i.status==='concluida'?'Abrir':i.status==='aberta'?'Editar / iniciar':'Continuar'}</button>
                           {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection(i)}><Trash2 size={15}/></button>}
                         </div>
                       </div>
-                    ))}
+                    })}
                     {!related.length && <span className="muted">Nenhuma inspeção neste processo.</span>}
                   </div>
                 </article>
@@ -2276,6 +2295,15 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
+          {!!detail.parametros_amostragem?.lote_sequencial && <div className="inspection-sequence-banner">
+            <div><strong>Produto {detail.parametros_amostragem.ordem_produto} de {detail.parametros_amostragem.total_produtos}</strong>
+            <span>{detail.items?.[0]?.processo_itens?.produtos?.sku||detail.parametros_amostragem.produto_codigo||'Código não informado'} · {detail.grupos_inspecao?.nome}</span></div>
+            {detail.status==='concluida'&&(()=>{
+              const next=inspections.find(i=>i.parametros_amostragem?.lote_sequencial===detail.parametros_amostragem.lote_sequencial
+                &&i.parametros_amostragem?.ordem_produto===Number(detail.parametros_amostragem.ordem_produto)+1)
+              return next?<button className="primary" type="button" onClick={()=>void openInspection(next.id)}>Próximo produto <ChevronRight size={17}/></button>:<span>Todos os produtos registrados foram concluídos.</span>
+            })()}
+          </div>}
           <nav id="inspection-stage-nav" className="inspection-stage-tabs" role="tablist" aria-label="Etapas da inspeção">
             {([
               ['dados','Dados',true],['amostragem','Amostragem',samplingDone],
