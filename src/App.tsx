@@ -1964,7 +1964,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       {tab==='auditorias' && (
         <section className="workspace audit-workspace" aria-label="Inspeções Armazém">
           <Suspense fallback={<div className="audit-center">Carregando inspeções do armazém…</div>}>
-            <AuditoriasPage profileName={profile.nome}/>
+            <AuditoriasPage profileName={profile.nome} canDelete={!!canDelete}/>
           </Suspense>
         </section>
       )}
