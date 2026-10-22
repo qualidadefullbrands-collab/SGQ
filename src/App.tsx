@@ -986,7 +986,6 @@ export default function App() {
     setError('')
     setMessage('')
 
-    // Durante construção/testes, a única informação obrigatória para avançar é a IT.
     if (iniciar && !inspection.itVersionId) {setPopupMessage('Selecione a IT para iniciar a inspeção.');return}
 
     const itens:any[]=[]
@@ -1385,7 +1384,7 @@ export default function App() {
 
     const pendencias:string[]=finished.data?.pendencias ?? []
     setMessage(pendencias.length
-      ? 'Inspeção finalizada em modo de teste, mesmo com campos pendentes.'
+      ? 'Inspeção finalizada com pendências registradas.'
       : 'Inspeção finalizada. Agora defina a retenção das amostras.')
     await Promise.all([loadApp(),openInspection(selectedInspectionId)])
   }
