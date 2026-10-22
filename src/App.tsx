@@ -982,6 +982,7 @@ export default function App() {
       retained:data.retained ?? [],
     }
 
+    photosLinksExpiration.current.delete(id)
     setDetail(next)
     setSampleNcDraft(String(next.total_nao_conforme ?? 0))
     setFinalObservation(next.observacoes ?? '')
@@ -1035,7 +1036,8 @@ export default function App() {
     setEditingInspectionData(null)
     const p=saved.data?.plano
     setMessage(`Dados atualizados. Plano recalculado: ${p?.codigo ?? '—'} · ${p?.amostra ?? 0} un. · Ac/Re ${p?.ac ?? '—'}/${p?.re ?? '—'}.`)
-    await Promise.all([refreshLists(),openInspection(selectedInspectionId)])
+    void refreshLists()
+    await openInspection(selectedInspectionId)
   }
   async function createInspection(e: React.FormEvent, iniciar:boolean) {
     e.preventDefault()
@@ -1102,6 +1104,28 @@ export default function App() {
       return setError(created.error?.message || 'Falha ao criar inspeção.')
     }
 
+    // Show the newly saved record without another round trip to the dashboard.
+    const fst=inspection.codigo.trim()
+    const existing=processes.find(p=>fstDigits(p.codigo)===fstDigits(fst))
+    const processSummary:ProcessRow=existing??{
+      id:'',codigo:fst?('FST'+fstDigits(fst)):'',cliente:inspection.cliente.trim()||null,
+      nota_fiscal:inspection.notaFiscal.trim()||null,origem:inspection.origem.trim()||null,
+      transporte:inspection.transporte.trim()||null,chegada_cd:inspection.chegadaCd||null,
+      data_processo:inspection.dataInspecao||new Date().toISOString().slice(0,10),
+      status:'aberto',criado_em:new Date().toISOString()
+    }
+    const plan=created.data.plano
+    const provisional:InspectionRow={
+      id:created.data.id,numero:created.data.numero||'',status:iniciar?'em_andamento':'aberta',
+      resultado:'pendente',tamanho_lote:plan?.lote??null,tamanho_amostra:plan?.amostra??null,
+      total_inspecionado:0,total_nao_conforme:0,nivel_inspecao:inspection.inspectionLevel,
+      codigo_amostragem:plan?.codigo??null,criado_em:new Date().toISOString(),
+      grupos_inspecao:{
+        id:created.data.grupo_inspecao_id||'',nome:skuRows.find(row=>row.nome.trim())?.nome||'Inspeção',
+        tipo:'produto',processo_id:existing?.id||'',processos:processSummary
+      }
+    }
+    setInspections(old=>[provisional,...old.filter(x=>x.id!==provisional.id)])
     setMessage(iniciar?'Inspeção iniciada.':'Inspeção salva.')
     resetNewInspection()
     loadSequence.current++
@@ -1455,7 +1479,8 @@ export default function App() {
     setMessage(pendencias.length
       ? 'Inspeção finalizada com pendências registradas.'
       : 'Inspeção finalizada. Agora defina a retenção das amostras.')
-    await Promise.all([refreshLists(),openInspection(selectedInspectionId)])
+    void refreshLists()
+    await openInspection(selectedInspectionId)
   }
 
   async function saveRetention() {
