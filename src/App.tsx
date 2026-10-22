@@ -1305,7 +1305,7 @@ export default function App() {
       })
       return setError(saved.error.message)
     }
-    if (saved.data?.finalizados) setDetail((d:any)=>d?{...d,testes_finalizados:true}:d)
+    if (saved.data?.finalizados===false) setDetail((d:any)=>d?{...d,testes_finalizados:false}:d)
   }
 
 
