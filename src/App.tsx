@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, X } from 'lucide-react'
 import QRCode from 'qrcode'
-import { apiGet, apiPost, apiPut, apiUrl, supabase } from './lib/supabase'
+import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/supabase'
 import AuditoriasPage from './auditorias/AuditoriasPage'
 import EquipmentPage, {useEquipmentList,equipmentFit} from './equipamentos/EquipmentPage'
 
@@ -842,7 +842,7 @@ export default function App() {
     if(existing?.cliente){setInspection(old=>({...old,cliente:old.cliente||existing.cliente||''}));return}
     setProcessLookupBusy(true)
     try{
-      const {data,error}=await supabase.functions.invoke('sgq-omie-fst',{body:{codigo:code}})
+      const {data,error}=await authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code}})
       if(!error&&data?.found&&data?.cliente)
         setInspection(old=>String(old.codigo||'').replace(/\D/g,'')===code?{...old,cliente:old.cliente||String(data.cliente)}:old)
     }finally{setProcessLookupBusy(false)}
@@ -1272,7 +1272,7 @@ export default function App() {
         testes:(detail.testResults??[]).map((r:any)=>({resultado:r.resultado})),
         textoAtual:finalObservation,
       }
-      const {data,error:aiError}=await supabase.functions.invoke('sgq-conclusao',{body:context})
+      const {data,error:aiError}=await authClient.functions.invoke('sgq-conclusao',{body:context})
       if(aiError||data?.error||!data?.text){setPopupMessage('Não foi possível gerar a conclusão agora. Digite o texto manualmente.');return}
       setFinalObservation(String(data.text))
       setMessage('Sugestão gerada. Revise e edite antes de finalizar.')
