@@ -619,30 +619,36 @@ app.MapGet("/api/inspecoes/{id}/detalhe", async (string id,HttpRequest request,I
 
         await Task.WhenAll(itemsTask,checklistTask,checkResultsTask,paramsTask,dimResultsTask,dimConfigsTask,testsTask,testResultsTask,photosTask,registersTask,ncsTask,retainedTask);
 
+        // Signed photo URLs are independent: fetch concurrently with a bounded fan-out.
         var photoUrls=new Dictionary<string,string?>();
         if(photosTask.Result is {ValueKind:JsonValueKind.Array})
         {
-            foreach(var photo in photosTask.Result.Value.EnumerateArray())
-            {
-                if(!photo.TryGetProperty("storage_path",out var sp)||sp.ValueKind!=JsonValueKind.String) continue;
-                var path=sp.GetString();
-                if(string.IsNullOrWhiteSpace(path)) continue;
-                var sign=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/storage/v1/object/sign/inspecao-fotos/{EncodedPath(path)}");
-                ApplyAuth(sign,token);
-                sign.Content=JsonContent.Create(new {expiresIn=3600});
-                var res=await client.SendAsync(sign);
-                string? url=null;
-                if(res.IsSuccessStatusCode)
+            var paths=photosTask.Result.Value.EnumerateArray()
+                .Select(photo=>photo.TryGetProperty("storage_path",out var sp)&&sp.ValueKind==JsonValueKind.String?sp.GetString():null)
+                .Where(path=>!string.IsNullOrWhiteSpace(path))
+                .Distinct().ToArray();
+            using var gate=new SemaphoreSlim(5);
+            var signed=await Task.WhenAll(paths.Select(async path=>{
+                await gate.WaitAsync();
+                try
                 {
-                    var raw=await res.Content.ReadAsStringAsync();
+                    using var sign=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/storage/v1/object/sign/inspecao-fotos/{EncodedPath(path!)}");
+                    ApplyAuth(sign,token);
+                    sign.Content=JsonContent.Create(new {expiresIn=3600});
+                    using var response=await client.SendAsync(sign);
+                    if(!response.IsSuccessStatusCode)return (Path:path!,Url:(string?)null);
+                    var raw=await response.Content.ReadAsStringAsync();
                     using var doc=JsonDocument.Parse(raw);
                     var root=doc.RootElement;
-                    url=root.TryGetProperty("signedURL",out var s1)?s1.GetString():
+                    var url=root.TryGetProperty("signedURL",out var s1)?s1.GetString():
                         root.TryGetProperty("signedUrl",out var s2)?s2.GetString():null;
-                    if(!string.IsNullOrWhiteSpace(url)&&url.StartsWith("/")) url=supabaseUrl+"/storage/v1"+url;
+                    if(!string.IsNullOrWhiteSpace(url)&&url.StartsWith("/"))url=supabaseUrl+"/storage/v1"+url;
+                    return (Path:path!,Url:url);
                 }
-                photoUrls[path]=url;
-            }
+                catch{return (Path:path!,Url:(string?)null);}
+                finally {gate.Release();}
+            }));
+            foreach(var pair in signed)photoUrls[pair.Path]=pair.Url;
         }
 
         return Results.Ok(new {
