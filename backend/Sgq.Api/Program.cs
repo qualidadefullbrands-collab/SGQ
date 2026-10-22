@@ -2175,6 +2175,83 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
     catch(Exception e){return Results.Json(Error("Falha ao gerar Word pelo modelo oficial da IT.",e.Message),statusCode:500);}
 });
 
+// POST via SGQ: documento armazenado no Supabase -> Power Automate -> SharePoint.
+// A URL HTTP do fluxo deve ser cadastrada exclusivamente no Render (nunca no frontend).
+app.MapPost("/api/inspecoes/{id}/enviar-automate", async (string id,HttpRequest request,IHttpClientFactory factory) =>
+{
+    var webhook=Environment.GetEnvironmentVariable("POWER_AUTOMATE_SGQ_WEBHOOK_URL");
+    if(string.IsNullOrWhiteSpace(webhook))
+        return Results.Json(Error("Power Automate não configurado. Defina POWER_AUTOMATE_SGQ_WEBHOOK_URL no Render."),statusCode:503);
+    if(!Uri.TryCreate(webhook,UriKind.Absolute,out var hookUri) || hookUri.Scheme!=Uri.UriSchemeHttps)
+        return Results.Json(Error("A URL do Power Automate deve usar HTTPS."),statusCode:503);
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil,ativo&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
+        var (profile,exists)=FirstRow(profileRows);
+        var role=exists&&profile!.Value.TryGetProperty("perfil",out var rp)?rp.GetString():null;
+        if(!exists || role is not ("administrador" or "gestor" or "inspetor")
+            || profile!.Value.GetProperty("ativo").ValueKind!=JsonValueKind.True)
+            return Results.Json(Error("Sem permissão para exportar documentos."),statusCode:403);
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,status,grupo_inspecao_id,grupos_inspecao(processos(codigo,cliente))&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (ins,found)=FirstRow(insRows);
+        if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        if(ins!.Value.GetProperty("status").GetString()!="concluida")
+            return Results.Json(Error("Conclua a inspeção antes de enviar o Word."),statusCode:409);
+        var documents=await RestAsync(client,token,HttpMethod.Get,"laudos",
+            $"select=id,numero,storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}&storage_path=not.is.null&order=criado_em.desc&limit=1");
+        var (doc,docFound)=FirstRow(documents);
+        if(!docFound) return Results.Json(Error("Gere o Word no SGQ antes do envio."),statusCode:404);
+        var path=doc!.Value.GetProperty("storage_path").GetString();
+        if(string.IsNullOrWhiteSpace(path)) return Results.Json(Error("Word não está armazenado."),statusCode:404);
+        var project=ins.Value.GetProperty("grupos_inspecao").GetProperty("processos");
+        string? Field(JsonElement row,string key)=>row.TryGetProperty(key,out var v) && v.ValueKind==JsonValueKind.String?v.GetString():null;
+        var fst=Field(project,"codigo")??"SEM-FST";
+        var customer=Field(project,"cliente")??"Cliente";
+        static string SafeName(string value)=>System.Text.RegularExpressions.Regex.Replace(value,@"[^\p{L}\p{N}\s._-]","").Trim();
+        var fileName=$"{SafeName(fst)} - {SafeName(customer)} - Relatorio de Inspecao.docx";
+        using var fileReq=new HttpRequestMessage(HttpMethod.Get,$"{supabaseUrl}/storage/v1/object/authenticated/laudos/{EncodedPath(path)}");
+        ApplyAuth(fileReq,token);
+        using var fileRes=await client.SendAsync(fileReq);
+        if(!fileRes.IsSuccessStatusCode)
+            return Results.Json(Error("O documento não pôde ser lido do armazenamento."),statusCode:502);
+        var bytes=await fileRes.Content.ReadAsByteArrayAsync();
+        if(bytes.Length==0) return Results.Json(Error("Documento Word vazio."),statusCode:422);
+        var idempotency=System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(id+":"+path));
+        var exportKey=Convert.ToHexString(idempotency).ToLowerInvariant();
+        using var send=new HttpRequestMessage(HttpMethod.Post,hookUri);
+        send.Headers.TryAddWithoutValidation("X-SGQ-Event-ID",exportKey);
+        send.Content=JsonContent.Create(new {
+            eventId=exportKey, origem="sgq",tipoDocumento="relatorio_inspecao",
+            inspecaoId=id,laudoId=Field(doc.Value,"id"),numeroFst=fst,cliente=customer,
+            filename=fileName, contentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            contentBase64=Convert.ToBase64String(bytes),pastaAno=DateTime.UtcNow.Year.ToString()
+        });
+        using var sent=await client.SendAsync(send);
+        var raw=await sent.Content.ReadAsStringAsync();
+        var successful=sent.IsSuccessStatusCode;
+        string? documentUrl=null;
+        if(successful && raw.TrimStart().StartsWith("{"))
+        {
+            try { using var json=JsonDocument.Parse(raw);documentUrl=Field(json.RootElement,"webUrl")??Field(json.RootElement,"url"); } catch { }
+        }
+        await RestAsync(client,token,HttpMethod.Post,"sgq_documento_integracoes","",
+            new {inspecao_id=id,laudo_id=Field(doc.Value,"id"),storage_path=path,
+                destino="power_automate_sharepoint",status=successful?"enviado":"erro",
+                documento_url=documentUrl,erro=successful?null:$"HTTP {(int)sent.StatusCode}: {raw[..Math.Min(raw.Length,200)]}",
+                tentativas=1,solicitado_por=userId,enviado_em=successful?DateTimeOffset.UtcNow:(DateTimeOffset?)null},
+            "return=minimal");
+        if(!successful) return Results.Json(Error("Power Automate recusou o documento. Verifique o histórico do fluxo."),statusCode:502);
+        return Results.Ok(new {data=new {enviado=true,nome=fileName,webUrl=documentUrl,eventId=exportKey},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível enviar o Word ao Power Automate.",e.Message),statusCode:500);}
+});
+
 app.MapPost("/api/inspecoes/{id}/retencao", async (string id,RetentionRequest input,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
