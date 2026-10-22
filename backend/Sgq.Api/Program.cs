@@ -1002,10 +1002,12 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             if(alreadyCreated)
             {
                 var firstParams=existing!.Value.GetProperty("parametros_amostragem");
-                var expected=firstParams.ValueKind==JsonValueKind.Object&&firstParams.TryGetProperty("total_produtos",out var expectedCount)
-                    &&expectedCount.ValueKind==JsonValueKind.Number?expectedCount.GetInt32():1;
-                if(previous is {ValueKind:JsonValueKind.Array}&&previous.Value.GetArrayLength()<expected)
-                    return Results.Json(Error("A gravação anterior não terminou. O SGQ preservou os dados parciais e não duplicará o processo; contate a Qualidade para reconciliação."),statusCode:409);
+                // Uma inspeção por conjunto: um request_id sempre corresponde a um registro.
+                // Gravações antigas por SKU permanecem intactas para reconciliação, sem reuso neste fluxo.
+                if(firstParams.ValueKind==JsonValueKind.Object
+                    &&firstParams.TryGetProperty("lote_sequencial",out var legacyBatch)
+                    &&legacyBatch.ValueKind==JsonValueKind.String)
+                    return Results.Json(Error("Esta tentativa pertence ao formato antigo, com inspeções separadas por SKU. Atualize o cadastro antes de repetir a operação."),statusCode:409);
                 return Results.Ok(new {data=new {
                     id=existing!.Value.GetProperty("id").GetString(),
                     numero=existing.Value.GetProperty("numero").GetString(),
@@ -1037,10 +1039,9 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 (x.DistribuicaoCaixas?.Count ?? 0) > 0)
             .ToList();
 
-        // Produtos com SKUs diferentes têm inspeções independentes e ordenadas.
-        // Uma inspeção por código evita compartilhar checklist, medições, fotos e resultado.
-        var sequentialBatch=items.Count>1 ? Guid.NewGuid().ToString("N") : null;
-        var statisticalLot = (items.Count>1?items.Take(1):items)
+        // Uma inspeção por conjunto: cada produto permanece como item do mesmo grupo.
+        // A separação das análises dimensionais é feita visualmente, por item/SKU.
+        var statisticalLot = items
             .Select(x => (long)Math.Floor(EffectiveReceived(x) / Math.Max(x.UnidadesPorConjunto <= 0 ? 1m : x.UnidadesPorConjunto, 0.000001m)))
             .Where(x => x > 0)
             .DefaultIfEmpty(1)
@@ -1095,8 +1096,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         var groupCount = groupsRows is { ValueKind: JsonValueKind.Array } ? groupsRows.Value.GetArrayLength() : 0;
         var groupCode = $"G{groupCount + 1:00}";
         var nonEmptyNames = items.Select(x => (x.Nome ?? "").Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
-        var groupName = nonEmptyNames.Count > 0 ? (sequentialBatch==null?string.Join(" + ", nonEmptyNames):nonEmptyNames[0]) : "Inspeção em preenchimento";
-        var isComponentSet = false;
+        var groupName = nonEmptyNames.Count > 0 ? string.Join(" + ", nonEmptyNames) : "Inspeção em preenchimento";
+        var isComponentSet = items.Count > 1;
 
         var createdGroup = await RestAsync(client, token, HttpMethod.Post, "grupos_inspecao", "select=id",
             new {
@@ -1113,7 +1114,6 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
 
         string? firstItemId = null;
         var itemIndex = 0;
-        var sequentialItems=new List<(string GroupId,string ItemId,string Sku,string Name,long Lot,int Index,decimal BoxesReceived,decimal BoxesInspect)>();
         foreach (var item in items)
         {
             itemIndex++;
@@ -1175,25 +1175,13 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             var itemId = ir!.Value.GetProperty("id").GetString()!;
             firstItemId ??= itemId;
 
-            var individualGroupId=groupId;
-            var individualLot=Math.Max(1,(long)Math.Floor(effectiveQuantity / Math.Max(item.UnidadesPorConjunto<=0?1m:item.UnidadesPorConjunto,0.000001m)));
-            if(sequentialBatch!=null && itemIndex>1)
-            {
-                var separateGroup=await RestAsync(client,token,HttpMethod.Post,"grupos_inspecao","select=id",
-                    new {processo_id=processId,codigo=$"G{groupCount+itemIndex:00}",nome=normalizedName,
-                        tipo="individual",tamanho_lote_estatistico=individualLot,status="em_inspecao"},"return=representation");
-                var (separate,ok)=FirstRow(separateGroup);
-                if(!ok)throw new InvalidOperationException("Não foi possível separar o produto para inspeção individual.");
-                individualGroupId=separate!.Value.GetProperty("id").GetString()!;
-            }
             await RestAsync(client, token, HttpMethod.Post, "grupo_inspecao_itens", "",
                 new {
-                    grupo_inspecao_id = individualGroupId,
+                    grupo_inspecao_id = groupId,
                     processo_item_id = itemId,
                     quantidade_componente = effectiveQuantity,
                     unidades_por_conjunto = item.UnidadesPorConjunto <= 0 ? 1m : item.UnidadesPorConjunto
                 }, "return=minimal");
-            sequentialItems.Add((individualGroupId,itemId,normalizedSku,normalizedName,individualLot,itemIndex,item.CaixasRecebidas,item.CaixasInspecionadas));
         }
 
         if(!string.IsNullOrWhiteSpace(input.ItVersionId))
@@ -1201,8 +1189,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 new {grupo_inspecao_id=groupId,it_versao_id=input.ItVersionId,principal=true},"return=minimal");
 
         var inspectionNumber = $"INS-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
-        var totalBoxesReceived = sequentialBatch==null?items.Sum(x => x.CaixasRecebidas):items[0].CaixasRecebidas;
-        var totalBoxesInspect = sequentialBatch==null?items.Sum(x => x.CaixasInspecionadas):items[0].CaixasInspecionadas;
+        var totalBoxesReceived = items.Sum(x => x.CaixasRecebidas);
+        var totalBoxesInspect = items.Sum(x => x.CaixasInspecionadas);
 
         var createdInspection = await RestAsync(client, token, HttpMethod.Post, "inspecoes", "select=id",
             new {
@@ -1236,10 +1224,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     versao = "2026-10",
                     modo_teste = true,
                     somente_it_obrigatoria = true,
-                    lote_sequencial=sequentialBatch,
-                    ordem_produto=1,
-                    total_produtos=items.Count,
-                    produto_codigo=sequentialItems.Count>0?sequentialItems[0].Sku:null,
+                    modelo_inspecao="conjunto",
+                    quantidade_skus=items.Count,
                     request_id=requestId
                 }
             }, "return=representation");
@@ -1247,48 +1233,10 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         var (inspectionRow, inspectionFound) = FirstRow(createdInspection);
         if (!inspectionFound) throw new InvalidOperationException("Falha ao criar inspeção.");
         var inspectionId = inspectionRow!.Value.GetProperty("id").GetString()!;
-        var sequentialCreated=new List<object> {new {id=inspectionId,grupo_inspecao_id=groupId,codigo=sequentialItems.Count>0?sequentialItems[0].Sku:null,ordem=1,status=startNow?"em_andamento":"aberta"}};
-        // Never start product 2 before product 1 has completed.
-        if(sequentialBatch!=null)
-        {
-            foreach(var next in sequentialItems.Skip(1))
-            {
-                if(!string.IsNullOrWhiteSpace(input.ItVersionId))
-                    await RestAsync(client,token,HttpMethod.Post,"grupo_inspecao_its","",
-                        new {grupo_inspecao_id=next.GroupId,it_versao_id=input.ItVersionId,principal=true},"return=minimal");
-                var nextPlan=SamplingPlan(next.Lot,level);
-                var nextNumber=$"INS-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
-                var nextRow=await RestAsync(client,token,HttpMethod.Post,"inspecoes","select=id",
-                    new {
-                        numero=nextNumber,processo_item_id=next.ItemId,grupo_inspecao_id=next.GroupId,
-                        it_versao_id=input.ItVersionId,status="aberta",resultado="pendente",
-                        tamanho_lote=next.Lot,tamanho_amostra=nextPlan.Sample,limite_aceitacao=nextPlan.Ac,
-                        limite_rejeicao=nextPlan.Re,nivel_inspecao=level,nivel_inspecao_origem="it",
-                        regime_inspecao="normal",tipo_plano="simples",codigo_amostragem=nextPlan.Code,
-                        nqa_critico=0.40m,nqa_grave=1.50m,nqa_toleravel=4.00m,
-                        caixas_recebidas=next.BoxesReceived>0?(decimal?)next.BoxesReceived:null,
-                        caixas_avaliar=next.BoxesInspect>0?(decimal?)next.BoxesInspect:null,
-                        data_inspecao=inspectionDate,responsavel_id=userId,
-                        observacao_interna=string.IsNullOrWhiteSpace(input.ObservacaoInterna)?null:input.ObservacaoInterna.Trim(),
-                        parametros_amostragem=new {
-                            fonte="backend_dotnet",regra_caixas="informada_por_item",versao="2026-10",
-                            lote_sequencial=sequentialBatch,ordem_produto=next.Index,
-                            total_produtos=items.Count,produto_codigo=next.Sku,request_id=requestId
-                        }
-                    },"return=representation");
-                var (createdNext,ok)=FirstRow(nextRow);
-                if(!ok)throw new InvalidOperationException($"Falha ao criar a inspeção do produto {next.Sku}.");
-                sequentialCreated.Add(new {id=createdNext!.Value.GetProperty("id").GetString(),
-                    grupo_inspecao_id=next.GroupId,codigo=next.Sku,ordem=next.Index,status="aberta"});
-            }
-        }
-
         return Results.Ok(new {
             data = new {
                 id = inspectionId,
                 numero = inspectionNumber,
-                lote_sequencial=sequentialBatch,
-                inspecoes=sequentialCreated,
                 processo_id = processId,
                 grupo_inspecao_id = groupId,
                 status = startNow ? "em_andamento" : "aberta",
@@ -1320,12 +1268,6 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         var groupId=ins!.Value.GetProperty("grupo_inspecao_id").GetString()!;
         if(ins.Value.GetProperty("status").GetString() is "concluida" or "cancelada")
             return Results.Json(Error("Esta inspeção não pode ser editada."),statusCode:409);
-        if(ins.Value.TryGetProperty("parametros_amostragem",out var metadata)
-            && metadata.ValueKind==JsonValueKind.Object
-            && metadata.TryGetProperty("lote_sequencial",out var batch)
-            && batch.ValueKind==JsonValueKind.String
-            && (input.Itens??[]).Count>1)
-            return Results.Json(Error("Nesta sequência, cada inspeção pertence a um único produto. Cadastre outros códigos em suas inspeções separadas."),statusCode:409);
 
         var groupRows=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
             $"select=processo_id&id=eq.{Uri.EscapeDataString(groupId)}&limit=1");
@@ -1502,33 +1444,6 @@ app.MapPost("/api/inspecoes/{id}/iniciar", async (string id,HttpRequest request,
         if(it.ValueKind!=JsonValueKind.String || string.IsNullOrWhiteSpace(it.GetString()))
             return Results.Json(Error("Selecione e salve uma IT antes de iniciar."),statusCode:400);
         var groupId=row.Value.GetProperty("grupo_inspecao_id").GetString()!;
-        if(row.Value.TryGetProperty("parametros_amostragem",out var seq)
-            && seq.ValueKind==JsonValueKind.Object
-            && seq.TryGetProperty("lote_sequencial",out var batch)
-            && batch.ValueKind==JsonValueKind.String)
-        {
-            var batchId=batch.GetString();
-            var order=seq.TryGetProperty("ordem_produto",out var position)&&position.ValueKind==JsonValueKind.Number?position.GetInt32():1;
-            if(order>1&&!string.IsNullOrWhiteSpace(batchId))
-            {
-                var siblings=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-                    $"select=id,status,parametros_amostragem&parametros_amostragem->>lote_sequencial=eq.{Uri.EscapeDataString(batchId)}&excluido_em=is.null");
-                var preceding=0;
-                if(siblings is {ValueKind:JsonValueKind.Array})
-                    foreach(var sibling in siblings.Value.EnumerateArray())
-                    {
-                        if(!sibling.TryGetProperty("parametros_amostragem",out var metadata)||metadata.ValueKind!=JsonValueKind.Object)continue;
-                        var siblingOrder=metadata.TryGetProperty("ordem_produto",out var index)&&index.ValueKind==JsonValueKind.Number?index.GetInt32():0;
-                        if(siblingOrder<order && siblingOrder>0)
-                            preceding++;
-                        if(siblingOrder<order && siblingOrder>0
-                            && (!sibling.TryGetProperty("status",out var status)||status.GetString()!="concluida"))
-                            return Results.Json(Error($"Finalize primeiro o produto {siblingOrder} para iniciar o produto {order}."),statusCode:409);
-                    }
-                if(preceding<order-1)
-                    return Results.Json(Error("Não é possível iniciar este produto porque faltam inspeções anteriores na sequência. Solicite revisão do processo."),statusCode:409);
-            }
-        }
         var started=await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}&status=eq.aberta",
             new {status="em_andamento",iniciada_em=DateTimeOffset.UtcNow},"return=representation");
         if(started is not {ValueKind:JsonValueKind.Array} || started.Value.GetArrayLength()==0)
