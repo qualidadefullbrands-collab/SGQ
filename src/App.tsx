@@ -396,7 +396,7 @@ export default function App() {
   const productSearchTimers = useRef<Record<number,number>>({})
   const loadAppRequest = useRef<Promise<void> | null>(null)
   const loadSequence=useRef(0)
-  const {equipments,refresh:refreshEquipments}=useEquipmentList()
+  const {equipments,setEquipments,refresh:refreshEquipments}=useEquipmentList()
   const [editingInspectionData, setEditingInspectionData] = useState<any>(null)
   const [retentionSuggestion, setRetentionSuggestion] = useState<{quantidade:number|null;fonte:string|null}>({quantidade:null,fonte:null})
 
@@ -510,6 +510,7 @@ export default function App() {
       return
     }
     loadApp()
+    void refreshEquipments()
   }, [userId])
 
   useEffect(()=>{
@@ -2435,7 +2436,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
 
-      {tab==='equipamentos' && <EquipmentPage canManage={!!canManageIts}/>}
+      {tab==='equipamentos' && <EquipmentPage canManage={!!canManageIts} onChanged={setEquipments}/>}
 
       {tab==='its' && (
         <section className="workspace">
