@@ -1,4 +1,6 @@
 using System.Net.Http.Headers;
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -20,6 +22,20 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
 
 var app = builder.Build();
 app.UseCors();
+// Per-request timings are measured without exposing process numbers or JWTs in logs.
+app.Use(async(context,next)=>{
+    var stopwatch=System.Diagnostics.Stopwatch.StartNew();
+    context.Response.OnStarting(()=>{
+        context.Response.Headers["Server-Timing"]=$"sgq;dur={stopwatch.Elapsed.TotalMilliseconds:F1}";
+        return Task.CompletedTask;
+    });
+    await next();
+    stopwatch.Stop();
+    if(context.Request.Path.StartsWithSegments("/api") && stopwatch.ElapsedMilliseconds>1250)
+        app.Logger.LogWarning("SGQ slow endpoint: {Method} {Endpoint} {DurationMs}ms HTTP {Status}",
+            context.Request.Method,context.GetEndpoint()?.DisplayName??"/api",stopwatch.ElapsedMilliseconds,context.Response.StatusCode);
+});
+var userValidationCache=new ConcurrentDictionary<string,(string UserId,DateTimeOffset Until)>();
 
 string Token(HttpRequest request)
 {
@@ -80,13 +96,21 @@ async Task<JsonElement?> RestAsync(
 
 async Task<string> CurrentUserId(HttpClient client, string token)
 {
-    var msg = new HttpRequestMessage(HttpMethod.Get, $"{supabaseUrl}/auth/v1/user");
-    ApplyAuth(msg, token);
-    var res = await client.SendAsync(msg);
-    var raw = await res.Content.ReadAsStringAsync();
-    if (!res.IsSuccessStatusCode) throw new UnauthorizedAccessException("Sessão inválida ou expirada.");
-    using var doc = JsonDocument.Parse(raw);
-    return doc.RootElement.GetProperty("id").GetString() ?? throw new UnauthorizedAccessException("Usuário inválido.");
+    // Supabase PostgREST still validates RLS on every data operation.
+    // A short user-ID cache prevents successive UI requests from repeating /auth/v1/user.
+    var fingerprint=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+    if(userValidationCache.TryGetValue(fingerprint,out var cached)
+        && cached.Until>DateTimeOffset.UtcNow)return cached.UserId;
+    using var msg=new HttpRequestMessage(HttpMethod.Get,$"{supabaseUrl}/auth/v1/user");
+    ApplyAuth(msg,token);
+    using var res=await client.SendAsync(msg);
+    var raw=await res.Content.ReadAsStringAsync();
+    if(!res.IsSuccessStatusCode)throw new UnauthorizedAccessException("Sessão inválida ou expirada.");
+    using var doc=JsonDocument.Parse(raw);
+    var userId=doc.RootElement.GetProperty("id").GetString()??throw new UnauthorizedAccessException("Usuário inválido.");
+    if(userValidationCache.Count>1000)userValidationCache.Clear();
+    userValidationCache[fingerprint]=(userId,DateTimeOffset.UtcNow.AddSeconds(20));
+    return userId;
 }
 
 (JsonElement? row, bool found) FirstRow(JsonElement? element)
@@ -1267,12 +1291,18 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=grupo_inspecao_id,status,it_versao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+            $"select=grupo_inspecao_id,status,it_versao_id,parametros_amostragem&id=eq.{Uri.EscapeDataString(id)}&limit=1");
         var (ins,found)=FirstRow(insRows);
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var groupId=ins!.Value.GetProperty("grupo_inspecao_id").GetString()!;
         if(ins.Value.GetProperty("status").GetString() is "concluida" or "cancelada")
             return Results.Json(Error("Esta inspeção não pode ser editada."),statusCode:409);
+        if(ins.Value.TryGetProperty("parametros_amostragem",out var metadata)
+            && metadata.ValueKind==JsonValueKind.Object
+            && metadata.TryGetProperty("lote_sequencial",out var batch)
+            && batch.ValueKind==JsonValueKind.String
+            && (input.Itens??[]).Count>1)
+            return Results.Json(Error("Nesta sequência, cada inspeção pertence a um único produto. Cadastre outros códigos em suas inspeções separadas."),statusCode:409);
 
         var groupRows=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
             $"select=processo_id&id=eq.{Uri.EscapeDataString(groupId)}&limit=1");
