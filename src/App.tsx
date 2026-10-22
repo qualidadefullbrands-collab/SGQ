@@ -3,6 +3,7 @@ import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3,
 import QRCode from 'qrcode'
 import { apiGet, apiPost, apiPut, apiUrl, supabase } from './lib/supabase'
 import AuditoriasPage from './auditorias/AuditoriasPage'
+import EquipmentPage, {useEquipmentList,equipmentFit} from './equipamentos/EquipmentPage'
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
 type ItVersion = {
@@ -124,9 +125,13 @@ function fstDigits(value: string) {
 function formatFst(value: string | null | undefined) {
   const raw=String(value ?? '').trim()
   if (!raw) return '—'
-  if (/^TMP-/i.test(raw)) return 'Rascunho'
+  if (/^TMP-/i.test(raw)) return 'Sem FST'
   const d=raw.replace(/\D/g,'')
   return d ? 'FST' + d : raw
+}
+function inspectionDisplay(row:{grupos_inspecao?:{processos?:{codigo?:string|null;cliente?:string|null}|null}|null}) {
+  const p=row.grupos_inspecao?.processos
+  return formatFst(p?.codigo)+' - '+(p?.cliente?.trim()||'Cliente não informado')
 }
 function formatDateBR(value: string | null | undefined) {
   if (!value) return '—'
@@ -332,7 +337,12 @@ export default function App() {
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [environment, setEnvironment] = useState<'full' | 'contlog' | null>(null)
-  const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias'>('painel')
+  const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos'>('painel')
+  const [dashboardView,setDashboardView]=useState<'processos'|'inspecoes'|'estoque'|'concluidas'>('inspecoes')
+  const [popupMessage,setPopupMessage]=useState('')
+  const [aiConclusionBusy,setAiConclusionBusy]=useState(false)
+  const [sharepointBusy,setSharepointBusy]=useState(false)
+  const [processLookupBusy,setProcessLookupBusy]=useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [login, setLogin] = useState({ email: '', password: '' })
@@ -385,6 +395,8 @@ export default function App() {
   const [skuRows, setSkuRows] = useState([emptySku()])
   const productSearchTimers = useRef<Record<number,number>>({})
   const loadAppRequest = useRef<Promise<void> | null>(null)
+  const loadSequence=useRef(0)
+  const {equipments,refresh:refreshEquipments}=useEquipmentList()
   const [editingInspectionData, setEditingInspectionData] = useState<any>(null)
   const [retentionSuggestion, setRetentionSuggestion] = useState<{quantidade:number|null;fonte:string|null}>({quantidade:null,fonte:null})
 
@@ -500,6 +512,13 @@ export default function App() {
     loadApp()
   }, [userId])
 
+  useEffect(()=>{
+    const u=new URL(window.location.href)
+    if(u.searchParams.has('utm_source')) u.searchParams.delete('utm_source')
+    if(/^#sec-/.test(u.hash)) u.hash=''
+    if(u.href!==window.location.href) window.history.replaceState(null,'',u.pathname+u.search+u.hash)
+  },[])
+
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get('amostra')
     if (!token || !samples.length) return
@@ -546,6 +565,7 @@ export default function App() {
 
   async function loadApp() {
     if (loadAppRequest.current) return loadAppRequest.current
+    const sequence=++loadSequence.current
     const request=(async()=>{
       setError('')
       const loaded=await apiGet<any>('/api/app/bootstrap')
@@ -553,6 +573,7 @@ export default function App() {
         setError(loaded.error?.message || 'Falha ao carregar o SGQ.')
         return
       }
+      if(sequence!==loadSequence.current) return
       const data=loaded.data
       if (!data.profile) {
         setError('Seu usuário ainda não possui perfil liberado no SGQ.')
@@ -807,6 +828,13 @@ export default function App() {
     }
   }
 
+  async function refreshLists() {
+    const res=await apiGet<any>('/api/app/listas')
+    if(res.error||!res.data) return
+    setProcesses((res.data.processes??[]) as ProcessRow[])
+    setInspections((res.data.inspections??[]) as InspectionRow[])
+  }
+
   async function saveProcessEdit(e: React.FormEvent) {
     e.preventDefault()
     if (!editingProcess) return
@@ -828,23 +856,29 @@ export default function App() {
     if (!window.confirm(`Excluir o processo ${p.codigo} da visão operacional? O histórico será preservado para auditoria.`)) return
     const deleted=await apiPost<any>(`/api/processos/${p.id}/excluir`,{})
     if (deleted.error) return setError(deleted.error.message)
-    setMessage('Processo removido da visão operacional.')
-    await loadApp()
+    loadSequence.current++
+    setProcesses(current=>current.filter(row=>row.id!==p.id))
+    setInspections(current=>current.filter(row=>row.grupos_inspecao?.processo_id!==p.id))
+    setMessage('Processo excluído.')
+    void refreshLists()
   }
 
   async function deleteInspection(i: InspectionRow | { id:string; numero?:string }) {
     if (!canDelete) return
-    const label = (i as any).numero ? ` ${(i as any).numero}` : ''
+    const original=inspections.find(row=>row.id===i.id)
+    const label=original ? ' '+inspectionDisplay(original) : ''
     if (!window.confirm(`Excluir a inspeção${label}? Ela sairá da operação, mas o registro de auditoria será preservado.`)) return
     const deleted=await apiPost<any>(`/api/inspecoes/${i.id}/excluir`,{numero:(i as any).numero ?? null})
     if (deleted.error) return setError(deleted.error.message)
-    if (selectedInspectionId === i.id) {
+    loadSequence.current++
+    setInspections(current=>current.filter(row=>row.id!==i.id))
+    if (selectedInspectionId===i.id) {
       setSelectedInspectionId(null)
       setDetail(null)
-      setTab('inspecoes')
+      setTab('painel')
     }
-    setMessage('Inspeção excluída da operação.')
-    await loadApp()
+    setMessage('Inspeção excluída.')
+    void refreshLists()
   }
 
   async function openInspection(id: string) {
@@ -940,7 +974,7 @@ export default function App() {
     setMessage('')
 
     // Durante construção/testes, a única informação obrigatória para avançar é a IT.
-    if (iniciar && !inspection.itVersionId) return setError('Selecione a IT para iniciar a inspeção.')
+    if (iniciar && !inspection.itVersionId) {setPopupMessage('Selecione a IT para iniciar a inspeção.');return}
 
     const itens:any[]=[]
     for (const row of skuRows) {
@@ -999,28 +1033,28 @@ export default function App() {
       return setError(created.error?.message || 'Falha ao criar inspeção.')
     }
 
-    setMessage(iniciar ? `Inspeção ${created.data.numero} iniciada.` : `Inspeção ${created.data.numero} salva como não iniciada.`)
+    setMessage(iniciar?'Inspeção iniciada.':'Inspeção salva.')
     resetNewInspection()
-    if(iniciar) {
-      await Promise.all([loadApp(),openInspection(created.data.id)])
-      setActiveStage('amostragem')
-    } else {
-      await loadApp()
-      setTab('painel')
-    }
+    loadSequence.current++
+    if(iniciar){await openInspection(created.data.id);setActiveStage('amostragem')}
+    else setTab('painel')
+    void refreshLists()
   }
 
-  async function startSavedInspection() {
+  async function startSavedInspection(targetStage:typeof activeStage='amostragem') {
     if(!selectedInspectionId || detail?.status!=='aberta') return
+    if(!detail.it_versao_id){setPopupMessage('Selecione uma IT nos dados da inspeção antes de continuar.');setActiveStage('dados');return}
     setError('')
     const started=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/iniciar`,{})
-    if(started.error) return setError(started.error.message)
-    await Promise.all([loadApp(),openInspection(selectedInspectionId)])
-    setActiveStage('amostragem')
-    setMessage('Inspeção iniciada. Continue a partir da amostragem.')
+    if(started.error){setPopupMessage(started.error.message);return}
+    setDetail((d:any)=>d?{...d,status:'em_andamento'}:d)
+    setActiveStage(targetStage)
+    setMessage('Inspeção iniciada.')
+    void refreshLists()
   }
 
   function selectInspectionStage(stage:typeof activeStage) {
+    if(detail?.status==='aberta'&&stage!=='dados'){void startSavedInspection(stage);return}
     setActiveStage(stage)
     const nav=document.getElementById('inspection-stage-nav')
     if(nav) window.scrollTo({top:Math.max(0,window.scrollY+nav.getBoundingClientRect().top-90),behavior:'smooth'})
@@ -1121,7 +1155,7 @@ export default function App() {
     })
     if (saved.error) return setError(saved.error.message)
     setDetail((d:any)=>d?{...d,observacao_interna:internalObservation.trim() || null}:d)
-    setMessage('Observação interna salva. Ela fica somente no SGQ e não é incluída no laudo.')
+    setMessage('Observação salva.')
   }
 
   function getDimConfig(itemId:string, paramId:string) {
