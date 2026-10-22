@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, X } from 'lucide-react'
+import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { apiGet, apiPost, apiPut, apiUrl, supabase } from './lib/supabase'
 import AuditoriasPage from './auditorias/AuditoriasPage'
@@ -1742,7 +1742,19 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   const samplingDone = detail ? (detail.total_inspecionado ?? 0) >= (detail.tamanho_amostra ?? 0) || (!!detail.limite_rejeicao && detail.total_nao_conforme >= detail.limite_rejeicao) : false
 
   return (
-    <main className="app-shell">
+    <main className="app-shell sgq-operational-shell">
+      <aside className="sgq-side-nav">
+        <div className="sgq-side-brand"><ShieldCheck size={23}/><div><b>SGQ</b><small>FullBrands · Qualidade</small></div></div>
+        <div className="sgq-side-caption">OPERAÇÃO</div>
+        <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={18}/> Painel</button>
+        <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>setTab('inspecoes')}><ClipboardCheck size={18}/> Inspeções</button>
+        <button className={tab==='nova'?'selected':''} onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
+        <button className={tab==='estoque'?'selected':''} onClick={()=>setTab('estoque')}><Warehouse size={18}/> Estoque</button>
+        <div className="sgq-side-caption">QUALIDADE</div>
+        <button className={tab==='its'?'selected':''} onClick={()=>setTab('its')}><FileText size={18}/> Instruções técnicas</button>
+        <button className={tab==='equipamentos'?'selected':''} onClick={()=>{setTab('equipamentos');void refreshEquipments()}}><Wrench size={18}/> Equipamentos</button>
+        <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button onClick={()=>setEnvironment(null)}>Trocar ambiente</button></div>
+      </aside>
       <header className="topbar">
         <div className="brand-mark"><PackageSearch size={24}/><span>SGQ</span></div>
         <nav>
@@ -1760,6 +1772,12 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       </header>
 
       {error && <div className="alert error">{error}</div>}
+      {popupMessage && <div className="sgq-dialog-backdrop" role="presentation" onClick={()=>setPopupMessage('')}>
+        <div className="sgq-dialog" role="alertdialog" aria-modal="true" aria-label="Atenção" onClick={e=>e.stopPropagation()}>
+          <div className="sgq-dialog-symbol"><ShieldCheck size={24}/></div><h2>Verifique as informações</h2>
+          <p>{popupMessage}</p><button className="primary" type="button" autoFocus onClick={()=>setPopupMessage('')}>Entendi</button>
+        </div>
+      </div>
       {message && <div className="alert success">{message}</div>}
 
       {tab==='painel' && (
@@ -1769,12 +1787,24 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <button className="primary" onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
           </div>
           <section className="metrics">
-            <Metric icon={ClipboardCheck} label="Processos" value={processes.length}/>
-            <Metric icon={ShieldCheck} label="Inspeções" value={inspections.length}/>
-            <Metric icon={Boxes} label="Estoque" value={samples.length}/>
-            <Metric icon={FileText} label="Concluídas" value={inspections.filter((i)=>i.status==='concluida').length}/>
+            <button type="button" className={'metric-button '+(dashboardView==='processos'?'selected':'')} onClick={()=>setDashboardView('processos')}><Metric icon={ClipboardCheck} label="Processos" value={processes.length}/></button>
+            <button type="button" className={'metric-button '+(dashboardView==='inspecoes'?'selected':'')} onClick={()=>setDashboardView('inspecoes')}><Metric icon={ShieldCheck} label="Inspeções" value={inspections.length}/></button>
+            <button type="button" className={'metric-button '+(dashboardView==='estoque'?'selected':'')} onClick={()=>setDashboardView('estoque')}><Metric icon={Boxes} label="Estoque" value={samples.length}/></button>
+            <button type="button" className={'metric-button '+(dashboardView==='concluidas'?'selected':'')} onClick={()=>setDashboardView('concluidas')}><Metric icon={FileText} label="Concluídas" value={inspections.filter((i)=>i.status==='concluida').length}/></button>
           </section>
-
+          {dashboardView==='processos' && <section className="panel queue"><div className="section-title"><h2>Processos</h2><button className="secondary" type="button" onClick={()=>setTab('inspecoes')}>Ver todos</button></div>
+            {processes.slice(0,25).map(p=><div className="queue-row" key={p.id}><div><strong>{formatFst(p.codigo)} - {p.cliente||'Cliente não informado'}</strong><span>{p.nota_fiscal?'NF '+p.nota_fiscal:'NF não informada'}</span></div><button className="secondary small" onClick={()=>setTab('inspecoes')}>Inspeções do processo</button></div>)}
+            {!processes.length&&<p>Nenhum processo cadastrado.</p>}
+          </section>}
+          {dashboardView==='estoque' && <section className="panel queue"><div className="section-title"><h2>Estoque</h2><button className="secondary" onClick={()=>setTab('estoque')}>Abrir estoque</button></div>
+            {samples.slice(0,25).map(item=><div className="queue-row" key={item.id}><div><strong>{formatFst(item.processo_referencia)} - {item.cliente_referencia||'Cliente não informado'}</strong><span>{item.sku||item.descricao} · {item.saldo} {item.unidade_controle}</span></div><button className="secondary small" onClick={()=>{setTab('estoque');setSelectedSample(item)}}>Ver item</button></div>)}
+            {!samples.length&&<p>Nenhuma amostra em estoque.</p>}
+          </section>}
+          {dashboardView==='concluidas' && <section className="panel queue"><div className="section-title"><h2>Inspeções concluídas</h2><button className="secondary" onClick={()=>setTab('inspecoes')}>Ver todas</button></div>
+            {inspections.filter(i=>i.status==='concluida').slice(0,25).map(i=><div className="queue-row" key={i.id}><div><strong>{inspectionDisplay(i)}</strong><span>{statusLabel(i.resultado)} · {formatDateBR(i.criado_em)}</span></div><button className="secondary small" onClick={()=>openInspection(i.id)}>Abrir relatório</button></div>)}
+            {!inspections.some(i=>i.status==='concluida')&&<p>Nenhuma inspeção concluída.</p>}
+          </section>}
+          {dashboardView==='inspecoes' && <>
           <section className="panel queue">
             <div className="section-title"><h2>Inspeções não iniciadas</h2><button className="secondary" onClick={()=>setTab('inspecoes')}>Ver todas</button></div>
             {inspections.filter(i=>i.status==='aberta').slice(0,8).map(i=>(
@@ -1801,6 +1831,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             ))}
             {!inspections.some((i)=>i.status==='em_andamento') && <div className="empty">Nenhuma inspeção em andamento.</div>}
           </section>
+          </>}
         </section>
       )}
 
@@ -2391,6 +2422,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </section>
       )}
 
+
+      {tab==='equipamentos' && <EquipmentPage canManage={!!canManageIts}/>}
 
       {tab==='its' && (
         <section className="workspace">
