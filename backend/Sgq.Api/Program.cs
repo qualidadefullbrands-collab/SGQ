@@ -201,13 +201,61 @@ app.MapGet("/api/auditorias/bootstrap", async (HttpRequest request,IHttpClientFa
     {
         var token=Token(request);
         var client=factory.CreateClient("supabase");
-        var executions=RestAsync(client,token,HttpMethod.Get,"auditoria_execucoes","select=*&order=criado_em.desc&limit=30");
+        var executions=RestAsync(client,token,HttpMethod.Get,"auditoria_execucoes","select=*&excluido_em=is.null&order=criado_em.desc&limit=100");
         var templates=RestAsync(client,token,HttpMethod.Get,"auditoria_templates","select=rq_code,rq_version,arquivo_nome,storage_path,ativo&order=rq_code.asc");
         await Task.WhenAll(executions,templates);
         return Results.Ok(new {data=new {executions=executions.Result,templates=templates.Result},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao carregar auditorias.",e.Message),statusCode:500);}
+});
+
+// Logical exclusion of warehouse inspections: keep all messages, answers, photos and Word documents.
+app.MapPost("/api/auditorias/{id}/excluir", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    if(!Guid.TryParse(id,out _))
+        return Results.Json(Error("Identificador da inspeção inválido."),statusCode:400);
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        var profiles=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil,ativo&id=eq.{Uri.EscapeDataString(userId)}&ativo=is.true&limit=1");
+        var (profile,profileExists)=FirstRow(profiles);
+        var role=profileExists&&profile!.Value.TryGetProperty("perfil",out var roleValue)?roleValue.GetString():null;
+        if(role is not ("administrador" or "gestor"))
+            return Results.Json(Error("Somente administradores e gestores podem excluir inspeções do armazém."),statusCode:403);
+
+        var changed=await RestAsync(client,token,HttpMethod.Patch,"auditoria_execucoes",
+            $"id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&select=id,rq_code,titulo,status",
+            new {excluido_em=DateTimeOffset.UtcNow,excluido_por=userId},"return=representation");
+        var (record,deleted)=FirstRow(changed);
+        if(!deleted)
+            return Results.Json(Error("Inspeção não encontrada ou já excluída."),statusCode:404);
+        try
+        {
+            await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+                new {usuario_id=userId,entidade="auditoria_execucoes",entidade_id=id,
+                    acao="exclusao_logica",dados=new {
+                        rq_code=record!.Value.GetProperty("rq_code").GetString(),
+                        titulo=record.Value.GetProperty("titulo").GetString(),
+                        status_anterior=record.Value.GetProperty("status").GetString(),
+                        excluido_em=DateTimeOffset.UtcNow
+                    }},"return=minimal");
+        }
+        catch(Exception logError)
+        {
+            app.Logger.LogWarning(logError,"SGQ warehouse audit exclusion: separate audit_log entry failed for {AuditId}",id);
+        }
+        return Results.Ok(new {data=new {excluida=true,id},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e)
+    {
+        app.Logger.LogError(e,"SGQ failed to exclude warehouse inspection {AuditId}",id);
+        return Results.Json(Error("Falha ao excluir inspeção do armazém."),statusCode:500);
+    }
 });
 
 app.MapPost("/api/auditorias/criar", async (CreateAuditRequest input,HttpRequest request,IHttpClientFactory factory)=>
@@ -257,7 +305,8 @@ app.MapGet("/api/auditorias/{id}/detalhe", async (string id,HttpRequest request,
     {
         var token=Token(request);
         var client=factory.CreateClient("supabase");
-        var executionTask=RestAsync(client,token,HttpMethod.Get,"auditoria_execucoes",$"select=*&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var executionTask=RestAsync(client,token,HttpMethod.Get,"auditoria_execucoes",
+            $"select=*&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
         var messagesTask=RestAsync(client,token,HttpMethod.Get,"auditoria_mensagens",$"select=*&execucao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
         var answersTask=RestAsync(client,token,HttpMethod.Get,"auditoria_respostas",$"select=*&execucao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
         var findingsTask=RestAsync(client,token,HttpMethod.Get,"auditoria_achados",$"select=*&execucao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
