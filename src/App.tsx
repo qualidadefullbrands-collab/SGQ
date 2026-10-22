@@ -2175,8 +2175,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                             {usesMeasureReference(p) && <label>Referência da medida
                               <select value={cfg.tipo_referencia ?? p.tipo_referencia ?? ''} onChange={(e)=>saveDimConfig(item.id,p,{tipo_referencia:e.target.value})} disabled={detail.status==='concluida'}>
                                 <option value="">Selecionar</option>
-                                <option value="interno">Interno</option>
-                                <option value="externo">Externo</option>
+                                {/(intern|interior)/i.test(p.nome||'') && <option value="interno">Face / dimensão interna</option>}
+                                {/(extern|exterior)/i.test(p.nome||'') && <option value="externo">Face / dimensão externa</option>}
                                 <option value="desenho">Desenho técnico</option>
                                 <option value="logo">Logo / arte</option>
                                 <option value="amostra_padrao">Amostra padrão</option>
@@ -2203,11 +2203,17 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                               </select>
                             </label>
                             <label>Equipamento / instrumento
-                              <input defaultValue={cfg.equipamento ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{equipamento:e.target.value})} disabled={detail.status==='concluida'}/>
+                              <select value={cfg.codigo_equipamento ?? ''} onChange={e=>{
+                                const selected=equipments.find(x=>x.codigo===e.target.value)
+                                void saveDimConfig(item.id,p,{equipamento:selected?.nome??null,codigo_equipamento:selected?.codigo??null})
+                              }} disabled={detail.status==='concluida'}>
+                                <option value="">Selecionar equipamento disponível</option>
+                                {cfg.codigo_equipamento && !equipments.some(x=>x.codigo===cfg.codigo_equipamento) && <option value={cfg.codigo_equipamento}>{cfg.equipamento || cfg.codigo_equipamento} (cadastro anterior)</option>}
+                                {equipments.filter(e=>equipmentFit(e,p.nome,cfg.unidade||p.unidade)).map(e=><option value={e.codigo} key={e.id}>{e.codigo} · {e.nome}</option>)}
+                              </select>
+                              {!equipments.some(e=>equipmentFit(e,p.nome,cfg.unidade||p.unidade)) && <small className="field-hint">Não há equipamento calibrado e adequado cadastrado para esta medição.</small>}
                             </label>
-                            <label>Cód. equipamento
-                              <input defaultValue={cfg.codigo_equipamento ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{codigo_equipamento:e.target.value})} disabled={detail.status==='concluida'}/>
-                            </label>
+                            <label>Código do equipamento<input value={cfg.codigo_equipamento??''} readOnly placeholder="Preenchido ao selecionar"/></label>
                             <label>Desvio ±
                               <input type="number" min="0" step="any" defaultValue={cfg.desvio_mais ?? cfg.desvio_menos ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{desvio:e.target.value,desvio_menos:e.target.value,desvio_mais:e.target.value})} disabled={detail.status==='concluida'}/>
                             </label>
