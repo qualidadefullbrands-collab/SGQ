@@ -992,6 +992,21 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         var userId = await CurrentUserId(client, token);
 
         var startNow=input.Iniciar;
+        // Stable submission token allows a safe retry if the HTTP response is lost.
+        var requestId=Guid.TryParse(input.RequestId,out var parsedRequestId)?parsedRequestId.ToString("N"):null;
+        if(requestId!=null)
+        {
+            var previous=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+                $"select=id,numero,grupo_inspecao_id,status&parametros_amostragem->>request_id=eq.{requestId}&excluido_em=is.null&order=criado_em.asc&limit=1");
+            var (existing,alreadyCreated)=FirstRow(previous);
+            if(alreadyCreated)
+                return Results.Ok(new {data=new {
+                    id=existing!.Value.GetProperty("id").GetString(),
+                    numero=existing.Value.GetProperty("numero").GetString(),
+                    grupo_inspecao_id=existing.Value.GetProperty("grupo_inspecao_id").GetString(),
+                    replay=true
+                },error=(object?)null});
+        }
         if(startNow && string.IsNullOrWhiteSpace(input.ItVersionId))
             return Results.Json(Error("Selecione a IT para iniciar a inspeção."),statusCode:400);
 
@@ -1217,7 +1232,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     lote_sequencial=sequentialBatch,
                     ordem_produto=1,
                     total_produtos=items.Count,
-                    produto_codigo=sequentialItems.Count>0?sequentialItems[0].Sku:null
+                    produto_codigo=sequentialItems.Count>0?sequentialItems[0].Sku:null,
+                    request_id=requestId
                 }
             }, "return=representation");
 
@@ -1250,7 +1266,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                         parametros_amostragem=new {
                             fonte="backend_dotnet",regra_caixas="informada_por_item",versao="2026-10",
                             lote_sequencial=sequentialBatch,ordem_produto=next.Index,
-                            total_produtos=items.Count,produto_codigo=next.Sku
+                            total_produtos=items.Count,produto_codigo=next.Sku,request_id=requestId
                         }
                     },"return=representation");
                 var (createdNext,ok)=FirstRow(nextRow);
@@ -3040,6 +3056,7 @@ public sealed class FinishInspectionRequest
 public class CreateInspectionRequest
 {
     public bool Iniciar { get; set; } = true;
+    public string? RequestId { get; set; }
     public string Codigo { get; set; } = "";
     public string Cliente { get; set; } = "";
     public string? NotaFiscal { get; set; }
