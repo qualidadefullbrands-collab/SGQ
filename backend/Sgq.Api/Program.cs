@@ -542,7 +542,7 @@ app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory f
         var processesTask=RestAsync(client,token,HttpMethod.Get,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em&excluido_em=is.null&order=criado_em.desc");
         var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            "select=id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
+            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
         await Task.WhenAll(profileTask,processesTask,inspectionsTask);
         var (profile,found)=FirstRow(profileTask.Result);
         if(!found)return Results.Json(Error("Usuário sem perfil autorizado no SGQ."),statusCode:403);
@@ -596,7 +596,7 @@ app.MapGet("/api/app/listas", async (HttpRequest request,IHttpClientFactory fact
         var processes=RestAsync(client,token,HttpMethod.Get,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em&excluido_em=is.null&order=criado_em.desc");
         var inspections=RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            "select=id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
+            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
         await Task.WhenAll(processes,inspections);
         return Results.Ok(new{data=new{processes=processes.Result,inspections=inspections.Result},error=(object?)null});
     }
@@ -1440,7 +1440,7 @@ app.MapPost("/api/inspecoes/{id}/iniciar", async (string id,HttpRequest request,
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         var result=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=status,it_versao_id,grupo_inspecao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+            $"select=status,it_versao_id,grupo_inspecao_id,parametros_amostragem&id=eq.{Uri.EscapeDataString(id)}&limit=1");
         var (row,found)=FirstRow(result);
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         if(row!.Value.GetProperty("status").GetString()!="aberta")
@@ -1449,8 +1449,32 @@ app.MapPost("/api/inspecoes/{id}/iniciar", async (string id,HttpRequest request,
         if(it.ValueKind!=JsonValueKind.String || string.IsNullOrWhiteSpace(it.GetString()))
             return Results.Json(Error("Selecione e salve uma IT antes de iniciar."),statusCode:400);
         var groupId=row.Value.GetProperty("grupo_inspecao_id").GetString()!;
-        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}&status=eq.aberta",
-            new {status="em_andamento",iniciada_em=DateTimeOffset.UtcNow},"return=minimal");
+        if(row.Value.TryGetProperty("parametros_amostragem",out var seq)
+            && seq.ValueKind==JsonValueKind.Object
+            && seq.TryGetProperty("lote_sequencial",out var batch)
+            && batch.ValueKind==JsonValueKind.String)
+        {
+            var batchId=batch.GetString();
+            var order=seq.TryGetProperty("ordem_produto",out var position)&&position.ValueKind==JsonValueKind.Number?position.GetInt32():1;
+            if(order>1&&!string.IsNullOrWhiteSpace(batchId))
+            {
+                var siblings=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+                    $"select=id,status,parametros_amostragem&parametros_amostragem->>lote_sequencial=eq.{Uri.EscapeDataString(batchId)}&excluido_em=is.null");
+                if(siblings is {ValueKind:JsonValueKind.Array})
+                    foreach(var sibling in siblings.Value.EnumerateArray())
+                    {
+                        if(!sibling.TryGetProperty("parametros_amostragem",out var metadata)||metadata.ValueKind!=JsonValueKind.Object)continue;
+                        var siblingOrder=metadata.TryGetProperty("ordem_produto",out var index)&&index.ValueKind==JsonValueKind.Number?index.GetInt32():0;
+                        if(siblingOrder<order && siblingOrder>0
+                            && (!sibling.TryGetProperty("status",out var status)||status.GetString()!="concluida"))
+                            return Results.Json(Error($"Finalize primeiro o produto {siblingOrder} para iniciar o produto {order}."),statusCode:409);
+                    }
+            }
+        }
+        var started=await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}&status=eq.aberta",
+            new {status="em_andamento",iniciada_em=DateTimeOffset.UtcNow},"return=representation");
+        if(started is not {ValueKind:JsonValueKind.Array} || started.Value.GetArrayLength()==0)
+            return Results.Json(Error("Esta inspeção já foi iniciada por outra sessão. Atualize o painel."),statusCode:409);
         await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",$"id=eq.{Uri.EscapeDataString(groupId)}",
             new {status="em_inspecao"},"return=minimal");
         return Results.Ok(new {data=new {ok=true,status="em_andamento"},error=(object?)null});
@@ -1840,10 +1864,12 @@ app.MapPost("/api/inspecoes/{id}/concluir", async (string id,FinishInspectionReq
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=grupo_inspecao_id,it_versao_id,tamanho_amostra,total_inspecionado,total_nao_conforme,limite_rejeicao,dimensionais_finalizados,testes_finalizados&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+            $"select=status,grupo_inspecao_id,it_versao_id,tamanho_amostra,total_inspecionado,total_nao_conforme,limite_rejeicao,dimensionais_finalizados,testes_finalizados&id=eq.{Uri.EscapeDataString(id)}&limit=1");
         var (ins,found)=FirstRow(insRows);
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var i=ins!.Value;
+        if(!i.TryGetProperty("status",out var currentStatus)||currentStatus.GetString()!="em_andamento")
+            return Results.Json(Error("Inicie o produto antes de concluir. Produtos ainda não iniciados não podem ser finalizados."),statusCode:409);
 
         int sample=i.TryGetProperty("tamanho_amostra",out var sm)&&sm.ValueKind==JsonValueKind.Number?sm.GetInt32():0;
         int inspected=i.TryGetProperty("total_inspecionado",out var ti)&&ti.ValueKind==JsonValueKind.Number?ti.GetInt32():0;
