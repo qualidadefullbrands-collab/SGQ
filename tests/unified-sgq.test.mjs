@@ -22,7 +22,7 @@ test('Inspeções Armazém is directly below Estoque in main side navigation',()
   const quality=app.indexOf('QUALIDADE</div>',stock)
   assert.ok(stock>0&&warehouse>stock&&quality>warehouse,'warehouse nav must be below stock and above quality grouping')
   assert.match(app,/tab==='auditorias' && \(/)
-  assert.match(app,/<AuditoriasPage profileName=\{profile\.nome\}\/>/)
+  assert.match(app,/<AuditoriasPage profileName=\{profile\.nome\} canDelete=\{!!canDelete\}\/>/)
 })
 
 test('Contlog work continues through same secured API and original storage buckets',()=>{
