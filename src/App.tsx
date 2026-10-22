@@ -835,6 +835,19 @@ export default function App() {
     setInspections((res.data.inspections??[]) as InspectionRow[])
   }
 
+  async function lookupFstClient(value:string){
+    const code=String(value||'').replace(/\D/g,'')
+    if(!code)return
+    const existing=processes.find(p=>String(p.codigo||'').replace(/\D/g,'')===code)
+    if(existing?.cliente){setInspection(old=>({...old,cliente:old.cliente||existing.cliente||''}));return}
+    setProcessLookupBusy(true)
+    try{
+      const {data,error}=await supabase.functions.invoke('sgq-omie-fst',{body:{codigo:code}})
+      if(!error&&data?.found&&data?.cliente)
+        setInspection(old=>String(old.codigo||'').replace(/\D/g,'')===code?{...old,cliente:old.cliente||String(data.cliente)}:old)
+    }finally{setProcessLookupBusy(false)}
+  }
+
   async function saveProcessEdit(e: React.FormEvent) {
     e.preventDefault()
     if (!editingProcess) return
@@ -1902,7 +1915,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
               <div className="form-grid">
                 <label>Processo FST
-  <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>setInspection({...inspection,codigo:e.target.value})} placeholder="Número FST"/></div>
+  <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>setInspection({...inspection,codigo:e.target.value})} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
+  {processLookupBusy && <small className="field-hint">Consultando cliente vinculado ao FST…</small>}
 </label>
                 <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
                 <label>Nota fiscal<input value={inspection.notaFiscal} onChange={(e)=>setInspection({...inspection,notaFiscal:e.target.value})}/></label>
