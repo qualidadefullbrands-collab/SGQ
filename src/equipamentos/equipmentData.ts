@@ -1,4 +1,4 @@
-import {useEffect,useState} from 'react'
+import {useState} from 'react'
 import {authClient} from '../lib/supabase'
 
 export type Equipment = {
@@ -31,6 +31,5 @@ export function useEquipmentList() {
     setBusy(false)
     return error
   }
-  useEffect(()=>{void refresh()},[])
   return {equipments,setEquipments,busy,refresh}
 }
