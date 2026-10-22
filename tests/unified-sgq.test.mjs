@@ -8,6 +8,7 @@ const audits=src('src/auditorias/AuditoriasPage.tsx')
 const styles=src('src/auditorias/auditorias.css')
 const catalog=src('src/auditorias/catalog.ts')
 const api=src('backend/Sgq.Api/Program.cs')
+const worker=src('public/sw.js')
 
 test('one authenticated SGQ shell, without environment selection screen',()=>{
   assert.doesNotMatch(app,/if \(!environment\)|environment-picker|environment==='contlog'|Trocar ambiente/)
@@ -52,4 +53,12 @@ test('camera, voice, Word generation and checklist are preserved',()=>{
   assert.match(audits,/generateWord/)
   assert.match(audits,/saveManualAnswer/)
   assert.match(audits,/confirmFinish/)
+})
+
+test('new navigation cannot be held behind stale worker HTML cache',()=>{
+  assert.match(worker,/sgq-shell-v2-/)
+  assert.match(worker,/request\.mode==='navigate'/)
+  assert.match(worker,/fetch\(request,\{cache:'no-store'\}\)/)
+  assert.match(worker,/url\.origin!==self\.location\.origin/)
+  assert.match(worker,/url\.pathname\.startsWith\('\/api\/'\)/)
 })
