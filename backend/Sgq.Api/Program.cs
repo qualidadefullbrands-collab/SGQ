@@ -776,7 +776,7 @@ app.MapPost("/api/inspecoes/{id}/excluir", async (string id,DeleteInspectionRequ
     catch(Exception e){return Results.Json(Error("Falha ao excluir inspeção.",e.Message),statusCode:500);}
 });
 
-app.MapGet("/api/produtos/sugerir", async (string termo,HttpRequest request,IHttpClientFactory factory)=>
+app.MapGet("/api/produtos/sugerir", async (string termo,string? origem,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
     {
@@ -802,9 +802,9 @@ app.MapGet("/api/produtos/sugerir", async (string termo,HttpRequest request,IHtt
                 .Where(x=>!string.IsNullOrWhiteSpace(x))
                 .Select(x=>x!),
             StringComparer.OrdinalIgnoreCase);
-        if(local.Count<5)
+        if(local.Count<5 && origem!="local")
         {
-            var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/omie-produto");
+            using var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/omie-produto");
             ApplyAuth(fn,token);
             fn.Content=JsonContent.Create(new {termo=q,modo="sugerir"});
             var res=await client.SendAsync(fn);
@@ -1295,6 +1295,8 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                     new {grupo_inspecao_id=groupId,processo_item_id=item.ProcessoItemId,
                         quantidade_componente=quantity,
                         unidades_por_conjunto=item.UnidadesPorConjunto<=0?1m:item.UnidadesPorConjunto},"return=minimal");
+                // Novo produto já foi cadastrado e vinculado; evitar quatro requisições redundantes.
+                continue;
             }
             var effectiveQuantity=EffectiveReceived(item);
             var productId=(string?)null;
