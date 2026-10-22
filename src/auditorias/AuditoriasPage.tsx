@@ -153,6 +153,9 @@ export default function AuditoriasPage({profileName}:Props) {
   const [showChecklist,setShowChecklist]=useState(false)
   const [showFinish,setShowFinish]=useState(false)
   const [notice,setNotice]=useState('')
+  const [historyFilter,setHistoryFilter]=useState<'todas'|'em_andamento'|'concluida'>('todas')
+  const [historySearch,setHistorySearch]=useState('')
+  const [bootstrapFailed,setBootstrapFailed]=useState(false)
   const bottomRef=useRef<HTMLDivElement|null>(null)
   const fileRef=useRef<HTMLInputElement|null>(null)
 
@@ -164,8 +167,22 @@ export default function AuditoriasPage({profileName}:Props) {
   const progressTotal=definition?.fixedChecklist ? definition.criteria.length : Math.max(active?.progresso_total ?? 0,uniqueAnswered)
   const progressDone=definition?.fixedChecklist ? uniqueAnswered : Math.max(active?.progresso_concluido ?? 0,uniqueAnswered)
   const progressPct=progressTotal ? Math.min(100,Math.round((progressDone/progressTotal)*100)) : 0
+  const openCount=executions.filter(x=>x.status==='em_andamento'||x.status==='revisao').length
+  const finishedCount=executions.filter(x=>x.status==='concluida'||x.status==='erro_integracao').length
+  const visibleExecutions=useMemo(()=>executions.filter(x=>{
+    const inGroup=historyFilter==='todas'||(historyFilter==='concluida'
+      ? x.status==='concluida'||x.status==='erro_integracao'
+      : x.status==='em_andamento'||x.status==='revisao')
+    const term=historySearch.trim().toLocaleLowerCase('pt-BR')
+    return inGroup&&(!term||[x.titulo,x.rq_code,x.responsavel_nome].some(value=>String(value??'').toLocaleLowerCase('pt-BR').includes(term)))
+  }),[executions,historyFilter,historySearch])
 
   useEffect(()=>{ void loadAuditHome() },[])
+  useEffect(()=>{
+    if(!notice)return
+    const timer=window.setTimeout(()=>setNotice(''),5500)
+    return()=>window.clearTimeout(timer)
+  },[notice])
   useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:'smooth'}) },[messages.length,loading])
   useEffect(()=>{
     return ()=>{ if(photoPreview) URL.revokeObjectURL(photoPreview) }
@@ -177,6 +194,10 @@ export default function AuditoriasPage({profileName}:Props) {
     if (!loaded.error && loaded.data) {
       setExecutions((loaded.data.executions ?? []) as AuditExecution[])
       setTemplates((loaded.data.templates ?? []) as TemplateRow[])
+      setBootstrapFailed(false)
+    } else {
+      setBootstrapFailed(true)
+      setNotice(loaded.error?.message || 'Não foi possível carregar as inspeções do armazém.')
     }
     setLoadingPage(false)
   }
@@ -480,17 +501,32 @@ export default function AuditoriasPage({profileName}:Props) {
   if (!active) {
     const readyCount=templates.filter((t)=>t.ativo && t.storage_path).length
     return (
-      <section className="audit-page">
+      <section className="audit-page audit-integrated">
         <div className="audit-hero">
           <div>
-            <span className="eyebrow">QUALIDADE · CAMPO</span>
-            <h1>Assistente de inspeções</h1>
-            <p>Escolha o registro. Durante a inspeção, converse normalmente, dite ou fotografe a evidência. O sistema estrutura os achados no modelo oficial.</p>
+            <span className="eyebrow">CONTLOG · QUALIDADE OPERACIONAL</span>
+            <h1>Inspeções Armazém</h1>
+            <p>Inspeções de campo, checklist, evidências fotográficas e relatórios Word. Todos os registros anteriores continuam disponíveis neste módulo.</p>
           </div>
-          <div className="audit-hero-icon"><Sparkles size={28}/></div>
+          <div className="audit-hero-icon"><ClipboardCheck size={26}/></div>
+        </div>
+
+        <div className="audit-overview" aria-label="Indicadores das inspeções do armazém">
+          <button type="button" className={'audit-overview-card '+(historyFilter==='todas'?'active':'')} onClick={()=>setHistoryFilter('todas')}>
+            <span>Inspeções</span><strong>{executions.length}</strong><small>Registros disponíveis</small>
+          </button>
+          <button type="button" className={'audit-overview-card '+(historyFilter==='em_andamento'?'active':'')} onClick={()=>setHistoryFilter('em_andamento')}>
+            <span>Em andamento</span><strong>{openCount}</strong><small>Inclui revisão</small>
+          </button>
+          <button type="button" className={'audit-overview-card '+(historyFilter==='concluida'?'active':'')} onClick={()=>setHistoryFilter('concluida')}>
+            <span>Concluídas</span><strong>{finishedCount}</strong><small>Inclui integração pendente</small>
+          </button>
+          <div className="audit-overview-card static"><span>Modelos oficiais</span><strong>{readyCount}/4</strong><small>Arquivos Word disponíveis</small></div>
         </div>
 
         {notice && <div className="audit-notice">{notice}<button onClick={()=>setNotice('')}><X size={15}/></button></div>}
+
+        {bootstrapFailed && <div className="audit-retry"><span>Falha ao consultar o histórico e os modelos do armazém.</span><button type="button" className="secondary" onClick={()=>void loadAuditHome()}>Tentar novamente</button></div>}
 
         <div className="audit-template-panel">
           <div>
@@ -533,10 +569,16 @@ export default function AuditoriasPage({profileName}:Props) {
 
         <div className="audit-history">
           <div className="audit-section-title">
-            <div><span className="eyebrow">HISTÓRICO</span><h2>Inspeções recentes</h2></div>
+            <div><span className="eyebrow">HISTÓRICO · CONTLOG</span><h2>Inspeções recentes</h2></div>
+            <div className="audit-history-controls">
+              <label className="audit-history-search">Buscar no histórico
+                <input value={historySearch} onChange={e=>setHistorySearch(e.target.value)} placeholder="RQ, inspeção ou responsável" />
+              </label>
+              <button type="button" className="secondary" onClick={()=>void loadAuditHome()} disabled={loadingPage}>Atualizar</button>
+            </div>
           </div>
-          {!executions.length && <div className="audit-empty">Nenhuma inspeção deste módulo ainda.</div>}
-          {executions.map((x)=>(
+          {!bootstrapFailed && !visibleExecutions.length && <div className="audit-empty">{executions.length?'Nenhuma inspeção corresponde ao filtro.':'Nenhuma inspeção deste módulo ainda.'}</div>}
+          {visibleExecutions.map((x)=>(
             <button className="audit-history-row" key={x.id} onClick={()=>openAudit(x.id)}>
               <div>
                 <strong>{x.rq_code.replace('RQ','RQ ')} · {x.titulo}</strong>
