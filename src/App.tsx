@@ -1836,8 +1836,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {inspections.filter((i)=>i.status==='em_andamento').slice(0,8).map((i)=>(
               <div className="queue-row" key={i.id}>
                 <div>
-                  <strong>{formatFst(i.grupos_inspecao?.processos?.codigo)} · Recebimento {formatDateBR(i.grupos_inspecao?.processos?.chegada_cd || i.grupos_inspecao?.processos?.data_processo)}</strong>
-                  <span>{i.grupos_inspecao?.nome} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0} unidades</span>
+                  <strong>{inspectionDisplay(i)}</strong>
+                  <span>{i.grupos_inspecao?.nome} · Recebimento {formatDateBR(i.grupos_inspecao?.processos?.chegada_cd || i.grupos_inspecao?.processos?.data_processo)} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0} unidades</span>
                 </div>
                 <button className="primary small" onClick={()=>openInspection(i.id)}><Play size={15}/> Continuar</button>
               </div>
