@@ -858,7 +858,13 @@ export default function App() {
     setSkuRows([emptySku()]);setTab('nova');setMessage('')
   }
 
+  const productLookupTimers=useRef<Record<number,number>>({})
   function queueProductSuggestions(index:number, value:string) {
+    const prior=productLookupTimers.current[index]
+    if(prior)window.clearTimeout(prior)
+    if(/[0-9]/.test(value)&&value.trim().length>=4){
+      productLookupTimers.current[index]=window.setTimeout(()=>void lookupProduct(index,value.trim()),850)
+    }
     const old=productSearchTimers.current[index]
     if (old) window.clearTimeout(old)
     const term=value.trim()
@@ -868,12 +874,13 @@ export default function App() {
     }
     setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,suggesting:true}:r))
     productSearchTimers.current[index]=window.setTimeout(async()=>{
-      const result=await apiGet<any[]>(`/api/produtos/sugerir?termo=${encodeURIComponent(term)}`)
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{
-        ...r,
-        suggestions:(result.data ?? []).map((x:any)=>({sku:String(x.sku ?? ''),nome:String(x.nome ?? ''),origem:String(x.origem ?? '')})),
-        suggesting:false,
-      }:r))
+      const fast=await apiGet<any[]>(`/api/produtos/sugerir?termo=${encodeURIComponent(term)}&origem=local`)
+      const parse=(items:any[])=>(items??[]).map((x:any)=>({sku:String(x.sku??''),nome:String(x.nome??''),origem:String(x.origem??'')}))
+      const items=parse(fast.data??[])
+      setSkuRows(rows=>rows.map((r,i)=>i===index&&r.sku.trim()===term?{...r,suggestions:items,suggesting:items.length<5}:r))
+      if(items.length>=5)return
+      const complete=await apiGet<any[]>(`/api/produtos/sugerir?termo=${encodeURIComponent(term)}`)
+      setSkuRows(rows=>rows.map((r,i)=>i===index&&r.sku.trim()===term?{...r,suggestions:parse(complete.data??items),suggesting:false}:r))
     },280)
   }
 
@@ -890,32 +897,32 @@ export default function App() {
 
     const result=await apiPost<any>('/api/produtos/consultar',{codigo:code})
     if (result.error) {
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'error',omieMessage:result.error.message || 'Falha ao consultar o OMIE.'}:r))
+      setSkuRows((rows)=>rows.map((r,i)=>i===index&&r.sku.trim()===code?{...r,omieStatus:'error',omieMessage:result.error.message || 'Falha ao consultar o OMIE.'}:r))
       return
     }
     const data=result.data
     if (data?.error === 'omie_not_configured') {
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_configured',omieMessage:String(data?.message ?? 'Integração OMIE não configurada.')}:r))
+      setSkuRows((rows)=>rows.map((r,i)=>i===index&&r.sku.trim()===code?{...r,omieStatus:'not_configured',omieMessage:String(data?.message ?? 'Integração OMIE não configurada.')}:r))
       return
     }
     if (data?.error === 'not_found') {
       const suggestions=(data?.sugestoes ?? []).map((x:any)=>({sku:String(x.codigo ?? ''),nome:String(x.descricao ?? ''),origem:'omie'}))
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_found',omieMessage:String(data?.message ?? 'Código não encontrado no OMIE.'),suggestions}:r))
+      setSkuRows((rows)=>rows.map((r,i)=>i===index&&r.sku.trim()===code?{...r,omieStatus:'not_found',omieMessage:String(data?.message ?? 'Código não encontrado no OMIE.'),suggestions}:r))
       return
     }
     if (data?.error) {
       let prefix='Falha ao consultar o OMIE'
       if (data.error==='auth_error') prefix='Credenciais do OMIE recusadas'
       if (data.error==='rate_limit') prefix='Limite de consultas do OMIE atingido'
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'error',omieMessage:prefix+': '+String(data?.message ?? prefix)}:r))
+      setSkuRows((rows)=>rows.map((r,i)=>i===index&&r.sku.trim()===code?{...r,omieStatus:'error',omieMessage:prefix+': '+String(data?.message ?? prefix)}:r))
       return
     }
     if (!data?.found || !data?.descricao) {
-      setSkuRows((rows)=>rows.map((r,i)=>i===index?{...r,nome:'',omieStatus:'not_found',omieMessage:'Código não localizado no cadastro de produtos do OMIE.'}:r))
+      setSkuRows((rows)=>rows.map((r,i)=>i===index&&r.sku.trim()===code?{...r,omieStatus:'not_found',omieMessage:'Código não localizado no cadastro de produtos do OMIE.'}:r))
       return
     }
 
-    setSkuRows((rows)=>rows.map((r,i)=>i===index?{
+    setSkuRows((rows)=>rows.map((r,i)=>i===index&&r.sku.trim()===code?{
       ...r,
       nome:String(data.descricao),
       fotoPrincipalPath:String(data.fotoPrincipalPath ?? ''),
@@ -2172,7 +2179,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                           </div>}
                         </label>
                         <label>Descrição
-                          <input value={row.nome} readOnly placeholder="Preenchida pelo OMIE"/>
+                          <input value={row.nome} onChange={e=>setSkuRows(old=>old.map((r,j)=>j===i?{...r,nome:e.target.value}:r))} placeholder="Descrição do produto (Omie ou manual)"/>
                           {row.omieStatus==='loading' && <small className="field-status">{row.omieMessage || 'Consultando OMIE…'}</small>}
                           {row.omieStatus==='found' && <small className="field-status ok">{row.omieMessage || 'Produto confirmado no OMIE'}</small>}
                           {row.omieStatus==='not_found' && <small className="field-status bad">{row.omieMessage || 'Código não encontrado no OMIE'}</small>}
