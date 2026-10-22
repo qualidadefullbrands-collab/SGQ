@@ -348,6 +348,10 @@ export default function App() {
   const [editingProcessId,setEditingProcessId]=useState<string|null>(null)
   const [inspectionBusy,setInspectionBusy]=useState(false)
   const [activeProductIndex,setActiveProductIndex]=useState(0)
+  const [itSuggestBusy,setItSuggestBusy]=useState(false)
+  const [itSuggestionNote,setItSuggestionNote]=useState('')
+  const lastItSuggested=useRef('')
+  const manualItSelection=useRef(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   useEffect(()=>{if(!message)return;const timer=window.setTimeout(()=>setMessage(''),3500);return()=>window.clearTimeout(timer)},[message])
@@ -751,6 +755,7 @@ export default function App() {
 
   function resetNewInspection() {
     setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0)
+    manualItSelection.current=false;lastItSuggested.current='';setItSuggestionNote('')
     setInspection({
       processoId: '', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
       dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I', observacaoInterna: '',
@@ -941,8 +946,11 @@ export default function App() {
     setProcessLookupBusy(true)
     try{
       const {data,error}=await authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code}})
-      if(!error&&data?.found&&data?.cliente)
+      if(!error&&data?.found&&data?.cliente){
         setInspection(old=>String(old.codigo||'').replace(/\D/g,'')===code?{...old,cliente:old.cliente||String(data.cliente)}:old)
+      }else if(!inspection.cliente){
+        setItSuggestionNote('Cliente não localizado por vínculo exato FST–Omie. Informe manualmente, se necessário.')
+      }
     }finally{setProcessLookupBusy(false)}
   }
 
@@ -1080,6 +1088,34 @@ export default function App() {
     void refreshLists()
     await openInspection(selectedInspectionId)
   }
+  async function suggestApplicableIt(force=false){
+    const products=skuRows.filter(row=>row.nome.trim()||row.sku.trim()).map(row=>({codigo:row.sku,descricao:row.nome}))
+    const its=itVersions.filter(it=>it.status==='publicada').map(it=>({
+      id:it.id,codigo:it.instrucoes_trabalho?.codigo,titulo:it.instrucoes_trabalho?.titulo
+    }))
+    const fingerprint=JSON.stringify(products.map(p=>[p.codigo,p.descricao]))+its.map(x=>x.id).join()
+    if(!products.length||!its.length||(!force&&(inspection.itVersionId||manualItSelection.current||fingerprint===lastItSuggested.current)))return
+    lastItSuggested.current=fingerprint
+    setItSuggestBusy(true)
+    try{
+      const {data,error}=await authClient.functions.invoke('sgq-it-sugerir',{body:{products,its}})
+      if(error||!data){setItSuggestionNote('Não foi possível sugerir uma IT. Selecione manualmente.');return}
+      const chosen=its.find(x=>x.id===data.id)
+      if(chosen&&!manualItSelection.current){
+        setInspection(old=>old.itVersionId?old:{...old,itVersionId:chosen.id})
+        setItSuggestionNote('IT sugerida por IA com base nos produtos. Confirme antes de iniciar.')
+      }else setItSuggestionNote(data.motivo||'Nenhuma IT compatível com confiança suficiente. Selecione manualmente.')
+    }catch{setItSuggestionNote('Sugestão indisponível. Selecione a IT manualmente.')}
+    finally{setItSuggestBusy(false)}
+  }
+  const aiItFingerprint=skuRows.map(row=>row.sku+'|'+row.nome).join('¦')
+  useEffect(()=>{
+    if(!userId||!itVersions.length||!skuRows.some(row=>row.nome.trim()))return
+    if(inspection.itVersionId||manualItSelection.current)return
+    const timer=window.setTimeout(()=>void suggestApplicableIt(),950)
+    return()=>window.clearTimeout(timer)
+  },[aiItFingerprint,itVersions,userId,inspection.itVersionId])
+
   async function createInspection(e: React.FormEvent, iniciar:boolean) {
     e.preventDefault()
     if(!canWrite||!userId||inspectionBusy)return
@@ -2090,14 +2126,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <label className="check-option"><input type="checkbox" checked={inspection.transporte.includes('Marítimo')} onChange={()=>setInspection({...inspection,transporte:toggleTransport(inspection.transporte,'Marítimo')})}/><span>Marítimo</span></label>
                 </div></div>
                 <label>Data da inspeção<input type="date" value={inspection.dataInspecao} onChange={(e)=>setInspection({...inspection,dataInspecao:e.target.value})}/></label>
-                <label>IT aplicável
-                  <select value={inspection.itVersionId} onChange={(e)=>{ const value=e.target.value; const selected=itVersions.find((it)=>it.id===value); setInspection({...inspection,itVersionId:value,inspectionLevel:selected?.nivel_inspecao_padrao || inspection.inspectionLevel}) }}>
-                    <option value="">Selecione</option>
-                    {itVersions.filter((it)=>it.status==='publicada').map((it)=>(
-                      <option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo} · {it.versao}</option>
-                    ))}
-                  </select>
-                </label>
+
                 <label>Nível de inspeção
                   <select value={inspection.inspectionLevel} onChange={(e)=>setInspection({...inspection,inspectionLevel:e.target.value})}>
                     <option value="I">Nível I</option>
@@ -2179,6 +2208,22 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   )
                 })}
               </div>
+            </section>
+
+            <section className="panel section-card inspection-it-choice">
+              <div className="section-title"><h2>IT aplicável</h2><button className="secondary small" type="button" disabled={itSuggestBusy} onClick={()=>void suggestApplicableIt(true)}><Sparkles size={16}/>{itSuggestBusy?'Analisando…':'Sugerir com IA'}</button></div>
+              <label>IT para os produtos cadastrados
+                <select value={inspection.itVersionId} onChange={e=>{
+                  manualItSelection.current=true
+                  const selected=itVersions.find(it=>it.id===e.target.value)
+                  setInspection(old=>({...old,itVersionId:e.target.value,inspectionLevel:selected?.nivel_inspecao_padrao||old.inspectionLevel}))
+                  setItSuggestionNote('')
+                }}>
+                  <option value="">Selecione uma IT</option>
+                  {itVersions.filter(it=>it.status==='publicada').map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo} · {it.versao}</option>)}
+                </select>
+              </label>
+              {itSuggestionNote && <p className="field-hint" role="status">{itSuggestionNote}</p>}
             </section>
 
             <section className="calc-strip">
