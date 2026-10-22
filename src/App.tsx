@@ -2045,7 +2045,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {detail.status!=='concluida' && canWrite && <button className="secondary" type="button" onClick={()=>{setActiveStage('dados');startEditingInspectionData()}}><Edit3 size={16}/> Editar dados</button>}
 
               {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
-              {detail.status==='concluida' && <button className="secondary" type="button" disabled={sharepointBusy} onClick={()=>void sendWordToPowerAutomate()}><FileText size={16}/>{sharepointBusy?'Enviando…':'Enviar ao SharePoint'}</button>
+              {detail.status==='concluida' && <button className="secondary" type="button" disabled={sharepointBusy} onClick={()=>void sendWordToPowerAutomate()}><FileText size={16}/>{sharepointBusy?'Enviando…':'Enviar ao SharePoint'}</button>}
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
           </div>
