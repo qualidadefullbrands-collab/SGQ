@@ -572,6 +572,23 @@ app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory f
     catch(Exception e){return Results.Json(Error("Falha ao carregar o SGQ.",e.Message),statusCode:500);}
 });
 
+// Atualização leve das listas: evita baixar estoque e ITs após cada exclusão ou mudança de status.
+app.MapGet("/api/app/listas", async (HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var processes=RestAsync(client,token,HttpMethod.Get,"processos",
+            "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em&excluido_em=is.null&order=criado_em.desc");
+        var inspections=RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            "select=id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
+        await Task.WhenAll(processes,inspections);
+        return Results.Ok(new{data=new{processes=processes.Result,inspections=inspections.Result},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao atualizar as listas.",e.Message),statusCode:500);}
+});
+
 app.MapGet("/api/inspecoes/{id}/detalhe", async (string id,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
