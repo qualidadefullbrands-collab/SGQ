@@ -1159,6 +1159,7 @@ export default function App() {
     setMessage('')
 
     if (iniciar && !inspection.itVersionId) {setPopupMessage('Selecione a IT para iniciar a inspeção.');return}
+    setInspectionBusy(true)
 
     const itens:any[]=[]
     for (const row of skuRows) {
@@ -1178,7 +1179,7 @@ export default function App() {
         const folder=row.sku.trim() || 'temporario'
         const photoPath=`${folder}/${Date.now()}-${safe}`
         const upload=await supabase.storage.from('produto-fotos').upload(photoPath,row.fotoFile,{contentType:row.fotoFile.type||undefined})
-        if (upload.error) return setError('Falha ao salvar foto principal do produto: '+upload.error.message)
+        if (upload.error){setInspectionBusy(false);return setError('Falha ao salvar foto principal do produto: '+upload.error.message)}
         fotoPrincipalPath=photoPath
       }
 
@@ -1214,6 +1215,7 @@ export default function App() {
     })
 
     if (created.error || !created.data?.id) {
+      setInspectionBusy(false)
       return setError(created.error?.message || 'Falha ao criar inspeção.')
     }
 
@@ -1244,9 +1246,9 @@ export default function App() {
     loadSequence.current++
     if(iniciar){await openInspection(created.data.id);setActiveStage('amostragem')}
     else setTab('painel')
+    setInspectionBusy(false)
     void refreshLists()
   }
-
   async function startSavedInspection(targetStage:typeof activeStage='amostragem') {
     if(!selectedInspectionId || detail?.status!=='aberta') return
     if(!detail.it_versao_id){setPopupMessage('Selecione uma IT nos dados da inspeção antes de continuar.');setActiveStage('dados');return}
@@ -2257,7 +2259,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
-              {detail.status!=='concluida' && canWrite && <button className="secondary" type="button" onClick={()=>{setActiveStage('dados');startEditingInspectionData()}}><Edit3 size={16}/> Editar dados</button>}
+              {detail.status!=='concluida' && canWrite && <button className="secondary" type="button" onClick={()=>void editInspectionFull(detail.id)}><Edit3 size={16}/> Editar dados</button>}
 
               {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
               {detail.status==='concluida' && <button className="secondary" type="button" disabled={sharepointBusy} onClick={()=>void sendWordToPowerAutomate()}><FileText size={16}/>{sharepointBusy?'Enviando…':'Enviar ao SharePoint'}</button>}
@@ -2286,10 +2288,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
           <section id="sec-dados" className={'panel section-card internal-note-panel inspection-stage'+(activeStage==='dados'?'':' inspection-stage-hidden')}>
             <div className="section-title"><div><h2>Dados iniciais da inspeção</h2></div>
-              {canWrite && detail.status!=='concluida' && <button className="secondary small" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados e IT</button>}
+              {canWrite && detail.status!=='concluida' && <button className="secondary small" type="button" onClick={()=>void editInspectionFull(detail.id)}><Edit3 size={16}/> Editar dados e IT</button>}
             </div>
             <div className="inspection-data-summary">
-              <div><small>Processo FST</small><strong>{formatFst(detail.grupos_inspecao?.processos?.codigo)}</strong></div>
+              <div><small>Processo</small><strong>{formatFst(detail.grupos_inspecao?.processos?.codigo)}</strong></div>
               <div><small>Cliente</small><strong>{detail.grupos_inspecao?.processos?.cliente || '—'}</strong></div>
               <div><small>Nota fiscal</small><strong>{detail.grupos_inspecao?.processos?.nota_fiscal || '—'}</strong></div>
               <div><small>Origem / transporte</small><strong>{detail.grupos_inspecao?.processos?.origem || '—'} · {detail.grupos_inspecao?.processos?.transporte || '—'}</strong></div>
@@ -2942,7 +2944,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <h2>Editar inspeção</h2>
             <p className="muted">Altere os campos necessários e salve.</p>
             <div className="form-grid">
-              <label>Processo FST<input value={editingInspectionData.codigo ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,codigo:e.target.value})}/></label>
+              <label>Processo<input value={editingInspectionData.codigo ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,codigo:e.target.value})}/></label>
               <label>Cliente<input value={editingInspectionData.cliente ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,cliente:e.target.value})}/></label>
               <label>Nota fiscal<input value={editingInspectionData.notaFiscal ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,notaFiscal:e.target.value})}/></label>
               <label>Chegada no CD<input type="date" value={editingInspectionData.chegadaCd ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,chegadaCd:e.target.value})}/></label>
