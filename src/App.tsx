@@ -1790,8 +1790,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <div className="sgq-dialog-symbol"><ShieldCheck size={24}/></div><h2>Verifique as informações</h2>
           <p>{popupMessage}</p><button className="primary" type="button" autoFocus onClick={()=>setPopupMessage('')}>Entendi</button>
         </div>
-      </div>
-      {message && <div className="alert success">{message}</div>}
+      </div>}
+      {message && <div className="alert success">{message}</div>
 
       {tab==='painel' && (
         <section className="workspace">
@@ -2320,7 +2320,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             })}
             {!detail.tests?.length && <div className="muted">Sem teste especial estruturado para esta IT.</div>}
             {!!detail.tests?.length && !detail.testes_finalizados && detail.status!=='concluida' && <div className="actions"><button className="secondary" type="button" onClick={()=>void completeTests()}><CheckCircle2 size={16}/> Concluir testes</button></div>}
-            {!!detail.tests?.length && }
           </section>
 
           <section id="sec-fotos" className={'panel section-card inspection-stage'+(activeStage==='fotos' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
