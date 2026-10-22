@@ -1230,8 +1230,50 @@ export default function App() {
     if (!selectedInspectionId) return
     const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/dimensionais/finalizar`,{})
     if (saved.error) return setError(saved.error.message)
-    setMessage('Dimensionais marcados como concluídos. Nesta fase de testes, campos pendentes não bloqueiam o avanço.')
+    setMessage('Análises dimensionais concluídas.')
     await openInspection(selectedInspectionId)
+  }
+
+  async function completeTests() {
+    if (!selectedInspectionId||!detail)return
+    const done=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/testes/finalizar`,{})
+    if(done.error){setPopupMessage(done.error.message);return}
+    setDetail((d:any)=>d?{...d,testes_finalizados:true}:d)
+    setMessage('Testes concluídos.')
+  }
+
+  async function suggestAIConclusion(){
+    if(!detail||aiConclusionBusy)return
+    setAiConclusionBusy(true)
+    setError('')
+    try{
+      const context={
+        numeroFst:detail.grupos_inspecao?.processos?.codigo,
+        cliente:detail.grupos_inspecao?.processos?.cliente,
+        produto:detail.grupos_inspecao?.nome,
+        tamanhoAmostra:detail.tamanho_amostra,
+        totalInspecionado:detail.total_inspecionado,
+        naoConformes:detail.total_nao_conforme,
+        checklist:(detail.checklistResults??[]).map((r:any)=>({resultado:r.resultado,observacao:r.observacao})),
+        dimensionais:(detail.dimResults??[]).map((r:any)=>({conforme:r.conforme,valor:r.valor_medido})),
+        testes:(detail.testResults??[]).map((r:any)=>({resultado:r.resultado})),
+        textoAtual:finalObservation,
+      }
+      const {data,error:aiError}=await supabase.functions.invoke('sgq-conclusao',{body:context})
+      if(aiError||data?.error||!data?.text){setPopupMessage('Não foi possível gerar a conclusão agora. Digite o texto manualmente.');return}
+      setFinalObservation(String(data.text))
+      setMessage('Sugestão gerada. Revise e edite antes de finalizar.')
+    }catch{setPopupMessage('Falha ao consultar a IA. Escreva a conclusão manualmente.')}
+    finally{setAiConclusionBusy(false)}
+  }
+
+  async function sendWordToPowerAutomate(){
+    if(!selectedInspectionId||sharepointBusy)return
+    setSharepointBusy(true)
+    const r=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/enviar-automate`,{})
+    setSharepointBusy(false)
+    if(r.error){setPopupMessage(r.error.message);return}
+    setMessage('Documento encaminhado ao Power Automate.')
   }
 
   async function saveTest(testId: string, result: string) {
@@ -1696,7 +1738,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
   const checklistDone = detail ? (detail.checklist?.length ?? 0) === 0 || (detail.checklistResults?.length ?? 0) >= detail.checklist.length : false
   const dimsDone = detail ? (detail.params?.length ?? 0) === 0 || detail.dimensionais_finalizados : false
-  const testsDone = detail ? (detail.tests?.length ?? 0) === 0 || detail.testes_finalizados : false
+  const testsDone = detail ? (detail.tests?.length ?? 0) === 0 || !!detail.testes_finalizados : false
   const samplingDone = detail ? (detail.total_inspecionado ?? 0) >= (detail.tamanho_amostra ?? 0) || (!!detail.limite_rejeicao && detail.total_nao_conforme >= detail.limite_rejeicao) : false
 
   return (
@@ -1956,8 +1998,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
               {detail.status!=='concluida' && canWrite && <button className="secondary" type="button" onClick={()=>{setActiveStage('dados');startEditingInspectionData()}}><Edit3 size={16}/> Editar dados</button>}
-              {detail.status==='aberta' && <button className="primary" type="button" onClick={()=>void startSavedInspection()}><Play size={16}/> Iniciar inspeção</button>}
+
               {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
+              {detail.status==='concluida' && <button className="secondary" type="button" disabled={sharepointBusy} onClick={()=>void sendWordToPowerAutomate()}><FileText size={16}/>{sharepointBusy?'Enviando…':'Enviar ao SharePoint'}</button>
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
           </div>
@@ -2001,7 +2044,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <span>{link.processo_itens.produtos?.nome || 'Produto em preenchimento'} · {link.processo_itens.quantidade ?? 0} un.</span></div>
               ))}
             </div>
-            {detail.status==='aberta' && <div className="actions"><button className="primary" type="button" onClick={()=>void startSavedInspection()}><Play size={16}/> Iniciar inspeção</button></div>}
+
             <div className="section-title"><h3>Observação interna</h3></div>
             <div className="section-title"><h2>Observação interna</h2></div>
             <textarea
@@ -2225,6 +2268,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               )
             })}
             {!detail.tests?.length && <div className="muted">Sem teste especial estruturado para esta IT.</div>}
+            {!!detail.tests?.length && !detail.testes_finalizados && detail.status!=='concluida' && <div className="actions"><button className="secondary" type="button" onClick={()=>void completeTests()}><CheckCircle2 size={16}/> Concluir testes</button></div>}
             {!!detail.tests?.length && }
           </section>
 
@@ -2280,6 +2324,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
               <div className="section-title conclusion-title">
                 <label>Observação / conclusão</label>
+                <button type="button" className="secondary small" onClick={()=>void suggestAIConclusion()} disabled={aiConclusionBusy}><Sparkles size={16}/>{aiConclusionBusy?'Gerando…':'Gerar sugestão com IA'}</button>
               </div>
               <textarea value={finalObservation} onChange={(e)=>setFinalObservation(e.target.value)} rows={5} placeholder="Registre a conclusão da inspeção."/>
               <div className="result-actions">
