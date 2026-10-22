@@ -359,6 +359,8 @@ export default function App() {
   const [editingInspectionId,setEditingInspectionId]=useState<string|null>(null)
   const [editingProcessId,setEditingProcessId]=useState<string|null>(null)
   const [inspectionBusy,setInspectionBusy]=useState(false)
+  const submitLock=useRef(false)
+  const createRequestId=useRef(crypto.randomUUID())
   const [activeProductIndex,setActiveProductIndex]=useState(0)
   const [itSuggestBusy,setItSuggestBusy]=useState(false)
   const [itSuggestionNote,setItSuggestionNote]=useState('')
@@ -766,6 +768,7 @@ export default function App() {
   }
 
   function resetNewInspection() {
+    createRequestId.current=crypto.randomUUID()
     setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0)
     manualItSelection.current=false;lastItSuggested.current='';setItSuggestionNote('');setProcessLookupMessage('')
     setInspection({
@@ -1144,7 +1147,9 @@ export default function App() {
 
   async function createInspection(e: React.FormEvent, iniciar:boolean) {
     e.preventDefault()
-    if(!canWrite||!userId||inspectionBusy)return
+    if(!canWrite||!userId||inspectionBusy||submitLock.current)return
+    submitLock.current=true
+    try {
     if(editingInspectionId||editingProcessId){
       setInspectionBusy(true)
       try{
@@ -1220,6 +1225,7 @@ export default function App() {
 
     const created=await apiPost<any>('/api/inspecoes/criar',{
       codigo:inspection.codigo.trim(),
+      requestId:createRequestId.current,
       cliente:inspection.cliente.trim() || null,
       notaFiscal:inspection.notaFiscal.trim() || null,
       origem:inspection.origem.trim() || null,
@@ -1270,6 +1276,10 @@ export default function App() {
     else setTab('painel')
     setInspectionBusy(false)
     void refreshLists()
+    }finally{
+      submitLock.current=false
+      setInspectionBusy(false)
+    }
   }
   async function startSavedInspection(targetStage:typeof activeStage='amostragem') {
     if(!selectedInspectionId || detail?.status!=='aberta') return
