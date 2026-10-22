@@ -395,6 +395,13 @@ export default function App() {
   const [skuRows, setSkuRows] = useState([emptySku()])
   const productSearchTimers = useRef<Record<number,number>>({})
   const loadAppRequest = useRef<Promise<void> | null>(null)
+  const catalogsRequest=useRef<Promise<void>|null>(null)
+  const stockRequest=useRef<Promise<void>|null>(null)
+  const photosLinksExpiration=useRef(new Map<string,number>())
+  const photoLinksRequest=useRef(new Map<string,Promise<void>>())
+  const [catalogsLoading,setCatalogsLoading]=useState(false)
+  const [stockLoading,setStockLoading]=useState(false)
+  const [photoUploadBusy,setPhotoUploadBusy]=useState(false)
   const loadSequence=useRef(0)
   const {equipments,setEquipments,refresh:refreshEquipments}=useEquipmentList()
   const [editingInspectionData, setEditingInspectionData] = useState<any>(null)
@@ -509,8 +516,11 @@ export default function App() {
       setEnvironment(null)
       return
     }
-    loadApp()
-    void refreshEquipments()
+    void loadApp().then(()=>{
+      void loadCatalogs()
+      void loadStock()
+      void refreshEquipments()
+    })
   }, [userId])
 
   useEffect(()=>{
@@ -564,6 +574,56 @@ export default function App() {
   }, [selectedSample])
 
 
+  async function loadCatalogs(){
+    if(catalogsRequest.current)return catalogsRequest.current
+    const req=(async()=>{
+      setCatalogsLoading(true)
+      try{
+        const res=await apiGet<any>('/api/app/catalogos')
+        if(res.data){
+          setItVersions((res.data.itVersions??[]) as ItVersion[])
+          setGroups((res.data.groups??[]) as Group[])
+        }
+      }finally{setCatalogsLoading(false)}
+    })()
+    catalogsRequest.current=req
+    try{await req}finally{if(catalogsRequest.current===req)catalogsRequest.current=null}
+  }
+
+  async function loadStock(){
+    if(stockRequest.current)return stockRequest.current
+    const req=(async()=>{
+      setStockLoading(true)
+      try{
+        const res=await apiGet<any>('/api/app/estoque')
+        if(res.data){
+          const rows=(res.data.samples??[]).map((x:any)=>({...x,saldo:Number(x.saldo??0)}))
+          setSamples(rows)
+          setCounts(old=>({...old,amostras:rows.length}))
+        }
+      }finally{setStockLoading(false)}
+    })()
+    stockRequest.current=req
+    try{await req}finally{if(stockRequest.current===req)stockRequest.current=null}
+  }
+
+  async function loadPhotoLinks(id:string,force=false){
+    if(!force&&(photosLinksExpiration.current.get(id)||0)>Date.now())return
+    const running=photoLinksRequest.current.get(id)
+    if(running)return running
+    const req=(async()=>{
+      const res=await apiGet<{photoUrls:Record<string,string|null>}>(`/api/inspecoes/${encodeURIComponent(id)}/fotos/links`)
+      if(res.error||!res.data)return
+      const links=res.data.photoUrls??{}
+      setDetail((d:any)=>d?.id===id?{...d,photos:(d.photos??[]).map((p:any)=>({
+        ...p,signed_url:links[p.storage_path]??null
+      }))}:d)
+      photosLinksExpiration.current.set(id,Date.now()+45*60*1000)
+    })()
+    photoLinksRequest.current.set(id,req)
+    try{await req}finally{if(photoLinksRequest.current.get(id)===req)photoLinksRequest.current.delete(id)}
+  }
+
   async function loadApp() {
     if (loadAppRequest.current) return loadAppRequest.current
     const sequence=++loadSequence.current
@@ -583,15 +643,9 @@ export default function App() {
       setProfile(data.profile as Profile)
       setProcesses((data.processes ?? []) as ProcessRow[])
       setInspections((data.inspections ?? []) as InspectionRow[])
-      setItVersions((data.itVersions ?? []) as ItVersion[])
-      setGroups((data.groups ?? []) as Group[])
-      setSamples((data.samples ?? []).map((s:any)=>({...s,saldo:Number(s.saldo ?? 0)})))
-      setCounts(data.counts ?? {
-        processos:(data.processes ?? []).length,
-        inspecoes:(data.inspections ?? []).length,
-        amostras:(data.samples ?? []).length,
-        laudos:0,
-      })
+      setCounts(old=>({
+        ...old,processos:(data.processes??[]).length,inspecoes:(data.inspections??[]).length
+      }))
     })()
     loadAppRequest.current=request
     try {
@@ -830,8 +884,9 @@ export default function App() {
   }
 
   async function refreshLists() {
+    const version=loadSequence.current
     const res=await apiGet<any>('/api/app/listas')
-    if(res.error||!res.data) return
+    if(res.error||!res.data||version!==loadSequence.current)return
     setProcesses((res.data.processes??[]) as ProcessRow[])
     setInspections((res.data.inspections??[]) as InspectionRow[])
   }
@@ -1069,6 +1124,7 @@ export default function App() {
   function selectInspectionStage(stage:typeof activeStage) {
     if(detail?.status==='aberta'&&stage!=='dados'){void startSavedInspection(stage);return}
     setActiveStage(stage)
+    if(stage==='fotos'&&selectedInspectionId)void loadPhotoLinks(selectedInspectionId)
     const nav=document.getElementById('inspection-stage-nav')
     if(nav) window.scrollTo({top:Math.max(0,window.scrollY+nav.getBoundingClientRect().top-90),behavior:'smooth'})
   }
@@ -1417,7 +1473,7 @@ export default function App() {
     const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/retencao`,{motivoSemRetencao:null,itens})
     if (saved.error) return setError(saved.error.message)
     setMessage(`${saved.data?.retidos ?? itens.length} amostra(s) enviada(s) ao estoque usando a foto principal já definida na inspeção.`)
-    await Promise.all([loadApp(),openInspection(selectedInspectionId)])
+    await Promise.all([loadStock(),openInspection(selectedInspectionId)])
   }
 
   async function structureItVersion(itVersionId:string, openReview=true) {
