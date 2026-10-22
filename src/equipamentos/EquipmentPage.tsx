@@ -126,7 +126,7 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
       <div className="form-grid">
         {field('Código','codigo')}{field('Nome do equipamento','nome')}
         <label>Finalidade para uso nas inspeções<select value={editing.tipo||'instrumento'} onChange={e=>setEditing({...editing,tipo:e.target.value})}><option value="instrumento">Medição metrológica</option><option value="dimensional">Medição dimensional</option><option value="teste">Ensaio ou teste funcional</option><option value="apoio">Apoio ou conservação (não medir)</option></select></label>
-        {editing.dados_origem?.tipo_controle && <div className="span-2 equipment-source"><b>Controle previsto na L 017</b><span>{String(editing.dados_origem.tipo_controle)}</span><small>Criticidade {String(editing.dados_origem.criticidade||'—')} · classificação original preservada</small></div>}
+        {!!editing.dados_origem?.tipo_controle && <div className="span-2 equipment-source"><b>Controle previsto na L 017</b><span>{String(editing.dados_origem.tipo_controle)}</span><small>Criticidade {String(editing.dados_origem.criticidade||'—')} · classificação original preservada</small></div>}
         {field('Fabricante','fabricante')}{field('Modelo','modelo')}{field('Número de série','numero_serie')}{field('Patrimônio','patrimonio')}
         {field('Setor','setor')}{field('Localização','localizacao')}{field('Responsável','responsavel')}
         {field('Unidade','unidade')}{field('Faixa de medição','faixa_medicao')}{field('Resolução','resolucao')}{field('Tolerância','tolerancia')}
