@@ -56,15 +56,20 @@ async Task<JsonElement?> RestAsync(
     string? prefer = null)
 {
     var url = $"{supabaseUrl}/rest/v1/{table}" + (string.IsNullOrWhiteSpace(query) ? "" : "?" + query);
-    var msg = new HttpRequestMessage(method, url);
+    using var msg = new HttpRequestMessage(method, url);
     ApplyAuth(msg, token);
     msg.Headers.TryAddWithoutValidation("Accept", "application/json");
     if (!string.IsNullOrWhiteSpace(prefer)) msg.Headers.TryAddWithoutValidation("Prefer", prefer);
     if (body is not null)
         msg.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
-    var res = await client.SendAsync(msg);
+    var watch = System.Diagnostics.Stopwatch.StartNew();
+    using var res = await client.SendAsync(msg);
     var raw = await res.Content.ReadAsStringAsync();
+    watch.Stop();
+    if(watch.ElapsedMilliseconds>1600)
+        app.Logger.LogWarning("SGQ slow Supabase query: {Method} {Table} {DurationMs} ms, HTTP {Status}",
+            method.Method,table,watch.ElapsedMilliseconds,(int)res.StatusCode);
     if (!res.IsSuccessStatusCode)
         throw new InvalidOperationException($"{table}: HTTP {(int)res.StatusCode} - {raw}");
 
@@ -524,6 +529,7 @@ app.MapPost("/api/auditorias/{id}/concluir", async (string id,FinishAuditRequest
     catch(Exception e){return Results.Json(Error("Falha ao concluir auditoria.",e.Message),statusCode:500);}
 });
 
+// First paint: profile and operational lists only.
 app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -531,45 +537,54 @@ app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory f
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         var userId=await CurrentUserId(client,token);
-
-        var profileTask=RestAsync(client,token,HttpMethod.Get,"profiles",$"select=nome,perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
+        var profileTask=RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=nome,perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
         var processesTask=RestAsync(client,token,HttpMethod.Get,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em&excluido_em=is.null&order=criado_em.desc");
         var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
             "select=id,numero,status,resultado,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
-        var itsTask=RestAsync(client,token,HttpMethod.Get,"it_versoes",
-            "select=id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)&order=criado_em.desc");
-        var groupsTask=RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
-            "select=id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)&order=criado_em.desc");
-        var samplesTask=RestAsync(client,token,HttpMethod.Get,"vw_saldo_amostras",
-            "select=id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id,sku,processo_referencia,data_chegada_referencia,nota_fiscal_referencia,cliente_referencia,observacao,origem_importacao,linha_origem,laudo_id,laudo_numero,laudo_storage_path,foto_cadastro_path,produto_foto_principal_path,data_inspecao_referencia&order=codigo.desc");
-        var reportsTask=RestAsync(client,token,HttpMethod.Get,"laudos","select=id");
-
-        await Task.WhenAll(profileTask,processesTask,inspectionsTask,itsTask,groupsTask,samplesTask,reportsTask);
-        var (profile,profileFound)=FirstRow(profileTask.Result);
-        if(!profileFound) return Results.Json(Error("Seu usuário ainda não possui perfil liberado no SGQ."),statusCode:403);
-
-        int Count(JsonElement? value)=>value is {ValueKind:JsonValueKind.Array}?value.Value.GetArrayLength():0;
-        return Results.Ok(new {
-            data=new {
-                profile,
-                processes=processesTask.Result,
-                inspections=inspectionsTask.Result,
-                itVersions=itsTask.Result,
-                groups=groupsTask.Result,
-                samples=samplesTask.Result,
-                counts=new {
-                    processos=Count(processesTask.Result),
-                    inspecoes=Count(inspectionsTask.Result),
-                    amostras=Count(samplesTask.Result),
-                    laudos=Count(reportsTask.Result)
-                }
-            },
-            error=(object?)null
-        });
+        await Task.WhenAll(profileTask,processesTask,inspectionsTask);
+        var (profile,found)=FirstRow(profileTask.Result);
+        if(!found)return Results.Json(Error("Usuário sem perfil autorizado no SGQ."),statusCode:403);
+        return Results.Ok(new {data=new {
+            profile,processes=processesTask.Result,inspections=inspectionsTask.Result
+        },error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
-    catch(Exception e){return Results.Json(Error("Falha ao carregar o SGQ.",e.Message),statusCode:500);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar o painel.",e.Message),statusCode:500);}
+});
+
+app.MapGet("/api/app/catalogos", async (HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var its=RestAsync(client,token,HttpMethod.Get,"it_versoes",
+            "select=id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)&order=criado_em.desc");
+        var groups=RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
+            "select=id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)&order=criado_em.desc");
+        await Task.WhenAll(its,groups);
+        return Results.Ok(new {data=new {itVersions=its.Result,groups=groups.Result},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar instruções e grupos.",e.Message),statusCode:500);}
+});
+
+app.MapGet("/api/app/estoque", async (HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var samples=await RestAsync(client,token,HttpMethod.Get,"vw_saldo_amostras",
+            "select=id,codigo,descricao,endereco,lote,saldo,unidade_controle,qr_token,grupo_inspecao_id,inspecao_id,produto_id,sku,processo_referencia,data_chegada_referencia,nota_fiscal_referencia,cliente_referencia,observacao,origem_importacao,linha_origem,laudo_id,laudo_numero,laudo_storage_path,foto_cadastro_path,produto_foto_principal_path,data_inspecao_referencia&order=codigo.desc");
+        return Results.Ok(new {data=new {samples},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar estoque.",e.Message),statusCode:500);}
 });
 
 // Atualização leve das listas: evita baixar estoque e ITs após cada exclusão ou mudança de status.
@@ -587,6 +602,52 @@ app.MapGet("/api/app/listas", async (HttpRequest request,IHttpClientFactory fact
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao atualizar as listas.",e.Message),statusCode:500);}
+});
+
+app.MapGet("/api/inspecoes/{id}/fotos/links", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var photosTask=RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
+            $"select=storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+        // Signed photo URLs are independent: fetch concurrently with a bounded fan-out.
+        var photoUrls=new Dictionary<string,string?>();
+        if(photosTask.Result is {ValueKind:JsonValueKind.Array})
+        {
+            var paths=photosTask.Result.Value.EnumerateArray()
+                .Select(photo=>photo.TryGetProperty("storage_path",out var sp)&&sp.ValueKind==JsonValueKind.String?sp.GetString():null)
+                .Where(path=>!string.IsNullOrWhiteSpace(path))
+                .Distinct().ToArray();
+            using var gate=new SemaphoreSlim(5);
+            var signed=await Task.WhenAll(paths.Select(async path=>{
+                await gate.WaitAsync();
+                try
+                {
+                    using var sign=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/storage/v1/object/sign/inspecao-fotos/{EncodedPath(path!)}");
+                    ApplyAuth(sign,token);
+                    sign.Content=JsonContent.Create(new {expiresIn=3600});
+                    using var response=await client.SendAsync(sign);
+                    if(!response.IsSuccessStatusCode)return (Path:path!,Url:(string?)null);
+                    var raw=await response.Content.ReadAsStringAsync();
+                    using var doc=JsonDocument.Parse(raw);
+                    var root=doc.RootElement;
+                    var url=root.TryGetProperty("signedURL",out var s1)?s1.GetString():
+                        root.TryGetProperty("signedUrl",out var s2)?s2.GetString():null;
+                    if(!string.IsNullOrWhiteSpace(url)&&url.StartsWith("/"))url=supabaseUrl+"/storage/v1"+url;
+                    return (Path:path!,Url:url);
+                }
+                catch{return (Path:path!,Url:(string?)null);}
+                finally {gate.Release();}
+            }));
+            foreach(var pair in signed)photoUrls[pair.Path]=pair.Url;
+        }
+
+        return Results.Ok(new {data=new {photoUrls},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível obter as fotos.",e.Message),statusCode:500);}
 });
 
 app.MapGet("/api/inspecoes/{id}/detalhe", async (string id,HttpRequest request,IHttpClientFactory factory)=>
@@ -619,37 +680,7 @@ app.MapGet("/api/inspecoes/{id}/detalhe", async (string id,HttpRequest request,I
 
         await Task.WhenAll(itemsTask,checklistTask,checkResultsTask,paramsTask,dimResultsTask,dimConfigsTask,testsTask,testResultsTask,photosTask,registersTask,ncsTask,retainedTask);
 
-        // Signed photo URLs are independent: fetch concurrently with a bounded fan-out.
-        var photoUrls=new Dictionary<string,string?>();
-        if(photosTask.Result is {ValueKind:JsonValueKind.Array})
-        {
-            var paths=photosTask.Result.Value.EnumerateArray()
-                .Select(photo=>photo.TryGetProperty("storage_path",out var sp)&&sp.ValueKind==JsonValueKind.String?sp.GetString():null)
-                .Where(path=>!string.IsNullOrWhiteSpace(path))
-                .Distinct().ToArray();
-            using var gate=new SemaphoreSlim(5);
-            var signed=await Task.WhenAll(paths.Select(async path=>{
-                await gate.WaitAsync();
-                try
-                {
-                    using var sign=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/storage/v1/object/sign/inspecao-fotos/{EncodedPath(path!)}");
-                    ApplyAuth(sign,token);
-                    sign.Content=JsonContent.Create(new {expiresIn=3600});
-                    using var response=await client.SendAsync(sign);
-                    if(!response.IsSuccessStatusCode)return (Path:path!,Url:(string?)null);
-                    var raw=await response.Content.ReadAsStringAsync();
-                    using var doc=JsonDocument.Parse(raw);
-                    var root=doc.RootElement;
-                    var url=root.TryGetProperty("signedURL",out var s1)?s1.GetString():
-                        root.TryGetProperty("signedUrl",out var s2)?s2.GetString():null;
-                    if(!string.IsNullOrWhiteSpace(url)&&url.StartsWith("/"))url=supabaseUrl+"/storage/v1"+url;
-                    return (Path:path!,Url:url);
-                }
-                catch{return (Path:path!,Url:(string?)null);}
-                finally {gate.Release();}
-            }));
-            foreach(var pair in signed)photoUrls[pair.Path]=pair.Url;
-        }
+        var photoUrls=new Dictionary<string,string?>(); // Lazy, see /fotos/links.
 
         return Results.Ok(new {
             data=new {
