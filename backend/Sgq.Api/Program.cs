@@ -2235,7 +2235,7 @@ app.MapPost("/api/inspecoes/{id}/enviar-automate", async (string id,HttpRequest 
             return Results.Json(Error("O documento não pôde ser lido do armazenamento."),statusCode:502);
         var bytes=await fileRes.Content.ReadAsByteArrayAsync();
         if(bytes.Length==0) return Results.Json(Error("Documento Word vazio."),statusCode:422);
-        var idempotency=System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(id+":"+path));
+        var idempotency=System.Security.Cryptography.SHA256.HashData(bytes);
         var exportKey=Convert.ToHexString(idempotency).ToLowerInvariant();
         using var send=new HttpRequestMessage(HttpMethod.Post,hookUri);
         send.Headers.TryAddWithoutValidation("X-SGQ-Event-ID",exportKey);
@@ -2253,14 +2253,15 @@ app.MapPost("/api/inspecoes/{id}/enviar-automate", async (string id,HttpRequest 
         {
             try { using var json=JsonDocument.Parse(raw);documentUrl=Field(json.RootElement,"webUrl")??Field(json.RootElement,"url"); } catch { }
         }
+        var confirmed=successful&&!string.IsNullOrWhiteSpace(documentUrl);
         await RestAsync(client,token,HttpMethod.Post,"sgq_documento_integracoes","",
             new {inspecao_id=id,laudo_id=Field(doc.Value,"id"),storage_path=path,
-                destino="power_automate_sharepoint",status=successful?"enviado":"erro",
+                destino="power_automate_sharepoint",status=confirmed?"enviado":successful?"pendente":"erro",
                 documento_url=documentUrl,erro=successful?null:$"HTTP {(int)sent.StatusCode}: {raw[..Math.Min(raw.Length,200)]}",
-                tentativas=1,solicitado_por=userId,enviado_em=successful?DateTimeOffset.UtcNow:(DateTimeOffset?)null},
+                tentativas=1,solicitado_por=userId,enviado_em=confirmed?DateTimeOffset.UtcNow:(DateTimeOffset?)null},
             "return=minimal");
         if(!successful) return Results.Json(Error("Power Automate recusou o documento. Verifique o histórico do fluxo."),statusCode:502);
-        return Results.Ok(new {data=new {enviado=true,nome=fileName,webUrl=documentUrl,eventId=exportKey},error=(object?)null});
+        return Results.Ok(new {data=new {enviado=confirmed,aceito=true,nome=fileName,webUrl=documentUrl,eventId=exportKey},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Não foi possível enviar o Word ao Power Automate.",e.Message),statusCode:500);}
