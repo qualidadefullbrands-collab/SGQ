@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import {sequentialProductInfo} from './sequence.mjs'
 import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/supabase'
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
@@ -324,16 +325,6 @@ function samplingPlan(lot:number, level:string) {
   const sample=Math.min(planned,lot)
   const rule=AC_RE_15[code]
   return { code, sample, ac:rule?.ac ?? null, re:rule?.re ?? null }
-}
-function sequentialProductInfo(i:InspectionRow,all:InspectionRow[]){
-  const metadata=i.parametros_amostragem
-  const batch=metadata?.lote_sequencial
-  if(!batch)return {blocked:false,order:1,total:1,previous:null as InspectionRow|null}
-  const order=Number(metadata?.ordem_produto||1),total=Number(metadata?.total_produtos||1)
-  const previous=all.filter(x=>x.parametros_amostragem?.lote_sequencial===batch
-    &&Number(x.parametros_amostragem?.ordem_produto||0)<order
-    &&x.status!=='concluida').sort((a,b)=>Number(a.parametros_amostragem?.ordem_produto||0)-Number(b.parametros_amostragem?.ordem_produto||0))[0]||null
-  return {blocked:previous!==null,order,total,previous}
 }
 function statusLabel(value:string|null|undefined) {
   const map:Record<string,string> = {
