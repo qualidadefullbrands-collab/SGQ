@@ -344,6 +344,7 @@ export default function App() {
   const [aiConclusionBusy,setAiConclusionBusy]=useState(false)
   const [sharepointBusy,setSharepointBusy]=useState(false)
   const [processLookupBusy,setProcessLookupBusy]=useState(false)
+  const [processLookupMessage,setProcessLookupMessage]=useState('')
   const [editingInspectionId,setEditingInspectionId]=useState<string|null>(null)
   const [editingProcessId,setEditingProcessId]=useState<string|null>(null)
   const [inspectionBusy,setInspectionBusy]=useState(false)
@@ -755,7 +756,7 @@ export default function App() {
 
   function resetNewInspection() {
     setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0)
-    manualItSelection.current=false;lastItSuggested.current='';setItSuggestionNote('')
+    manualItSelection.current=false;lastItSuggested.current='';setItSuggestionNote('');setProcessLookupMessage('')
     setInspection({
       processoId: '', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
       dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I', observacaoInterna: '',
@@ -949,14 +950,21 @@ export default function App() {
     const code=String(value||'').replace(/\D/g,'')
     if(!code)return
     const existing=processes.find(p=>String(p.codigo||'').replace(/\D/g,'')===code)
-    if(existing?.cliente){setInspection(old=>({...old,cliente:old.cliente||existing.cliente||''}));return}
+    if(existing){
+      setInspection(old=>({...old,processoId:existing.id,cliente:old.cliente||existing.cliente||'',
+        notaFiscal:old.notaFiscal||existing.nota_fiscal||'',origem:old.origem||existing.origem||'',
+        transporte:old.transporte||existing.transporte||'',chegadaCd:old.chegadaCd||existing.chegada_cd||''}))
+      setProcessLookupMessage(existing.cliente?'Cliente e processo localizados no SGQ.':'Processo localizado, mas cliente não informado.')
+      return
+    }
     setProcessLookupBusy(true)
     try{
       const {data,error}=await authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code}})
       if(!error&&data?.found&&data?.cliente){
         setInspection(old=>String(old.codigo||'').replace(/\D/g,'')===code?{...old,cliente:old.cliente||String(data.cliente)}:old)
-      }else if(!inspection.cliente){
-        setItSuggestionNote('Cliente não localizado por vínculo exato FST–Omie. Informe manualmente, se necessário.')
+        setProcessLookupMessage('Cliente preenchido pelo Omie.')
+      }else {
+        setProcessLookupMessage('FST sem correspondência exata no Omie. Você pode informar o cliente manualmente.')
       }
     }finally{setProcessLookupBusy(false)}
   }
@@ -2125,6 +2133,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <label>Processo
   <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>setInspection({...inspection,codigo:e.target.value})} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
   {processLookupBusy && <small className="field-hint">Consultando cliente vinculado ao FST…</small>}
+  {!processLookupBusy && processLookupMessage && <small className="field-hint" role="status">{processLookupMessage}</small>}
 </label>
                 <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
                 <label>Nota fiscal<input value={inspection.notaFiscal} onChange={(e)=>setInspection({...inspection,notaFiscal:e.target.value})}/></label>
