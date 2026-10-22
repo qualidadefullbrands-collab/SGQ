@@ -344,8 +344,13 @@ export default function App() {
   const [aiConclusionBusy,setAiConclusionBusy]=useState(false)
   const [sharepointBusy,setSharepointBusy]=useState(false)
   const [processLookupBusy,setProcessLookupBusy]=useState(false)
+  const [editingInspectionId,setEditingInspectionId]=useState<string|null>(null)
+  const [editingProcessId,setEditingProcessId]=useState<string|null>(null)
+  const [inspectionBusy,setInspectionBusy]=useState(false)
+  const [activeProductIndex,setActiveProductIndex]=useState(0)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  useEffect(()=>{if(!message)return;const timer=window.setTimeout(()=>setMessage(''),3500);return()=>window.clearTimeout(timer)},[message])
   const [login, setLogin] = useState({ email: '', password: '' })
   const [forgotPassword, setForgotPassword] = useState(false)
   const [recoveryMode, setRecoveryMode] = useState(new URLSearchParams(window.location.search).get('auth') === 'recovery')
@@ -745,6 +750,7 @@ export default function App() {
   }
 
   function resetNewInspection() {
+    setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0)
     setInspection({
       processoId: '', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
       dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I', observacaoInterna: '',
@@ -796,6 +802,7 @@ export default function App() {
   }
 
   function reuseProcess(p: ProcessRow) {
+    setEditingInspectionId(null);setEditingProcessId(null);
     setInspection((x) => ({
       ...x,
       processoId: p.id,
@@ -1899,7 +1906,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <button type="button" className={'metric-button '+(dashboardView==='concluidas'?'selected':'')} onClick={()=>setDashboardView('concluidas')}><Metric icon={FileText} label="Concluídas" value={inspections.filter((i)=>i.status==='concluida').length}/></button>
           </section>
           {dashboardView==='processos' && <section className="panel queue"><div className="section-title"><h2>Processos</h2><button className="secondary" type="button" onClick={()=>setTab('inspecoes')}>Ver todos</button></div>
-            {processes.slice(0,25).map(p=><div className="queue-row" key={p.id}><div><strong>{formatFst(p.codigo)} - {p.cliente||'Cliente não informado'}</strong><span>{p.nota_fiscal?'NF '+p.nota_fiscal:'NF não informada'}</span></div><button className="secondary small" onClick={()=>setTab('inspecoes')}>Inspeções do processo</button></div>)}
+            {processes.slice(0,25).map(p=><div className="queue-row" key={p.id}><div><strong>{formatFst(p.codigo)} - {p.cliente||'Cliente não informado'}</strong><span>{p.nota_fiscal?'NF '+p.nota_fiscal:'NF não informada'}</span></div><button className="secondary small" onClick={()=>setTab('inspecoes')}>Inspeções</button></div>)}
             {!processes.length&&<p>Nenhum processo cadastrado.</p>}
           </section>}
           {dashboardView==='estoque' && <section className="panel queue"><div className="section-title"><h2>Estoque</h2><button className="secondary" onClick={()=>setTab('estoque')}>Abrir estoque</button></div>
@@ -1957,11 +1964,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     <div>
                       <span className="eyebrow">{formatFst(p.codigo)}</span>
                       <h2>{p.cliente || 'Sem cliente'}</h2>
-                      <p>NF {p.nota_fiscal || '—'} · chegada {p.chegada_cd || '—'} · {p.origem || 'origem não informada'}</p>
+                      <p>NF {p.nota_fiscal || '—'} · chegada {formatDateBR(p.chegada_cd)} · {p.origem || 'origem não informada'}</p>
                     </div>
                     <div className="row-actions">
                       <button className="secondary" onClick={()=>reuseProcess(p)}><Copy size={15}/> Nova inspeção neste processo</button>
-                      <button className="secondary icon-only" title="Editar processo" onClick={()=>setEditingProcess({...p})}><Edit3 size={16}/></button>
+                      <button className="secondary icon-only" title="Editar processo" onClick={()=>editProcessFull(p)}><Edit3 size={16}/></button>
                       {canDelete && <button className="danger icon-only" title="Excluir processo" onClick={()=>deleteProcess(p)}><Trash2 size={16}/></button>}
                     </div>
                   </div>
@@ -1992,7 +1999,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       {tab==='nova' && (
         <section className="workspace">
           <div className="page-title">
-            <div><span className="eyebrow">INSPEÇÃO</span><h1>Nova inspeção</h1></div>
+            <div><span className="eyebrow">INSPEÇÃO</span><h1>{editingInspectionId?'Editar inspeção':editingProcessId?'Editar processo':'Nova inspeção'}</h1></div>
             <div className="row-actions">
               
               {processes[0] && <button className="secondary" type="button" onClick={()=>reuseProcess(processes[0])}><Copy size={16}/> Reutilizar últimos dados gerais</button>}
@@ -2007,7 +2014,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 {inspection.processoId && <span className="pill">Processo existente</span>}
               </div>
               <div className="form-grid">
-                <label>Processo FST
+                <label>Processo
   <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>setInspection({...inspection,codigo:e.target.value})} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
   {processLookupBusy && <small className="field-hint">Consultando cliente vinculado ao FST…</small>}
 </label>
@@ -2817,8 +2824,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <article className="sample-detail inspection-edit-modal" onClick={(e)=>e.stopPropagation()}>
             <button className="close" type="button" onClick={()=>setEditingInspectionData(null)}>×</button>
             <span className="eyebrow">DADOS DA INSPEÇÃO</span>
-            <h2>Editar a qualquer momento</h2>
-            <p className="muted">As alterações recalculam lote, amostra e Ac/Re sem recriar a inspeção.</p>
+            <h2>Editar inspeção</h2>
+            <p className="muted">Altere os campos necessários e salve.</p>
             <div className="form-grid">
               <label>Processo FST<input value={editingInspectionData.codigo ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,codigo:e.target.value})}/></label>
               <label>Cliente<input value={editingInspectionData.cliente ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,cliente:e.target.value})}/></label>
@@ -2858,7 +2865,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </article>})}
             </div>
             <button className="secondary" type="button" onClick={()=>setEditingInspectionData({...editingInspectionData,itens:[...(editingInspectionData.itens ?? []),{...emptySku(),processoItemId:null}]})}><Plus size={16}/> Adicionar produto à inspeção</button>
-            <button className="primary wide" type="button" onClick={saveEditingInspectionData}>Salvar dados e recalcular plano</button>
+            <button className="primary wide" type="button" onClick={saveEditingInspectionData}>Salvar</button>
           </article>
         </div>
       )}
