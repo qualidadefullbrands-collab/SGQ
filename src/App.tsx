@@ -1386,49 +1386,60 @@ export default function App() {
     })
   }
 
-  async function uploadInspectionPhotos() {
-    if (!selectedInspectionId || !pendingPhotos.length) return
-    if (pendingPhotos.some((p)=>!p.legenda.trim())) {
-      return setError('Todas as fotos precisam de legenda antes de enviar.')
+  async function uploadInspectionPhotos(){
+    if(!selectedInspectionId||!pendingPhotos.length||photoUploadBusy)return
+    if(pendingPhotos.some(p=>!p.legenda.trim())){
+      setPopupMessage('Informe a legenda de cada foto antes de enviar.')
+      return
     }
-    const validProductIds=new Set((detail?.items ?? []).map((x:any)=>x.processo_itens?.produto_id).filter(Boolean))
-    const registros:any[]=[]
-    let hasProductPhoto=false
-
-    for (const p of pendingPhotos) {
-      const safe = p.file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-      const stamp=Date.now()
-      const path = `${selectedInspectionId}/gerais/${stamp}-${safe}`
-      const up = await supabase.storage.from('inspecao-fotos').upload(path,p.file,{contentType:p.file.type||undefined})
-      if (up.error) return setError(up.error.message)
-
-      let productPhotoPath:string|null=null
-      const defaultProductId=(detail?.items ?? [])[0]?.processo_itens?.produto_id ?? ''
-      const productId=p.isProductId ? (p.productId || defaultProductId) : ''
-      if (productId && validProductIds.has(productId)) {
-        productPhotoPath=`${productId}/${stamp}-${safe}`
-        const productUpload=await supabase.storage.from('produto-fotos').upload(productPhotoPath,p.file,{contentType:p.file.type||undefined})
-        if (productUpload.error) return setError('A foto da inspeção foi salva, mas não foi possível defini-la como identificação do produto: '+productUpload.error.message)
-        hasProductPhoto=true
+    const inspectionId=selectedInspectionId
+    setPhotoUploadBusy(true)
+    setError('')
+    try{
+      const validIds=new Set<string>((detail?.items??[]).map((x:any)=>String(x.processo_itens?.produto_id??'')).filter(Boolean))
+      const primaryId=String((detail?.items??[])[0]?.processo_itens?.produto_id??'')
+      type PhotoResult={id:string;record?:any;product:boolean;error?:string}
+      const outcomes:PhotoResult[]=new Array(pendingPhotos.length)
+      let pointer=0
+      const worker=async()=>{
+        while(pointer<pendingPhotos.length){
+          const index=pointer++
+          const p=pendingPhotos[index]
+          try{
+            const safe=p.file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
+            const unique=crypto.randomUUID()
+            const path=`${inspectionId}/gerais/${unique}-${safe}`
+            const uploaded=await supabase.storage.from('inspecao-fotos').upload(path,p.file,{contentType:p.file.type||undefined})
+            if(uploaded.error){outcomes[index]={id:p.id,product:false,error:uploaded.error.message};continue}
+            const productId=p.isProductId?String(p.productId||primaryId):''
+            let productPhotoPath:string|null=null
+            if(productId&&validIds.has(productId)){
+              productPhotoPath=`${productId}/${unique}-${safe}`
+              const second=await supabase.storage.from('produto-fotos').upload(productPhotoPath,p.file,{contentType:p.file.type||undefined})
+              if(second.error){outcomes[index]={id:p.id,product:false,error:second.error.message};continue}
+            }
+            outcomes[index]={id:p.id,product:!!productPhotoPath,record:{
+              storagePath:path,legenda:p.legenda.trim(),productId:productId||null,productPhotoPath
+            }}
+          }catch(e:any){outcomes[index]={id:p.id,product:false,error:e?.message||'Falha ao enviar foto'}}
+        }
       }
-
-      registros.push({
-        storagePath:path,
-        legenda:p.legenda.trim(),
-        productId:productId || null,
-        productPhotoPath,
-      })
-    }
-
-    const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/fotos/registrar`,{fotos:registros})
-    if (saved.error) return setError(saved.error.message)
-
-    pendingPhotos.forEach((p)=>URL.revokeObjectURL(p.url))
-    setPendingPhotos([])
-    setMessage(hasProductPhoto
-      ? 'Fotos enviadas. A imagem selecionada também foi definida como identificação principal do produto.'
-      : 'Fotos da inspeção enviadas.')
-    await openInspection(selectedInspectionId)
+      await Promise.all(Array.from({length:Math.min(3,pendingPhotos.length)},()=>worker()))
+      const successes=outcomes.filter(x=>x?.record)
+      const failures=outcomes.filter(x=>!x?.record)
+      if(successes.length){
+        const saved=await apiPost<any>(`/api/inspecoes/${inspectionId}/fotos/registrar`,{fotos:successes.map(x=>x.record)})
+        if(saved.error){setPopupMessage(saved.error.message);return}
+        const sentIds=new Set(successes.map(x=>x.id))
+        pendingPhotos.filter(p=>sentIds.has(p.id)).forEach(p=>URL.revokeObjectURL(p.url))
+        setPendingPhotos(current=>current.filter(p=>!sentIds.has(p.id)))
+        photosLinksExpiration.current.delete(inspectionId)
+        await openInspection(inspectionId)
+        await loadPhotoLinks(inspectionId,true)
+        setMessage(successes.some(x=>x.product)?'Fotos e identificação do produto salvas.':'Fotos salvas.')
+      }
+      if(failures.length)setPopupMessage(`${failures.length} foto(s) não foram enviadas. As fotos pendentes permanecem na seleção para nova tentativa.`)
+    }finally{setPhotoUploadBusy(false)}
   }
 
   async function finishInspection(result: 'aprovado' | 'reprovado') {
@@ -1485,11 +1496,11 @@ export default function App() {
     if (result.error || data?.error) {
       const msg=String(data?.message ?? result.error?.message ?? 'Falha na estruturação automática.')
       setError('Não foi possível estruturar a IT: '+msg)
-      await loadApp()
+      await loadCatalogs()
       return false
     }
     setMessage(`IT estruturada: ${data?.checklist ?? 0} verificações, ${data?.dimensionais ?? 0} dimensionais e ${data?.testes ?? 0} testes. Revise antes de publicar.`)
-    await loadApp()
+    await loadCatalogs()
     if (openReview) {
       const current=itVersions.find((x)=>x.id===itVersionId)
       if (current) await reviewItVersion({...current,status:'em_revisao',leitura_ia_status:'revisao'})
@@ -1534,7 +1545,7 @@ export default function App() {
     if (saved.error) return setError(saved.error.message)
     setItReview(null)
     setMessage('Versão da IT publicada e disponível para novas inspeções.')
-    await loadApp()
+    await loadCatalogs()
   }
 
   async function uploadIt(e: React.FormEvent) {
@@ -1574,7 +1585,7 @@ export default function App() {
     } else {
       setMessage(`IT enviada e estruturada: ${structure?.checklist ?? 0} verificações, ${structure?.dimensionais ?? 0} dimensionais e ${structure?.testes ?? 0} testes.`)
     }
-    await loadApp()
+    await loadCatalogs()
   }
 
   async function createSample(e: React.FormEvent) {
@@ -1598,7 +1609,7 @@ export default function App() {
 
     setMessage(`${created.data.codigo} criada e endereçada.`)
     setSampleForm({ groupId: '', descricao: '', lote: '', quantidade: '', endereco: '', unidade: 'conjunto' })
-    await loadApp()
+    await loadStock()
   }
 
   function sampleUrl(sample: Sample) {
@@ -1654,7 +1665,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
     setStockMove({ tipo:'retirada', quantidade:'', endereco:'', motivo:'' })
     setSelectedSample(null)
     setMessage('Movimentação registrada.')
-    await loadApp()
+    await loadStock()
   }
 
   async function downloadInspectionWord() {
@@ -2404,7 +2415,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     </article>
                   ))}
                 </div>}
-                {!!pendingPhotos.length && <div className="actions"><button className="primary" type="button" onClick={uploadInspectionPhotos}>Enviar fotos finais</button></div>}
+                {!!pendingPhotos.length && <div className="actions"><button className="primary" type="button" disabled={photoUploadBusy} onClick={()=>void uploadInspectionPhotos()}>{photoUploadBusy?'Enviando fotos…':'Enviar fotos'}</button></div>}
               </>
             )}
 
