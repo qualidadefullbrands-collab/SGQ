@@ -27,7 +27,7 @@ test('deleted warehouse inspections are omitted from list and details',()=>{
   assert.match(api,/auditoria_execucoes",\s*\$"select=\*\&id=eq\.\{Uri\.EscapeDataString\(id\)\}\&excluido_em=is\.null/)
 })
 test('controls are restricted and preserve evidence and Word',()=>{
-  assert.match(app,/<AuditoriasPage profileName=\{profile\.nome\} canDelete=\{!!canDelete\}\/>/)
+  assert.match(app,/<AuditoriasPage profileName=\{profile\.nome\} canDelete=\{!!canDelete\} canManageTemplates=\{!!canManageIts\}\/>/)
   assert.match(ui,/\{canDelete&&<button/)
   assert.match(ui,/confirm|deleteWarehouseInspection/i)
   assert.match(ui,/registros, fotos e documentos serão preservados/)
