@@ -525,7 +525,19 @@ export default function App() {
 
   useEffect(() => {
     if (!userId) {
+      // Clear any prior session's cached records, including responses still in flight.
+      loadSequence.current++
       setProfile(null)
+      setProcesses([])
+      setInspections([])
+      setSamples([])
+      setItVersions([])
+      setGroups([])
+      setSelectedInspectionId(null)
+      setDetail(null)
+      setSelectedSample(null)
+      setCounts({processos:0,inspecoes:0,amostras:0,laudos:0})
+      photosLinksExpiration.current.clear()
       return
     }
     void loadApp().then(()=>{
@@ -1991,7 +2003,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
           {dashboardView==='processos' && <section className="panel queue"><div className="section-title"><h2>Processos</h2><button className="secondary" type="button" onClick={()=>setTab('inspecoes')}>Ver todos</button></div>
             {processes.slice(0,25).map(p=><div className="queue-row" key={p.id}><div><strong>{formatFst(p.codigo)} - {p.cliente||'Cliente não informado'}</strong><span>{p.nota_fiscal?'NF '+p.nota_fiscal:'NF não informada'}</span></div><button className="secondary small" onClick={()=>setTab('inspecoes')}>Inspeções</button></div>)}
-            {!processes.length&&<p>Nenhum processo cadastrado.</p>}
+            {!processes.length&&<p>Nenhum processo ativo no momento. Os registros arquivados permanecem preservados no SGQ.</p>}
           </section>}
           {dashboardView==='estoque' && <section className="panel queue"><div className="section-title"><h2>Estoque</h2><button className="secondary" onClick={()=>setTab('estoque')}>Abrir estoque</button></div>
             {samples.slice(0,25).map(item=><div className="queue-row" key={item.id}><div><strong>{formatFst(item.processo_referencia)} - {item.cliente_referencia||'Cliente não informado'}</strong><span>{item.sku||item.descricao} · {item.saldo} {item.unidade_controle}</span></div><button className="secondary small" onClick={()=>{setTab('estoque');setSelectedSample(item)}}>Ver item</button></div>)}
@@ -2075,7 +2087,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 </article>
               )
             })}
-            {!processes.length && <div className="empty">Nenhum processo cadastrado.</div>}
+            {!processes.length && <div className="empty">Nenhum processo ativo no momento. Se necessário, inicie uma nova inspeção.</div>}
           </div>
         </section>
       )}
