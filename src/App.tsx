@@ -533,6 +533,7 @@ export default function App() {
       setSamples([])
       setItVersions([])
       setGroups([])
+      setEquipments([])
       setSelectedInspectionId(null)
       setDetail(null)
       setSelectedSample(null)
