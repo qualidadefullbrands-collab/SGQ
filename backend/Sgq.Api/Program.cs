@@ -178,6 +178,10 @@ app.MapGet("/", () => Results.Ok(new
     status = "ok",
     service = "sgq-api"
 }));
+ 
+// Monitoring clients frequently probe with HEAD; answer without running application queries.
+app.MapMethods("/",new[]{"HEAD"},()=>Results.Ok());
+app.MapMethods("/health",new[]{"HEAD"},()=>Results.Ok());
 
 app.MapGet("/health/word", async (IHttpClientFactory factory) =>
 {
