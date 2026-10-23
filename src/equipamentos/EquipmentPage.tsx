@@ -6,7 +6,12 @@ import type {Equipment} from './equipmentData'
 type EventRow={id:string;equipamento_id:string;tipo:string;data_evento:string;proximo_vencimento:string|null;resultado:string;prestador:string|null;documento_url:string|null;observacoes:string|null}
 type EventDraft={tipo:string;data_evento:string;proximo_vencimento:string;resultado:string;prestador:string;documento_url:string;observacoes:string}
 const blank=():Partial<Equipment>=>({codigo:'',nome:'',tipo:'instrumento',fabricante:'',modelo:'',numero_serie:'',patrimonio:'',setor:'',localizacao:'',responsavel:'',unidade:'',faixa_medicao:'',resolucao:'',tolerancia:'',aplicacoes:[],requer_calibracao:false,ultima_calibracao:null,proxima_calibracao:null,certificado_calibracao:'',laboratorio_calibracao:'',periodicidade_calibracao_meses:null,proxima_verificacao:null,proxima_manutencao:null,estado:'ativo',observacoes:''})
-const newEvent=():EventDraft=>({tipo:'calibracao',data_evento:new Date().toISOString().slice(0,10),proximo_vencimento:'',resultado:'realizado',prestador:'',documento_url:'',observacoes:''})
+const localDate=(date=new Date())=>{
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date)
+  const pick=(type:string)=>parts.find(p=>p.type===type)?.value||''
+  return `${pick('year')}-${pick('month')}-${pick('day')}`
+}
+const newEvent=():EventDraft=>({tipo:'calibracao',data_evento:localDate(),proximo_vencimento:'',resultado:'realizado',prestador:'',documento_url:'',observacoes:''})
 const fmt=(x:string|null|undefined)=>{if(!x)return '—';const y=x.slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(y)?y.slice(8,10)+'/'+y.slice(5,7)+'/'+y.slice(0,4):x}
 const uses=['comprimento','diametro','largura','altura','espessura','massa','volume','temperatura','forca','pressao','outros']
 export default function EquipmentPage({canManage,equipments,setEquipments,busy,refresh}:{
@@ -21,24 +26,35 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
   const [section,setSection]=useState<'historico'|'rotina'|'manutencao'|'calibracao'>('historico')
   const [routineChecks,setRoutineChecks]=useState<string[]>([])
   const [events,setEvents]=useState<EventRow[]>([])
+  const [eventsLoading,setEventsLoading]=useState(false)
+  const [eventsError,setEventsError]=useState('')
   const [eventDraft,setEventDraft]=useState<EventDraft>(newEvent())
   const [saving,setSaving]=useState(false)
   const [search,setSearch]=useState('')
   const [notice,setNotice]=useState('')
   useEffect(()=>{if(!notice)return;const timer=window.setTimeout(()=>setNotice(''),3500);return()=>window.clearTimeout(timer)},[notice])
   const [failure,setFailure]=useState('')
-  const today=new Date().toISOString().slice(0,10)
-  const thirty=new Date(Date.now()+30*86400000).toISOString().slice(0,10)
+  const today=localDate()
+  const thirty=localDate(new Date(Date.now()+30*86400000))
   const alerts=useMemo(()=>equipments.filter(e=>e.estado==='ativo'&&e.requer_calibracao&&(!e.proxima_calibracao||e.proxima_calibracao<=thirty)),[equipments,thirty])
   const shown=useMemo(()=>equipments.filter(e=>[e.nome,e.codigo,e.fabricante,e.localizacao,e.numero_serie].some(s=>String(s||'').toLowerCase().includes(search.toLowerCase()))),[equipments,search])
   useEffect(()=>{
-    if(!selected){setEvents([]);return}
+    if(!selected){setEvents([]);setEventsError('');return}
     let valid=true
-    authClient.from('sgq_equipamento_eventos').select('*').eq('equipamento_id',selected).order('data_evento',{ascending:false}).then(({data})=>{if(valid)setEvents((data||[]) as EventRow[])})
+    setEventsLoading(true);setEventsError('')
+    authClient.from('sgq_equipamento_eventos').select('*').eq('equipamento_id',selected)
+      .order('data_evento',{ascending:false})
+      .then(({data,error})=>{
+        if(!valid)return
+        if(error){setEventsError('Não foi possível carregar o histórico. Tente abrir o equipamento novamente.');setEvents([])}
+        else setEvents((data||[]) as EventRow[])
+      }).catch(()=>{
+        if(valid){setEventsError('Falha na conexão com o histórico.');setEvents([])}
+      }).finally(()=>{if(valid)setEventsLoading(false)})
     return()=>{valid=false}
   },[selected])
   async function saveEquipment(e:React.FormEvent){
-    e.preventDefault();if(!editing||!canManage)return
+    e.preventDefault();if(!editing||!canManage||saving)return
     setFailure('');setNotice('');setSaving(true)
     const value={...editing,codigo:String(editing.codigo||'').trim().toUpperCase(),nome:String(editing.nome||'').trim(),aplicacoes:editing.aplicacoes||[],dados_origem:editing.dados_origem||{}}
     const {id:equipmentId,criado_em:ignored,atualizado_em:ignored2,...payload}=value as Equipment & {criado_em?:string;atualizado_em?:string}
@@ -52,7 +68,7 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
     setEditing(null);setSelected(data.id);setNotice('Equipamento salvo.')
   }
   async function saveEvent(e:React.FormEvent){
-    e.preventDefault();if(!selected)return
+    e.preventDefault();if(!selected||saving||!canManage)return
     setSaving(true);setFailure('');setNotice('')
     const {data:{user}}=await authClient.auth.getUser()
     const {data,error}=await authClient.from('sgq_equipamento_eventos').insert({
@@ -98,7 +114,7 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
     </div>
     {selected&&<div className="panel section-card equipment-history">
       <div className="section-title"><h2>Histórico do equipamento</h2><button className="secondary small" onClick={()=>setSelected('')} type="button">Fechar</button></div>
-      {section==='historico' && <div className="equipment-events">{events.length?events.map(e=><div key={e.id}><b>{e.tipo.replaceAll('_',' ')}</b><span>{fmt(e.data_evento)} · {e.resultado}{e.proximo_vencimento?' · Próximo: '+fmt(e.proximo_vencimento):''}</span>{e.observacoes&&<small>{e.observacoes}</small>}{e.documento_url&&<a href={e.documento_url} target="_blank" rel="noreferrer">Certificado / evidência</a>}</div>):<p>Nenhum evento cadastrado.</p>}</div>}
+      {section==='historico' && <div className="equipment-events">{eventsLoading?<p>Carregando histórico…</p>:eventsError?<p role="alert">{eventsError}</p>:events.length?events.map(e=><div key={e.id}><b>{e.tipo.replaceAll('_',' ')}</b><span>{fmt(e.data_evento)} · {e.resultado}{e.proximo_vencimento?' · Próximo: '+fmt(e.proximo_vencimento):''}</span>{e.observacoes&&<small>{e.observacoes}</small>}{e.documento_url&&<a href={e.documento_url} target="_blank" rel="noreferrer">Certificado / evidência</a>}</div>):<p>Nenhum evento cadastrado.</p>}</div>}
       <div className="equipment-section-tabs">
         {([['historico','Histórico'],['rotina','Verificação de rotina'],['manutencao','Manutenção'],['calibracao','Calibração']] as const).map(([k,label])=><button className={section===k?'active':''} type="button" key={k} onClick={()=>{
           setSection(k)
