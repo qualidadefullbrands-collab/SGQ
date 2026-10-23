@@ -59,3 +59,13 @@ test('catalog and inventory failures are visible, not silent zeros',()=>{
  assert.match(catalogs,/Falha de conexão ao carregar as instruções técnicas/)
  assert.match(catalogs,/Falha de conexão ao atualizar o estoque/)
 })
+
+test('warehouse completion also enforces mandatory checklist and RQ014 evidence on server',()=>{
+ const finish=section(api,'app.MapPost("/api/auditorias/{id}/concluir"','// First paint:')
+ assert.match(finish,/progresso_total/)
+ assert.match(finish,/answered<required/)
+ assert.match(finish,/rqCode=="RQ014"/)
+ assert.match(finish,/Count\(objects\)==0/)
+ assert.match(finish,/status=in\.\(em_andamento,revisao\)/)
+ assert.match(finish,/statusCode:409/)
+})
