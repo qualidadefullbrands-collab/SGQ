@@ -80,6 +80,7 @@ type TemplateRow = {
 type Props = {
   profileName?: string | null
   canDelete?: boolean
+  canManageTemplates?: boolean
 }
 
 const DOCS_URL=((import.meta.env.VITE_API_URL || 'https://app-sgq-api.onrender.com').replace(/\/$/,'') + '/api/auditorias')
@@ -133,7 +134,7 @@ function statusLabel(value:string) {
   return map[value] ?? value
 }
 
-export default function AuditoriasPage({profileName,canDelete=false}:Props) {
+export default function AuditoriasPage({profileName,canDelete=false,canManageTemplates=false}:Props) {
   const [executions,setExecutions]=useState<AuditExecution[]>([])
   const [templates,setTemplates]=useState<TemplateRow[]>([])
   const [active,setActive]=useState<AuditExecution|null>(null)
@@ -164,6 +165,7 @@ export default function AuditoriasPage({profileName,canDelete=false}:Props) {
   const fileRef=useRef<HTMLInputElement|null>(null)
 
   const definition=active ? getAuditDefinition(active.rq_code) : null
+  const readOnly=Boolean(active&&active.status!=='em_andamento'&&active.status!=='revisao')
   const relevantCriteria=useMemo(()=>definition ? sectionForLocation(definition,rq016bArea) : [],[definition,rq016bArea])
   const answerKey=(key:string,local:string)=>key+'@@'+local.trim().toLowerCase()
   const answerMap=useMemo(()=>new Map(answers.map((a)=>[answerKey(a.item_key,a.local_ref),a])),[answers])
@@ -214,6 +216,7 @@ export default function AuditoriasPage({profileName,canDelete=false}:Props) {
 
   async function uploadTemplate(def:AuditDefinition,file:File|null) {
     if (!file) return
+    if(!canManageTemplates){setNotice('Apenas administradores e gestores podem alterar os modelos oficiais.');return}
     if (!file.name.toLowerCase().endsWith('.docx')) {
       setNotice('O modelo precisa ser um arquivo .docx.')
       return
@@ -244,10 +247,10 @@ export default function AuditoriasPage({profileName,canDelete=false}:Props) {
 
 
   async function loadExecutions() {
-    setLoadingPage(true)
+    // Do not blank the entire open inspection just to refresh its list.
     const loaded=await apiGet<any>('/api/auditorias/bootstrap')
     if (!loaded.error && loaded.data) setExecutions((loaded.data.executions ?? []) as AuditExecution[])
-    setLoadingPage(false)
+    else setNotice(loaded.error?.message||'Não foi possível atualizar a lista das inspeções.')
   }
 
 
@@ -306,6 +309,7 @@ export default function AuditoriasPage({profileName,canDelete=false}:Props) {
 
 
   async function saveManualAnswer(criterion:AuditCriterion,result:'C'|'NC'|'NA') {
+    if(readOnly){setNotice('Inspeção concluída: o checklist está disponível somente para consulta.');return}
     if (!active) return
     const local=definition?.code==='RQ016B' ? currentLocation.trim() : ''
     if (definition?.code==='RQ016B' && !local) {
@@ -335,9 +339,9 @@ export default function AuditoriasPage({profileName,canDelete=false}:Props) {
   }
 
   async function sendMessage() {
-    if (!active || !definition || (!draft.trim() && !photo) || loading) return
-    const text=draft.trim() || 'Foto registrada para análise.'
-    setDraft('')
+    if (!active || !definition || (!draft.trim() && !photo) || loading || readOnly) return
+    const originalDraft=draft
+    const text=originalDraft.trim() || 'Foto registrada para análise.'
     setLoading(true)
     setNotice('')
     try {
@@ -378,6 +382,7 @@ export default function AuditoriasPage({profileName,canDelete=false}:Props) {
       })
       if (processed.error) throw new Error(processed.error.message || 'Não foi possível registrar a mensagem.')
 
+      setDraft(old=>old===originalDraft?'':old)
       choosePhoto(null)
       await openAudit(active.id)
       if (processed.data?.finishRequested) await requestFinish()
@@ -587,8 +592,8 @@ export default function AuditoriasPage({profileName,canDelete=false}:Props) {
                 <label className={'audit-template-chip '+(ready?'ready':'missing')} key={def.code}>
                   {templateUploading===def.code ? <Loader2 className="spin" size={15}/> : ready ? <Check size={15}/> : <Upload size={15}/>}
                   <span>{def.displayCode}</span>
-                  <small>{ready?'Modelo carregado':'Enviar .docx'}</small>
-                  <input hidden type="file" accept=".docx" onChange={(e)=>void uploadTemplate(def,e.target.files?.[0] ?? null)}/>
+                  <small>{ready?'Modelo carregado':canManageTemplates?'Enviar .docx':'Modelo pendente'}</small>
+                  {canManageTemplates&&<input hidden type="file" accept=".docx" onChange={(e)=>void uploadTemplate(def,e.target.files?.[0] ?? null)}/>}
                 </label>
               )
             })}
@@ -704,7 +709,7 @@ export default function AuditoriasPage({profileName,canDelete=false}:Props) {
                   <div><b>{criterion.key}</b><span>{criterion.label}</span></div>
                   <div className="audit-result-actions">
                     {(['C','NC','NA'] as const).map((r)=>(
-                      <button key={r} className={current?.resultado===r?'active '+r:''} onClick={()=>saveManualAnswer(criterion,r)}>{r}</button>
+                      <button key={r} disabled={readOnly||loading} className={current?.resultado===r?'active '+r:''} onClick={()=>void saveManualAnswer(criterion,r)}>{r}</button>
                     ))}
                   </div>
                 </div>
@@ -731,7 +736,7 @@ export default function AuditoriasPage({profileName,canDelete=false}:Props) {
         <div ref={bottomRef}/>
       </div>
 
-      {active.status!=='concluida' ? (
+      {!readOnly ? (
         <div className="audit-composer">
           {photoPreview && <div className="audit-photo-preview"><img src={photoPreview}/><button onClick={()=>choosePhoto(null)}><X size={16}/></button></div>}
           <div className="audit-input-row">
