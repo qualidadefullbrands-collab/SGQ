@@ -603,13 +603,29 @@ app.MapPost("/api/auditorias/{id}/concluir", async (string id,FinishAuditRequest
         var client=factory.CreateClient("supabase");
         if(!await WarehouseAuditWritable(client,token,id))
             return Results.Json(Error("A inspeção já foi concluída ou não está disponível."),statusCode:409);
-        var answers=await RestAsync(client,token,HttpMethod.Get,"auditoria_respostas",$"select=id&execucao_id=eq.{Uri.EscapeDataString(id)}");
+        var executionRows=await RestAsync(client,token,HttpMethod.Get,"auditoria_execucoes",
+            $"select=rq_code,progresso_total&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+        var (execution,foundExecution)=FirstRow(executionRows);
+        if(!foundExecution)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var rqCode=execution!.Value.TryGetProperty("rq_code",out var rq)?rq.GetString():"";
+        var required=execution.Value.TryGetProperty("progresso_total",out var totalProp)&&totalProp.ValueKind==JsonValueKind.Number
+            ?totalProp.GetInt32():0;
+        var answers=await RestAsync(client,token,HttpMethod.Get,"auditoria_respostas",$"select=item_key&execucao_id=eq.{Uri.EscapeDataString(id)}");
         var findings=await RestAsync(client,token,HttpMethod.Get,"auditoria_achados",$"select=id&execucao_id=eq.{Uri.EscapeDataString(id)}");
         var objects=await RestAsync(client,token,HttpMethod.Get,"auditoria_objetos",$"select=id&execucao_id=eq.{Uri.EscapeDataString(id)}");
         int Count(JsonElement? v)=>v is {ValueKind:JsonValueKind.Array}?v.Value.GetArrayLength():0;
+        var answered=answers is {ValueKind:JsonValueKind.Array}?
+            answers.Value.EnumerateArray()
+                .Where(x=>x.TryGetProperty("item_key",out var key)&&key.ValueKind==JsonValueKind.String)
+                .Select(x=>x.GetProperty("item_key").GetString())
+                .Where(x=>!string.IsNullOrWhiteSpace(x)).Distinct().Count():0;
+        if(required>0&&answered<required)
+            return Results.Json(Error($"Ainda faltam {required-answered} itens para concluir o checklist."),statusCode:409);
+        if(rqCode=="RQ014"&&Count(objects)==0)
+            return Results.Json(Error("Identifique ao menos um extintor ou hidrante antes de concluir o RQ 014."),statusCode:409);
         var now=DateTimeOffset.UtcNow;
         var updated=await RestAsync(client,token,HttpMethod.Patch,"auditoria_execucoes",
-            $"id=eq.{Uri.EscapeDataString(id)}&select=*",
+            $"id=eq.{Uri.EscapeDataString(id)}&status=in.(em_andamento,revisao)&excluido_em=is.null&select=*",
             new {
                 status="concluida",
                 finalizado_em=now,
