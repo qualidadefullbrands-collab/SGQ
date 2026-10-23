@@ -195,6 +195,18 @@ app.MapGet("/health/word", async (IHttpClientFactory factory) =>
     }
 });
 
+// Validate state before any warehouse inspection change, including direct HTTP requests.
+async Task<bool> WarehouseAuditWritable(HttpClient client,string token,string id)
+{
+    if(!Guid.TryParse(id,out _))return false;
+    var rows=await RestAsync(client,token,HttpMethod.Get,"auditoria_execucoes",
+        $"select=id,status&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+    var (execution,found)=FirstRow(rows);
+    return found && execution!.Value.TryGetProperty("status",out var status)
+        && status.ValueKind==JsonValueKind.String
+        && status.GetString() is ("em_andamento" or "revisao");
+}
+
 app.MapGet("/api/auditorias/bootstrap", async (HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -318,27 +330,36 @@ app.MapGet("/api/auditorias/{id}/detalhe", async (string id,HttpRequest request,
         var photoUrls=new Dictionary<string,string?>();
         if(messagesTask.Result is {ValueKind:JsonValueKind.Array})
         {
-            foreach(var m in messagesTask.Result.Value.EnumerateArray())
-            {
-                if(!m.TryGetProperty("foto_path",out var fp)||fp.ValueKind!=JsonValueKind.String) continue;
-                var path=fp.GetString();
-                if(string.IsNullOrWhiteSpace(path)||photoUrls.ContainsKey(path)) continue;
-                var sign=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/storage/v1/object/sign/auditoria-evidencias/{EncodedPath(path)}");
-                ApplyAuth(sign,token);
-                sign.Content=JsonContent.Create(new {expiresIn=3600});
-                var res=await client.SendAsync(sign);
-                string? url=null;
-                if(res.IsSuccessStatusCode)
+            var paths=messagesTask.Result.Value.EnumerateArray()
+                .Select(m=>m.TryGetProperty("foto_path",out var fp)&&fp.ValueKind==JsonValueKind.String?fp.GetString():null)
+                .Where(path=>!string.IsNullOrWhiteSpace(path))
+                .Distinct().ToArray();
+            using var gate=new SemaphoreSlim(4);
+            var signed=await Task.WhenAll(paths.Select(async path=>{
+                await gate.WaitAsync();
+                try
                 {
-                    var raw=await res.Content.ReadAsStringAsync();
-                    using var doc=JsonDocument.Parse(raw);
+                    using var sign=new HttpRequestMessage(HttpMethod.Post,
+                        $"{supabaseUrl}/storage/v1/object/sign/auditoria-evidencias/{EncodedPath(path!)}");
+                    ApplyAuth(sign,token);
+                    sign.Content=JsonContent.Create(new {expiresIn=3600});
+                    using var res=await client.SendAsync(sign);
+                    if(!res.IsSuccessStatusCode)return (Path:path!,Url:(string?)null);
+                    using var doc=JsonDocument.Parse(await res.Content.ReadAsStringAsync());
                     var root=doc.RootElement;
-                    url=root.TryGetProperty("signedURL",out var s1)?s1.GetString():
-                        root.TryGetProperty("signedUrl",out var s2)?s2.GetString():null;
-                    if(!string.IsNullOrWhiteSpace(url)&&url.StartsWith("/")) url=supabaseUrl+"/storage/v1"+url;
+                    var url=root.TryGetProperty("signedURL",out var a)?a.GetString():
+                        root.TryGetProperty("signedUrl",out var b)?b.GetString():null;
+                    if(!string.IsNullOrWhiteSpace(url)&&url.StartsWith("/"))url=supabaseUrl+"/storage/v1"+url;
+                    return (Path:path!,Url:url);
                 }
-                photoUrls[path]=url;
-            }
+                catch(Exception e)
+                {
+                    app.Logger.LogWarning(e,"SGQ warehouse photo signature failure");
+                    return (Path:path!,Url:(string?)null);
+                }
+                finally{gate.Release();}
+            }));
+            foreach(var pair in signed)photoUrls[pair.Path]=pair.Url;
         }
 
         return Results.Ok(new {data=new {
@@ -362,6 +383,8 @@ app.MapPut("/api/auditorias/{id}/respostas/{itemKey}", async (string id,string i
         var client=factory.CreateClient("supabase");
         if(input.Resultado is not ("C" or "NC" or "NA"))
             return Results.Json(Error("Resultado inválido."),statusCode:400);
+        if(!await WarehouseAuditWritable(client,token,id))
+            return Results.Json(Error("Esta inspeção está concluída, excluída ou indisponível para edição."),statusCode:409);
 
         var saved=await RestAsync(client,token,HttpMethod.Post,"auditoria_respostas",
             "on_conflict=execucao_id,item_key,local_ref&select=*",
@@ -403,6 +426,9 @@ app.MapPost("/api/auditorias/{id}/mensagens", async (string id,AuditMessageReque
         var client=factory.CreateClient("supabase");
         if(string.IsNullOrWhiteSpace(input.Message))
             return Results.Json(Error("Mensagem vazia."),statusCode:400);
+
+        if(!await WarehouseAuditWritable(client,token,id))
+            return Results.Json(Error("Não é possível incluir mensagens em uma inspeção concluída ou excluída."),statusCode:409);
 
         var auditorRows=await RestAsync(client,token,HttpMethod.Post,"auditoria_mensagens","select=*",
             new {
@@ -575,6 +601,8 @@ app.MapPost("/api/auditorias/{id}/concluir", async (string id,FinishAuditRequest
     {
         var token=Token(request);
         var client=factory.CreateClient("supabase");
+        if(!await WarehouseAuditWritable(client,token,id))
+            return Results.Json(Error("A inspeção já foi concluída ou não está disponível."),statusCode:409);
         var answers=await RestAsync(client,token,HttpMethod.Get,"auditoria_respostas",$"select=id&execucao_id=eq.{Uri.EscapeDataString(id)}");
         var findings=await RestAsync(client,token,HttpMethod.Get,"auditoria_achados",$"select=id&execucao_id=eq.{Uri.EscapeDataString(id)}");
         var objects=await RestAsync(client,token,HttpMethod.Get,"auditoria_objetos",$"select=id&execucao_id=eq.{Uri.EscapeDataString(id)}");
@@ -2756,7 +2784,15 @@ app.MapPut("/api/auditorias/templates/{rqCode}", async (string rqCode,AuditTempl
         var token=Token(request);
         if(string.IsNullOrWhiteSpace(input.StoragePath)||string.IsNullOrWhiteSpace(input.ArquivoNome)||string.IsNullOrWhiteSpace(input.RqVersion))
             return Results.Json(Error("Arquivo, caminho e versão do modelo são obrigatórios."),statusCode:400);
-        var updated=await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"auditoria_templates",
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil,ativo&id=eq.{Uri.EscapeDataString(userId)}&ativo=is.true&limit=1");
+        var (profile,foundProfile)=FirstRow(profileRows);
+        var role=foundProfile&&profile!.Value.TryGetProperty("perfil",out var p)?p.GetString():null;
+        if(role is not ("administrador" or "gestor"))
+            return Results.Json(Error("Somente administrador ou gestor pode atualizar modelos Word oficiais."),statusCode:403);
+        var updated=await RestAsync(client,token,HttpMethod.Patch,"auditoria_templates",
             $"rq_code=eq.{Uri.EscapeDataString(rqCode)}&select=*",
             new {
                 storage_path=input.StoragePath,
