@@ -532,7 +532,7 @@ export default function App() {
       void loadCatalogs()
       void loadStock()
       void refreshEquipments()
-    })
+    }).catch(()=>setError('Não foi possível iniciar os dados do SGQ. Atualize a página.'))
   }, [userId])
 
   useEffect(()=>{
@@ -595,7 +595,11 @@ export default function App() {
         if(res.data){
           setItVersions((res.data.itVersions??[]) as ItVersion[])
           setGroups((res.data.groups??[]) as Group[])
+        }else{
+          setError(res.error?.message||'Não foi possível carregar as instruções técnicas. Use Atualizar ou entre novamente.')
         }
+      }catch{
+        setError('Falha de conexão ao carregar as instruções técnicas.')
       }finally{setCatalogsLoading(false)}
     })()
     catalogsRequest.current=req
@@ -612,7 +616,11 @@ export default function App() {
           const rows=(res.data.samples??[]).map((x:any)=>({...x,saldo:Number(x.saldo??0)}))
           setSamples(rows)
           setCounts(old=>({...old,amostras:rows.length}))
+        }else{
+          setError(res.error?.message||'Não foi possível atualizar o estoque. Tente novamente.')
         }
+      }catch{
+        setError('Falha de conexão ao atualizar o estoque.')
       }finally{setStockLoading(false)}
     })()
     stockRequest.current=req
@@ -1964,7 +1972,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       {tab==='auditorias' && (
         <section className="workspace audit-workspace" aria-label="Inspeções Armazém">
           <Suspense fallback={<div className="audit-center">Carregando inspeções do armazém…</div>}>
-            <AuditoriasPage profileName={profile.nome} canDelete={!!canDelete}/>
+            <AuditoriasPage profileName={profile.nome} canDelete={!!canDelete} canManageTemplates={!!canManageIts}/>
           </Suspense>
         </section>
       )}
