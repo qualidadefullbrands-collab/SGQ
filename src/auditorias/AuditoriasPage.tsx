@@ -163,6 +163,9 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
   const [bootstrapFailed,setBootstrapFailed]=useState(false)
   const bottomRef=useRef<HTMLDivElement|null>(null)
   const fileRef=useRef<HTMLInputElement|null>(null)
+  const startRequestLock=useRef(false)
+  const sendRequestLock=useRef(false)
+  const openAuditVersion=useRef(0)
 
   const definition=active ? getAuditDefinition(active.rq_code) : null
   const readOnly=Boolean(active&&active.status!=='em_andamento'&&active.status!=='revisao')
@@ -255,6 +258,8 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
 
 
   async function startAudit(def:AuditDefinition) {
+    if(startRequestLock.current)return
+    startRequestLock.current=true
     setLoading(true)
     setNotice('')
     try {
@@ -275,17 +280,20 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
     } catch (e:any) {
       setNotice(e?.message || 'Não foi possível iniciar a auditoria.')
     } finally {
+      startRequestLock.current=false
       setLoading(false)
     }
   }
 
 
-  async function openAudit(id:string) {
+  async function openAudit(id:string,keepNotice=false) {
+    const requestVersion=++openAuditVersion.current
     setLoading(true)
-    setNotice('')
+    if(!keepNotice)setNotice('')
     try {
       const loaded=await apiGet<any>(`/api/auditorias/${id}/detalhe`)
       if (loaded.error || !loaded.data?.execution) throw new Error(loaded.error?.message || 'Não foi possível abrir a auditoria.')
+      if(requestVersion!==openAuditVersion.current)return
       const data=loaded.data
       const urls=data.photoUrls ?? {}
       const withUrls=((data.messages ?? []) as AuditMessage[]).map((m)=>({
@@ -301,9 +309,9 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
       setRq016bArea('Ruas')
       setShowChecklist(false)
     } catch (e:any) {
-      setNotice(e?.message || 'Não foi possível abrir a auditoria.')
+      if(requestVersion===openAuditVersion.current)setNotice(e?.message || 'Não foi possível abrir a auditoria.')
     } finally {
-      setLoading(false)
+      if(requestVersion===openAuditVersion.current)setLoading(false)
     }
   }
 
@@ -339,7 +347,8 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
   }
 
   async function sendMessage() {
-    if (!active || !definition || (!draft.trim() && !photo) || loading || readOnly) return
+    if (!active || !definition || (!draft.trim() && !photo) || loading || readOnly || sendRequestLock.current) return
+    sendRequestLock.current=true
     const originalDraft=draft
     const text=originalDraft.trim() || 'Foto registrada para análise.'
     setLoading(true)
@@ -389,6 +398,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
     } catch (e:any) {
       setNotice(e?.message || 'Não foi possível registrar a mensagem.')
     } finally {
+      sendRequestLock.current=false
       setLoading(false)
     }
   }
@@ -441,7 +451,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
       if (integration==='sent') setNotice('Word oficial gerado e enviado para o Power Automate.')
       else if (integration==='error') setNotice('Word oficial gerado. O envio ao Power Automate apresentou erro e pode ser reprocessado.')
       else setNotice('Word oficial gerado. A integração HTTP do Power Automate ainda não está configurada.')
-      await openAudit(execution.id)
+      await openAudit(execution.id,true)
       await loadExecutions()
     } catch (e:any) {
       setNotice(e?.message || 'Não foi possível gerar o Word oficial.')
