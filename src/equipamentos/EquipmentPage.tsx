@@ -42,8 +42,8 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
     if(!selected){setEvents([]);setEventsError('');return}
     let valid=true
     setEventsLoading(true);setEventsError('')
-    authClient.from('sgq_equipamento_eventos').select('*').eq('equipamento_id',selected)
-      .order('data_evento',{ascending:false})
+    Promise.resolve(authClient.from('sgq_equipamento_eventos').select('*').eq('equipamento_id',selected)
+      .order('data_evento',{ascending:false}))
       .then(({data,error})=>{
         if(!valid)return
         if(error){setEventsError('Não foi possível carregar o histórico. Tente abrir o equipamento novamente.');setEvents([])}
