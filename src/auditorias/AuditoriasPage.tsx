@@ -638,7 +638,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
               <button type="button" className="secondary" onClick={()=>void loadAuditHome()} disabled={loadingPage}>Atualizar</button>
             </div>
           </div>
-          {!bootstrapFailed && !visibleExecutions.length && <div className="audit-empty">{executions.length?'Nenhuma inspeção corresponde ao filtro.':'Nenhuma inspeção deste módulo ainda.'}</div>}
+          {!bootstrapFailed && !visibleExecutions.length && <div className="audit-empty">{executions.length?'Nenhuma inspeção corresponde ao filtro.':'Nenhuma inspeção ativa na lista. Registros excluídos permanecem preservados para rastreabilidade.'}</div>}
           {visibleExecutions.map((x)=>(
             <div className="audit-history-entry" key={x.id}>
               <button type="button" className="audit-history-row" onClick={()=>void openAudit(x.id)}>
