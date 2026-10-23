@@ -69,3 +69,8 @@ test('warehouse completion also enforces mandatory checklist and RQ014 evidence 
  assert.match(finish,/status=in\.\(em_andamento,revisao\)/)
  assert.match(finish,/statusCode:409/)
 })
+
+test('service monitoring probes return successful HEAD routes',()=>{
+ assert.match(api,/app\.MapMethods\("\/",new\[\]\{"HEAD"\}/)
+ assert.match(api,/app\.MapMethods\("\/health",new\[\]\{"HEAD"\}/)
+})
