@@ -74,3 +74,12 @@ test('service monitoring probes return successful HEAD routes',()=>{
  assert.match(api,/app\.MapMethods\("\/",new\[\]\{"HEAD"\}/)
  assert.match(api,/app\.MapMethods\("\/health",new\[\]\{"HEAD"\}/)
 })
+
+test('equipment history errors are distinguished from an empty history; dates use Brazil-local time',()=>{
+ const equipment=readFileSync(new URL('../src/equipamentos/EquipmentPage.tsx',import.meta.url),'utf8')
+ assert.match(equipment,/timeZone:'America\/Sao_Paulo'/)
+ assert.match(equipment,/eventsLoading/)
+ assert.match(equipment,/eventsError/)
+ assert.match(equipment,/Falha na conexão com o histórico/)
+ assert.match(equipment,/if\(!selected\|\|saving\|\|!canManage\)return/)
+})
