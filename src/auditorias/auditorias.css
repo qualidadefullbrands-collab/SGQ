@@ -393,3 +393,11 @@
   .sgq-operational-shell .audit-card:hover,
   .sgq-operational-shell .audit-overview-card:hover{transform:none!important}
 }
+
+
+/* Make failed inference distinguishable from a completed checklist classification */
+.sgq-operational-shell .audit-ai-unavailable{
+  display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:7px 9px;
+  border:1px solid #e6c9aa;border-radius:7px;background:#fff7ec;
+  color:#89582b;font-size:11px;font-weight:750;line-height:1.35
+}
