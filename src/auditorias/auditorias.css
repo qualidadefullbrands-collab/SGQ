@@ -401,3 +401,142 @@
   border:1px solid #e6c9aa;border-radius:7px;background:#fff7ec;
   color:#89582b;font-size:11px;font-weight:750;line-height:1.35
 }
+
+
+/* Manual RQs — forms replace the assistant chat */
+.sgq-operational-shell .audit-form-screen{max-width:1380px;padding-bottom:95px}
+.sgq-operational-shell .audit-form-screen .audit-session-header{
+  position:sticky;top:67px;z-index:16;display:flex;align-items:center;gap:14px;
+  padding:18px 19px;margin-bottom:14px;background:rgba(255,255,255,.97);
+  border:1px solid #d7e2ea;border-radius:14px;box-shadow:0 4px 14px #29445510;
+}
+.sgq-operational-shell .audit-form-screen .audit-session-title strong{
+  color:#1a3448;font-size:19px;font-weight:800;line-height:1.25
+}
+.sgq-operational-shell .audit-manual-controls{
+  display:flex;align-items:flex-end;gap:13px;flex-wrap:wrap;
+  padding:17px 19px;background:white;border:1px solid #d9e5ec;
+  border-radius:14px;margin-bottom:14px
+}
+.sgq-operational-shell .audit-manual-controls label{
+  display:grid;align-items:center;gap:7px;min-width:155px;font-size:13px;
+  font-weight:750;color:#345066
+}
+.sgq-operational-shell .audit-manual-controls .audit-manual-location{flex:1;min-width:240px}
+.sgq-operational-shell .audit-manual-controls input,.sgq-operational-shell .audit-manual-controls select,
+.sgq-operational-shell .audit-equipment-fields input,.sgq-operational-shell .audit-equipment-fields select{
+  width:100%;height:44px;border:1px solid #bbcedd;border-radius:9px;
+  background:#fff;color:#1a3448;font-size:14px;padding:0 12px
+}
+.sgq-operational-shell .audit-checklist-button{min-height:44px;padding:0 16px}
+.sgq-operational-shell .audit-saved-locations{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
+.sgq-operational-shell .audit-saved-locations button{
+  min-height:38px;padding:8px 12px;border-radius:20px;border:1px solid #c5d6e1;
+  background:white;color:#325b75;font-size:12px;font-weight:700
+}
+.sgq-operational-shell .audit-saved-locations button.active{
+  background:#e8f4fb;border-color:#5594b8;color:#0f608e
+}
+.sgq-operational-shell .audit-manual-sections{display:grid;gap:17px}
+.sgq-operational-shell .audit-manual-panel{
+  background:white;border:1px solid #cbdbe6;border-radius:15px;
+  margin-bottom:16px;overflow:hidden;box-shadow:0 2px 12px #264b620a;
+}
+.sgq-operational-shell .audit-manual-panel-head{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:14px;padding:17px 20px;border-bottom:1px solid #dbe6ed;background:#f5f9fc
+}
+.sgq-operational-shell .audit-manual-panel>h2{padding:18px 20px 0;margin:0;color:#19394d;font-size:19px}
+.sgq-operational-shell .audit-manual-panel-head h2{font-size:18px;color:#17374e;margin:0;font-weight:800}
+.sgq-operational-shell .audit-manual-panel-head span{font-size:12px;color:#658196}
+.sgq-operational-shell .audit-manual-rows{display:grid}
+.sgq-operational-shell .audit-manual-row{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;gap:12px 18px;padding:16px 20px;
+  border-top:1px solid #e1eaf0;
+}
+.sgq-operational-shell .audit-manual-row:first-child{border-top:0}
+.sgq-operational-shell .audit-manual-row:nth-child(even){background:#fbfdfe}
+.sgq-operational-shell .audit-manual-row.is-answered{box-shadow:inset 3px 0 0 #4b9aa7}
+.sgq-operational-shell .audit-manual-question{display:flex;align-items:flex-start;gap:13px;min-width:0}
+.sgq-operational-shell .audit-manual-question b{
+  flex:0 0 36px;width:36px;min-height:31px;display:grid;place-items:center;
+  padding:4px;color:#285777;font-size:12px;border-radius:8px;background:#e8f1f8
+}
+.sgq-operational-shell .audit-manual-question span{
+  color:#263e52;font-size:14px;line-height:1.5;font-weight:550
+}
+.sgq-operational-shell .audit-manual-answer{display:flex;gap:7px;align-items:center}
+.sgq-operational-shell .audit-manual-answer button{
+  width:49px;min-height:42px;border-radius:9px;border:1.5px solid #c5d4dc;
+  background:#f4f8fa;color:#375269;font-weight:850;font-size:12px;
+  transition:background-color .14s,border-color .14s,transform .14s
+}
+.sgq-operational-shell .audit-manual-answer button:disabled{opacity:.58;cursor:not-allowed}
+.sgq-operational-shell .audit-manual-answer .audit-result-C.selected{background:#117647;color:white;border-color:#0d6039}
+.sgq-operational-shell .audit-manual-answer .audit-result-NC.selected{background:#c93445;color:white;border-color:#a72231}
+.sgq-operational-shell .audit-manual-answer .audit-result-NA.selected{background:#385e86;color:white;border-color:#274563}
+.sgq-operational-shell .audit-manual-answer button:not(:disabled):hover{border-color:#658ba8;transform:translateY(-1px)}
+.sgq-operational-shell .audit-manual-observation{
+  display:flex;grid-column:1/-1;align-items:center;gap:9px;margin-left:49px
+}
+.sgq-operational-shell .audit-manual-observation input{
+  flex:1;width:100%;min-width:0;min-height:40px;border:1px solid #d2dfe8;
+  background:white;border-radius:9px;padding:9px 12px;font-size:13px;color:#213e55
+}
+.sgq-operational-shell .audit-manual-observation .secondary{min-height:40px}
+.sgq-operational-shell .audit-equipment-fields{
+  padding:18px 20px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:14px;align-items:end
+}
+.sgq-operational-shell .audit-equipment-fields label{display:grid;gap:7px;font-size:13px;font-weight:750;color:#32536a}
+.sgq-operational-shell .audit-equipment-notes{grid-column:span 2}
+.sgq-operational-shell .audit-equipment-fields .primary{min-height:44px}
+.sgq-operational-shell .audit-object-list{
+  display:flex;flex-wrap:wrap;gap:10px;margin:0 0 16px
+}
+.sgq-operational-shell .audit-object-list>div{
+  display:grid;gap:5px;min-width:185px;padding:11px 14px;
+  border:1px solid #aec9d8;border-radius:11px;background:#f2f8fb
+}
+.sgq-operational-shell .audit-object-list strong{color:#1c4966;font-size:14px}
+.sgq-operational-shell .audit-object-list span{font-size:12px;color:#506e80}
+.sgq-operational-shell .audit-evidence-section{margin-top:17px}
+.sgq-operational-shell .audit-manual-evidence{
+  display:flex;gap:12px;margin:14px 18px;padding:14px 15px;border:1px solid #e0e9ef;
+  border-radius:10px;background:#fafcfe;color:#334f65
+}
+.sgq-operational-shell .audit-manual-evidence img{width:100px;max-height:90px;object-fit:cover;border-radius:8px}
+.sgq-operational-shell .audit-manual-evidence p{margin:0 0 6px;line-height:1.5;font-size:14px;overflow-wrap:anywhere}
+.sgq-operational-shell .audit-manual-evidence small{font-size:11px;color:#7890a2}
+.sgq-operational-shell .audit-evidence-entry{display:grid;gap:12px;padding:17px 20px}
+.sgq-operational-shell .audit-evidence-entry textarea{
+  width:100%;min-height:100px;resize:vertical;border:1px solid #c5d7e2;border-radius:10px;
+  padding:13px;font-size:14px;color:#203b50;background:white
+}
+.sgq-operational-shell .audit-evidence-actions{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.sgq-operational-shell .audit-evidence-actions button{display:inline-flex;align-items:center;gap:8px;min-height:43px}
+.sgq-operational-shell .audit-manual-footer{
+  display:flex;justify-content:flex-end;gap:10px;margin:22px 0 40px
+}
+.sgq-operational-shell .audit-manual-footer>.primary{min-height:49px;padding:12px 22px}
+@media(max-width:850px){
+  .sgq-operational-shell .audit-form-screen .audit-session-header{top:72px}
+}
+@media(max-width:650px){
+  .sgq-operational-shell .audit-manual-controls{padding:14px;gap:10px}
+  .sgq-operational-shell .audit-manual-controls label,.sgq-operational-shell .audit-manual-controls .audit-manual-location{flex:1 1 100%}
+  .sgq-operational-shell .audit-manual-controls .audit-checklist-button{width:100%;justify-content:center}
+  .sgq-operational-shell .audit-manual-panel-head{padding:14px}
+  .sgq-operational-shell .audit-manual-row{grid-template-columns:1fr;padding:15px 13px;gap:10px}
+  .sgq-operational-shell .audit-manual-answer{margin-left:48px}
+  .sgq-operational-shell .audit-manual-answer button{min-height:46px;flex:1;max-width:78px}
+  .sgq-operational-shell .audit-manual-observation{margin-left:0}
+  .sgq-operational-shell .audit-manual-question span{font-size:13px}
+  .sgq-operational-shell .audit-equipment-fields{grid-template-columns:1fr;padding:15px}
+  .sgq-operational-shell .audit-equipment-notes{grid-column:auto}
+  .sgq-operational-shell .audit-manual-footer>.primary{width:100%;justify-content:center}
+  .sgq-operational-shell .audit-manual-evidence{margin:12px}
+  .sgq-operational-shell .audit-manual-evidence img{width:80px}
+  .sgq-operational-shell .audit-form-screen .audit-session-title strong{font-size:16px}
+}
