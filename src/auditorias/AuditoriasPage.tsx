@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileText, Loader2, MapPin, Mic, MicOff, Send, Sparkles, Trash2, Upload, X } from 'lucide-react'
+import { Activity, ArrowLeft, ArrowUpRight, Boxes, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileText, Flame, Layers3, Loader2, MapPin, Mic, MicOff, Send, ShieldCheck, Sparkles, Trash2, Upload, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, supabase } from '../lib/supabase'
 import { AUDIT_DEFINITIONS, getAuditDefinition, type AuditCriterion, type AuditDefinition, type RqCode } from './catalog'
 import './auditorias.css'
@@ -564,37 +564,46 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
     return (
       <section className="audit-page audit-integrated">
         <div className="audit-hero">
-          <div>
-            <span className="eyebrow">CONTLOG · QUALIDADE OPERACIONAL</span>
-            <h1>Inspeções Armazém</h1>
-            <p>Inspeções de campo, checklist, evidências fotográficas e relatórios Word. Todos os registros anteriores continuam disponíveis neste módulo.</p>
+          <div className="audit-hero-copy">
+            <span className="audit-contlog-brand">Contlog<span className="audit-brand-dot">.</span></span>
+            <div className="audit-hero-title-row">
+              <h1>Inspeções <span>Armazém</span></h1>
+              <span className="audit-hero-edition">CENTRAL DE QUALIDADE <b> / SGQ</b></span>
+            </div>
+            <div className="audit-hero-rule"><span/><span/><span/></div>
           </div>
-          <div className="audit-hero-icon"><ClipboardCheck size={26}/></div>
+          <div className="audit-hero-art" aria-hidden="true">
+            <div className="audit-hero-art-ring ring-one"/>
+            <div className="audit-hero-art-ring ring-two"/>
+            <div className="audit-hero-art-core"><ShieldCheck size={49} strokeWidth={1.3}/></div>
+            <span className="audit-hero-art-corner">CQ / 26</span>
+          </div>
         </div>
 
         <div className="audit-overview" aria-label="Indicadores das inspeções do armazém">
-          <button type="button" className={'audit-overview-card '+(historyFilter==='todas'?'active':'')} onClick={()=>setHistoryFilter('todas')}>
-            <span>Inspeções</span><strong>{executions.length}</strong><small>Registros disponíveis</small>
+          <button type="button" className={'audit-overview-card audit-stat-total '+(historyFilter==='todas'?'active':'')} onClick={()=>setHistoryFilter('todas')} aria-pressed={historyFilter==='todas'}>
+            <span className="audit-stat-caption"><ClipboardCheck size={17}/> Inspeções</span><strong>{executions.length}</strong>
+            <ArrowUpRight className="audit-stat-arrow" size={17}/>
           </button>
-          <button type="button" className={'audit-overview-card '+(historyFilter==='em_andamento'?'active':'')} onClick={()=>setHistoryFilter('em_andamento')}>
-            <span>Em andamento</span><strong>{openCount}</strong><small>Inclui revisão</small>
+          <button type="button" className={'audit-overview-card audit-stat-open '+(historyFilter==='em_andamento'?'active':'')} onClick={()=>setHistoryFilter('em_andamento')} aria-pressed={historyFilter==='em_andamento'}>
+            <span className="audit-stat-caption"><Activity size={17}/> Em andamento</span><strong>{openCount}</strong>
+            <ArrowUpRight className="audit-stat-arrow" size={17}/>
           </button>
-          <button type="button" className={'audit-overview-card '+(historyFilter==='concluida'?'active':'')} onClick={()=>setHistoryFilter('concluida')}>
-            <span>Concluídas</span><strong>{finishedCount}</strong><small>Inclui integração pendente</small>
+          <button type="button" className={'audit-overview-card audit-stat-complete '+(historyFilter==='concluida'?'active':'')} onClick={()=>setHistoryFilter('concluida')} aria-pressed={historyFilter==='concluida'}>
+            <span className="audit-stat-caption"><CheckCircle2 size={17}/> Concluídas</span><strong>{finishedCount}</strong>
+            <ArrowUpRight className="audit-stat-arrow" size={17}/>
           </button>
-          <div className="audit-overview-card static"><span>Modelos oficiais</span><strong>{readyCount}/4</strong><small>Arquivos Word disponíveis</small></div>
+          <div className="audit-overview-card audit-stat-document static">
+            <span className="audit-stat-caption"><FileText size={17}/> Documentos</span><strong>{readyCount}<span className="audit-stat-denominator">/4</span></strong>
+          </div>
         </div>
 
         {notice && <div className="audit-notice">{notice}<button onClick={()=>setNotice('')}><X size={15}/></button></div>}
 
         {bootstrapFailed && <div className="audit-retry"><span>Falha ao consultar o histórico e os modelos do armazém.</span><button type="button" className="secondary" onClick={()=>void loadAuditHome()}>Tentar novamente</button></div>}
 
-        <div className="audit-template-panel">
-          <div>
-            <span className="eyebrow">MODELOS OFICIAIS</span>
-            <strong>{readyCount}/4 modelos disponíveis para geração do Word</strong>
-            <small>O sistema preenche uma cópia do arquivo mestre e preserva o original.</small>
-          </div>
+        {canManageTemplates && <details className="audit-template-tools">
+          <summary><FileText size={16}/> Configurar documentos <ChevronRight size={16}/></summary>
           <div className="audit-template-list">
             {AUDIT_DEFINITIONS.map((def)=>{
               const ready=Boolean(templates.find((x)=>x.rq_code===def.code)?.storage_path)
@@ -602,27 +611,40 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
                 <label className={'audit-template-chip '+(ready?'ready':'missing')} key={def.code}>
                   {templateUploading===def.code ? <Loader2 className="spin" size={15}/> : ready ? <Check size={15}/> : <Upload size={15}/>}
                   <span>{def.displayCode}</span>
-                  <small>{ready?'Modelo carregado':canManageTemplates?'Enviar .docx':'Modelo pendente'}</small>
-                  {canManageTemplates&&<input hidden type="file" accept=".docx" onChange={(e)=>void uploadTemplate(def,e.target.files?.[0] ?? null)}/>}
+                  <small>{ready?'Atualizar DOCX':'Adicionar DOCX'}</small>
+                  <input hidden type="file" accept=".docx" onChange={(e)=>void uploadTemplate(def,e.target.files?.[0] ?? null)}/>
                 </label>
               )
             })}
           </div>
-        </div>
+        </details>}
 
+        <div className="audit-section-heading">
+          <div><span className="audit-section-eyebrow">ROTINAS DE INSPEÇÃO</span><h2>Escolha uma atividade</h2></div>
+          <span className="audit-section-index">04 ROTINAS</span>
+        </div>
         <div className="audit-grid">
-          {AUDIT_DEFINITIONS.map((def)=>{
+          {AUDIT_DEFINITIONS.map((def,index)=>{
             const ready=Boolean(templates.find((x)=>x.rq_code===def.code)?.storage_path)
             return (
-              <article className="audit-card" key={def.code}>
+              <article className={'audit-card audit-card-'+def.code.toLowerCase()} key={def.code}>
                 <div className="audit-card-head">
                   <span className="audit-code">{def.displayCode}</span>
-                  <span className={'audit-model-pill '+(ready?'ready':'')}>{ready?'Word pronto':'Modelo pendente'}</span>
+                  <span className="audit-card-number">0{index+1}</span>
+                </div>
+                <div className="audit-card-symbol" aria-hidden="true">
+                  {def.code==='RQ014'?<Flame size={31} strokeWidth={1.65}/>:
+                    def.code==='RQ015'?<Boxes size={31} strokeWidth={1.65}/>:
+                    def.code==='RQ016'?<Layers3 size={31} strokeWidth={1.65}/>:
+                    <Sparkles size={31} strokeWidth={1.65}/>}
                 </div>
                 <strong>{def.title}</strong>
-                <span>{def.description}</span>
-                <small>Versão {def.version} · {def.requiresPhoto?'Foto disponível':'Sem foto no modelo'}</small>
-                <button className="audit-start-button" onClick={()=>startAudit(def)} disabled={loading}>Iniciar inspeção <ChevronRight size={18}/></button>
+                <div className="audit-card-bottom">
+                  <span className="audit-card-category">{def.code==='RQ014'?'SEGURANÇA':def.code==='RQ015'?'ESTRUTURA':def.code==='RQ016'?'ORGANIZAÇÃO':'PREPARAÇÃO'}</span>
+                  <button className="audit-start-button" onClick={()=>void startAudit(def)} disabled={loading} aria-label={'Iniciar '+def.title}>
+                    <span>{ready?'Iniciar':'Iniciar sem modelo'}</span><ArrowUpRight size={19}/>
+                  </button>
+                </div>
               </article>
             )
           })}
@@ -630,7 +652,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
 
         <div className="audit-history">
           <div className="audit-section-title">
-            <div><span className="eyebrow">HISTÓRICO · CONTLOG</span><h2>Inspeções recentes</h2></div>
+            <div><span className="audit-section-eyebrow">ACOMPANHAMENTO</span><h2>Histórico de inspeções</h2></div>
             <div className="audit-history-controls">
               <label className="audit-history-search">Buscar no histórico
                 <input value={historySearch} onChange={e=>setHistorySearch(e.target.value)} placeholder="RQ, inspeção ou responsável" />
@@ -638,7 +660,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
               <button type="button" className="secondary" onClick={()=>void loadAuditHome()} disabled={loadingPage}>Atualizar</button>
             </div>
           </div>
-          {!bootstrapFailed && !visibleExecutions.length && <div className="audit-empty">{executions.length?'Nenhuma inspeção corresponde ao filtro.':'Nenhuma inspeção ativa na lista. Registros excluídos permanecem preservados para rastreabilidade.'}</div>}
+          {!bootstrapFailed && !visibleExecutions.length && <div className="audit-empty">{executions.length?'Nenhum resultado para o filtro.':'Nenhuma inspeção por aqui.'}</div>}
           {visibleExecutions.map((x)=>(
             <div className="audit-history-entry" key={x.id}>
               <button type="button" className="audit-history-row" onClick={()=>void openAudit(x.id)}>
@@ -734,7 +756,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
           <div className={'audit-bubble-row '+m.autor} key={m.id}>
             <div className="audit-bubble">
               {m.photoUrl && <img src={m.photoUrl} alt="Evidência da inspeção"/>}
-              <p>{m.texto}</p>
+              <p>{m.autor==='assistente' && /^(Avaliação iniciada\.|Pré-avaliação iniciada\.|Inspeção iniciada\.)/i.test(m.texto)?'Avaliação Iniciada':m.texto}</p>
               {m.autor==='assistente' && Array.isArray(m.metadata?.matches) && m.metadata.matches.length>0 && (
                 <div className="audit-tags">{m.metadata.matches.map((x:any)=><span key={x.key}>{x.key} · {x.result}</span>)}</div>
               )}
