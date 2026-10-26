@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, ArrowLeft, ArrowUpRight, Boxes, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileText, Flame, Layers3, Loader2, LoaderCircle, MapPin, Save, ShieldCheck, Sparkles, Trash2, Upload, X } from 'lucide-react'
+import { Activity, ArrowLeft, ArrowUpRight, Boxes, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileText, Flame, Layers3, Loader2, LoaderCircle, MapPin, Save, Sparkles, Trash2, Upload, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, supabase } from '../lib/supabase'
 import { AUDIT_DEFINITIONS, getAuditDefinition, type AuditCriterion, type AuditDefinition, type RqCode } from './catalog'
 import './auditorias.css'
