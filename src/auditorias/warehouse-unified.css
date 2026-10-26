@@ -424,3 +424,32 @@
 @media(prefers-reduced-motion:reduce){
   .sgq-operational-shell .sgq-warehouse-workspace :is(.audit-card,.audit-start-button,.metric) {transition:none}
 }
+
+
+/* Warehouse confirmation/delete dialogs use the same viewport-top placement as SGQ dialogs. */
+.sgq-operational-shell .audit-modal-backdrop {
+  position:fixed;
+  inset:0;
+  z-index:500;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-start;
+  align-items:center;
+  padding:clamp(20px,5vh,52px) 16px 24px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+}
+.sgq-operational-shell .audit-modal-backdrop > .audit-modal {
+  width:min(520px,100%);
+  max-height:calc(100dvh - clamp(20px,5vh,52px) - 24px);
+  flex:0 0 auto;
+  margin:0 auto;
+  overflow-y:auto;
+  box-sizing:border-box;
+}
+@media(max-width:650px){
+  .sgq-operational-shell .audit-modal-backdrop {padding:14px 10px 20px}
+  .sgq-operational-shell .audit-modal-backdrop > .audit-modal {
+    max-height:calc(100dvh - 34px);
+  }
+}
