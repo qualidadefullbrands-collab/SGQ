@@ -394,6 +394,8 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
       setDraft(old=>old===originalDraft?'':old)
       choosePhoto(null)
       await openAudit(active.id)
+      if(processed.data?.degraded)
+        setNotice('A IA não conseguiu interpretar este registro. O texto foi salvo; confira e classifique os itens manualmente.')
       if (processed.data?.finishRequested) await requestFinish()
     } catch (e:any) {
       setNotice(e?.message || 'Não foi possível registrar a mensagem.')
@@ -729,7 +731,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
       {showChecklist && (
         <div className="audit-checklist">
           <div className="audit-checklist-head">
-            <div><strong>Checklist do modelo oficial</strong><span>{definition?.code==='RQ016B' ? rq016bArea+' · informe o local para registrar' : 'Use C / NC / NA quando quiser corrigir ou completar a leitura da IA.'}</span></div>
+            <div><strong>Checklist do modelo oficial</strong><span>{definition?.code==='RQ016B' ? rq016bArea+' · informe o local para registrar' : 'Revise os resultados sugeridos pela IA. C / NC / NA podem ser ajustados manualmente.'}</span></div>
             <button onClick={()=>setShowChecklist(false)}><X size={18}/></button>
           </div>
           <div className="audit-checklist-list">
@@ -757,6 +759,9 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
             <div className="audit-bubble">
               {m.photoUrl && <img src={m.photoUrl} alt="Evidência da inspeção"/>}
               <p>{m.autor==='assistente' && /^(Avaliação iniciada\.|Pré-avaliação iniciada\.|Inspeção iniciada\.)/i.test(m.texto)?'Avaliação Iniciada':m.texto}</p>
+              {m.autor==='assistente' && m.metadata?.degraded && (
+                <span className="audit-ai-unavailable"><Activity size={13}/> IA indisponível — registro salvo sem classificação</span>
+              )}
               {m.autor==='assistente' && Array.isArray(m.metadata?.matches) && m.metadata.matches.length>0 && (
                 <div className="audit-tags">{m.metadata.matches.map((x:any)=><span key={x.key}>{x.key} · {x.result}</span>)}</div>
               )}
