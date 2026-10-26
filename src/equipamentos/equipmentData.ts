@@ -11,9 +11,22 @@ export type Equipment = {
   estado:'ativo'|'em_manutencao'|'interditado'|'inativo'; observacoes:string|null; dados_origem:Record<string,unknown>
 }
 
+export type EquipmentOperationalStatus = Equipment['estado'] | 'calibracao_pendente'
+
+export function equipmentOperationalStatus(e:Equipment, referenceDate?:string):EquipmentOperationalStatus {
+  if(e.estado!=='ativo') return e.estado
+  const now=referenceDate || (() => {
+    const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date())
+    const pick=(kind:string)=>parts.find(part=>part.type===kind)?.value||''
+    return `${pick('year')}-${pick('month')}-${pick('day')}`
+  })()
+  if(e.requer_calibracao===false) return 'ativo'
+  if(e.requer_calibracao===true && e.proxima_calibracao && e.proxima_calibracao.slice(0,10)>=now) return 'ativo'
+  return 'calibracao_pendente'
+}
+
 export function equipmentFit(e:Equipment,paramName:string,unit?:string|null) {
-  if(e.estado!=='ativo') return false
-  if(e.requer_calibracao && (!e.proxima_calibracao || e.proxima_calibracao<new Date().toISOString().slice(0,10))) return false
+  if(equipmentOperationalStatus(e)!=='ativo') return false
   if(e.tipo!=='instrumento' && e.tipo!=='dimensional') return false
   const name=(paramName||'').toLowerCase()
   const u=(unit||'').toLowerCase()
