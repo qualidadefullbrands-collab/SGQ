@@ -330,6 +330,12 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
     }finally{setSavingRow('')}
   }
 
+  function choosePhoto(file:File|null){
+    setPhoto(file)
+    setPhotoPreview(file?URL.createObjectURL(file):'')
+    if(fileRef.current)fileRef.current.value=''
+  }
+
   async function saveManualRecord(){
     if(!active||readOnly||sendRequestLock.current||(!draft.trim()&&!photo))return
     sendRequestLock.current=true
