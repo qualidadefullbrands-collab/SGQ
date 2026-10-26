@@ -3,6 +3,7 @@ import { Activity, ArrowLeft, ArrowUpRight, Boxes, Camera, Check, CheckCircle2, 
 import { apiGet, apiPost, apiPut, supabase } from '../lib/supabase'
 import { AUDIT_DEFINITIONS, getAuditDefinition, type AuditCriterion, type AuditDefinition, type RqCode } from './catalog'
 import './auditorias.css'
+import './warehouse-unified.css'
 
 type AuditExecution = {
   id:string
