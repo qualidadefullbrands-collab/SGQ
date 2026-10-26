@@ -521,36 +521,25 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
 
   if (!active) {
     return (
-      <section className="audit-page audit-integrated">
-        <div className="audit-hero">
-          <div className="audit-hero-copy">
+      <section className="audit-page audit-integrated sgq-warehouse-workspace">
+        <div className="page-title audit-page-title">
+          <div>
             <span className="audit-contlog-brand">Contlog</span>
-            <div className="audit-hero-title-row">
-              <h1>Inspeções <span>Armazém</span></h1>
-            </div>
-            <div className="audit-hero-rule"><span/><span/><span/></div>
-          </div>
-          <div className="audit-hero-art" aria-hidden="true">
-            <div className="audit-hero-art-ring ring-one"/>
-            <div className="audit-hero-art-ring ring-two"/>
-            <div className="audit-hero-art-core"><ShieldCheck size={49} strokeWidth={1.3}/></div>
+            <h1>Inspeções <span>Armazém</span></h1>
           </div>
         </div>
 
-        <div className="audit-overview" aria-label="Indicadores das inspeções do armazém">
-          <button type="button" className={'audit-overview-card audit-stat-total '+(historyFilter==='todas'?'active':'')} onClick={()=>setHistoryFilter('todas')} aria-pressed={historyFilter==='todas'}>
-            <span className="audit-stat-caption"><ClipboardCheck size={17}/> Inspeções</span><strong>{executions.length}</strong>
-            <ArrowUpRight className="audit-stat-arrow" size={17}/>
+        <section className="metrics audit-overview" aria-label="Indicadores das inspeções do armazém">
+          <button type="button" className={'metric-button '+(historyFilter==='todas'?'selected':'')} onClick={()=>setHistoryFilter('todas')} aria-pressed={historyFilter==='todas'}>
+            <article className="metric"><ClipboardCheck size={22}/><div><strong>{executions.length}</strong><span>Inspeções</span></div></article>
           </button>
-          <button type="button" className={'audit-overview-card audit-stat-open '+(historyFilter==='em_andamento'?'active':'')} onClick={()=>setHistoryFilter('em_andamento')} aria-pressed={historyFilter==='em_andamento'}>
-            <span className="audit-stat-caption"><Activity size={17}/> Em andamento</span><strong>{openCount}</strong>
-            <ArrowUpRight className="audit-stat-arrow" size={17}/>
+          <button type="button" className={'metric-button '+(historyFilter==='em_andamento'?'selected':'')} onClick={()=>setHistoryFilter('em_andamento')} aria-pressed={historyFilter==='em_andamento'}>
+            <article className="metric"><Activity size={22}/><div><strong>{openCount}</strong><span>Em andamento</span></div></article>
           </button>
-          <button type="button" className={'audit-overview-card audit-stat-complete '+(historyFilter==='concluida'?'active':'')} onClick={()=>setHistoryFilter('concluida')} aria-pressed={historyFilter==='concluida'}>
-            <span className="audit-stat-caption"><CheckCircle2 size={17}/> Concluídas</span><strong>{finishedCount}</strong>
-            <ArrowUpRight className="audit-stat-arrow" size={17}/>
+          <button type="button" className={'metric-button '+(historyFilter==='concluida'?'selected':'')} onClick={()=>setHistoryFilter('concluida')} aria-pressed={historyFilter==='concluida'}>
+            <article className="metric"><CheckCircle2 size={22}/><div><strong>{finishedCount}</strong><span>Concluídas</span></div></article>
           </button>
-        </div>
+        </section>
 
         {notice && <div className="audit-notice">{notice}<button onClick={()=>setNotice('')}><X size={15}/></button></div>}
 
@@ -573,37 +562,34 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
           </div>
         </details>}
 
-        <div className="audit-section-heading">
-          <div><h2>Nova inspeção</h2></div>
-        </div>
-        <div className="audit-grid">
-          {AUDIT_DEFINITIONS.map((def)=>{
-            const ready=Boolean(templates.find((x)=>x.rq_code===def.code)?.storage_path)
-            return (
-              <article className={'audit-card audit-card-'+def.code.toLowerCase()} key={def.code}>
-                <div className="audit-card-head">
-                  <span className="audit-code">{def.displayCode}</span>
-                </div>
-                <div className="audit-card-symbol" aria-hidden="true">
-                  {def.code==='RQ014'?<Flame size={31} strokeWidth={1.65}/>:
-                    def.code==='RQ015'?<Boxes size={31} strokeWidth={1.65}/>:
-                    def.code==='RQ016'?<Layers3 size={31} strokeWidth={1.65}/>:
-                    <Sparkles size={31} strokeWidth={1.65}/>}
-                </div>
-                <strong>{def.title}</strong>
-                <div className="audit-card-bottom">
-  
-                  <button className="audit-start-button" onClick={()=>void startAudit(def)} disabled={loading} aria-label={'Iniciar '+def.title}>
-                    <span>{ready?'Iniciar':'Iniciar sem modelo'}</span><ArrowUpRight size={19}/>
+        <section className="panel section-card audit-new-section">
+          <div className="section-title"><h2>Nova inspeção</h2></div>
+          <div className="audit-grid">
+            {AUDIT_DEFINITIONS.map((def)=>{
+              const ready=Boolean(templates.find((x)=>x.rq_code===def.code)?.storage_path)
+              return (
+                <article className={'audit-card row-card audit-card-'+def.code.toLowerCase()} key={def.code}>
+                  <span className="audit-card-symbol" aria-hidden="true">
+                    {def.code==='RQ014'?<Flame size={22}/>:
+                      def.code==='RQ015'?<Boxes size={22}/>:
+                      def.code==='RQ016'?<Layers3 size={22}/>:
+                      <Sparkles size={22}/>}
+                  </span>
+                  <div className="audit-card-content">
+                    <span className="audit-code">{def.displayCode}</span>
+                    <strong>{def.title}</strong>
+                  </div>
+                  <button type="button" className="primary audit-start-button" onClick={()=>void startAudit(def)} disabled={loading} aria-label={'Iniciar '+def.title}>
+                    {ready?'Iniciar':'Iniciar sem modelo'}<ArrowUpRight size={18}/>
                   </button>
-                </div>
-              </article>
-            )
-          })}
-        </div>
+                </article>
+              )
+            })}
+          </div>
+        </section>
 
-        <div className="audit-history">
-          <div className="audit-section-title">
+        <section className="panel queue audit-history">
+          <div className="section-title audit-section-title">
             <div><h2>Inspeções</h2></div>
             <div className="audit-history-controls">
               <label className="audit-history-search">Buscar no histórico
@@ -614,7 +600,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
           </div>
           {!bootstrapFailed && !visibleExecutions.length && <div className="audit-empty">{executions.length?'Nenhum resultado para o filtro.':'Nenhuma inspeção por aqui.'}</div>}
           {visibleExecutions.map((x)=>(
-            <div className="audit-history-entry" key={x.id}>
+            <div className="queue-row audit-history-entry" key={x.id}>
               <button type="button" className="audit-history-row" onClick={()=>void openAudit(x.id)}>
                 <div>
                   <strong>{x.rq_code.replace('RQ','RQ ')} · {x.titulo}</strong>
@@ -627,15 +613,15 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
               </button>}
             </div>
           ))}
-        </div>
+        </section>
         {deleteDialog}
       </section>
     )
   }
 
   return (
-    <section className="audit-page audit-session audit-form-screen">
-      <div className="audit-session-header">
+    <section className="audit-page audit-session audit-form-screen sgq-warehouse-workspace">
+      <div className="page-title audit-session-header">
         <button className="audit-back" type="button" title="Voltar" onClick={()=>{setActive(null);setMessages([]);setAnswers([]);setFindings([]);setObjects([]);setNotice('')}}><ArrowLeft size={20}/></button>
         <div className="audit-session-title">
           <span>{definition?.displayCode}</span>
@@ -648,7 +634,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
       {notice&&<div className="audit-notice" role="status">{notice}<button type="button" onClick={()=>setNotice('')} aria-label="Fechar"><X size={15}/></button></div>}
       {definition?.fixedChecklist&&<div className="audit-progress"><div><span style={{width:progressPct+'%'}}/></div><small>{progressPct}%</small></div>}
 
-      <div className="audit-manual-controls">
+      <div className="panel section-card audit-manual-controls">
         {definition?.code==='RQ016B'&&<label>Área
           <select value={rq016bArea} onChange={e=>setRq016bArea(e.target.value)}>
             <option>Ruas</option><option>Checkouts</option><option>Docas</option>
@@ -672,7 +658,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
       )}
 
       {definition?.code==='RQ014'&&!readOnly&&(
-        <section className="audit-manual-panel">
+        <section className="panel section-card audit-manual-panel">
           <h2>Equipamento</h2>
           <div className="audit-equipment-fields">
             <label>Tipo<select value={equipmentType} onChange={e=>setEquipmentType(e.target.value as 'extintor'|'hidrante')}><option value="extintor">Extintor</option><option value="hidrante">Hidrante</option></select></label>
@@ -693,7 +679,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
 
       {showChecklist&&<div className="audit-manual-sections">
         {Array.from(new Set(relevantCriteria.map(c=>c.section))).map(section=>(
-          <section className="audit-manual-panel" key={section}>
+          <section className="panel section-card audit-manual-panel" key={section}>
             <div className="audit-manual-panel-head">
               <h2>{section}</h2>
               <span>{relevantCriteria.filter(c=>c.section===section).length} itens</span>
@@ -732,7 +718,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
         ))}
       </div>}
 
-      <section className="audit-manual-panel audit-evidence-section">
+      <section className="panel section-card audit-manual-panel audit-evidence-section">
         <div className="audit-manual-panel-head"><h2>Observações e fotos</h2><span>{messages.filter(x=>x.autor==='auditor').length} registros</span></div>
         {messages.filter(m=>m.autor==='auditor').map(m=>(
           <div className="audit-manual-evidence" key={m.id}>
