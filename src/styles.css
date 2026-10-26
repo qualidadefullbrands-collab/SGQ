@@ -1937,3 +1937,121 @@ input,select,textarea,button{font-size:15px}
   .sgq-operational-shell .dimension-set-tabs button{white-space:nowrap}
 }
 @media(prefers-reduced-motion:reduce){.sgq-operational-shell .dimension-set-tabs button{transition:none}}
+
+
+/* Unified SGQ interface language: panel, inspections, stocks, ITs, equipment, warehouse */
+.sgq-operational-shell{
+ --sgq-page:#f3f6f9;--sgq-ink:#1c3246;--sgq-muted:#5e7588;
+ --sgq-border:#cad9e4;--sgq-accent:#166b9c;--sgq-card:#fff;
+ color:var(--sgq-ink);font-family:Inter,"Segoe UI Variable",system-ui,sans-serif;
+}
+body:has(.sgq-operational-shell){background:var(--sgq-page)!important}
+.sgq-operational-shell .topbar{
+ background:rgba(248,250,252,.97)!important;border-bottom:1px solid var(--sgq-border)!important;
+ backdrop-filter:blur(14px);box-shadow:0 2px 15px #193c5410
+}
+.sgq-operational-shell .topbar .brand-mark{color:#1c405d;font-weight:850;letter-spacing:-.02em}
+.sgq-side-nav{background:#fff!important;border-right:1px solid var(--sgq-border)!important}
+.sgq-side-brand{border-bottom-color:#dfebf1;padding-bottom:25px}
+.sgq-side-brand b{font-size:25px;letter-spacing:-.045em;color:#193f5a}
+.sgq-side-nav>button{
+ font-size:13px;min-height:46px;border-radius:10px;margin-bottom:2px;
+ color:#536a7d;font-weight:750;transition:background .15s,color .15s,box-shadow .15s
+}
+.sgq-side-nav>button:hover{background:#f1f6f9!important;color:#225c80!important}
+.sgq-side-nav>button.selected{
+ background:#e8f3fa!important;box-shadow:inset 3px 0 0 #2a85b8;
+ color:#175c84!important
+}
+.sgq-side-caption{letter-spacing:.13em;color:#8298aa;margin-top:20px}
+.sgq-operational-shell .workspace{padding-top:27px}
+.sgq-operational-shell .workspace .page-title{
+ display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;
+ margin-bottom:22px
+}
+.sgq-operational-shell .page-title h1,.sgq-operational-shell .workspace h1{
+ color:#142f43;font-size:clamp(26px,3vw,38px);font-weight:830;
+ line-height:1.15;letter-spacing:-.042em
+}
+.sgq-operational-shell .section-title h2,.sgq-operational-shell .section-card h2{
+ font-size:19px;color:#1b394e;letter-spacing:-.018em
+}
+.sgq-operational-shell :is(.panel,.section-card,.process-card,.row-card,.sample-card,.sku-card,.metric,.test-card,.stock-card,.equipment-row){
+ border-radius:14px!important;border-color:var(--sgq-border)!important;
+ box-shadow:0 3px 13px rgba(24,54,77,.035)!important
+}
+.sgq-operational-shell :is(.panel,.section-card,.process-card,.stock-card,.equipment-row,.sku-card){
+ background:#fff!important
+}
+.sgq-operational-shell :is(.process-card,.row-card,.sample-card,.equipment-row,.stock-card){
+ transition:border-color .17s,box-shadow .17s,transform .16s
+}
+.sgq-operational-shell :is(.process-card,.sample-card,.equipment-row,.stock-card):hover{
+ border-color:#9ebed1!important;box-shadow:0 9px 24px rgba(24,54,77,.09)!important
+}
+.sgq-operational-shell :is(button,.primary,.secondary){
+ font-family:inherit;letter-spacing:0;touch-action:manipulation
+}
+.sgq-operational-shell .primary{
+ border-radius:9px;background:#176d9d;border:1px solid #176d9d;
+ color:#fff;font-weight:750;box-shadow:none
+}
+.sgq-operational-shell .primary:hover:not(:disabled){background:#105880;border-color:#105880}
+.sgq-operational-shell .secondary{
+ border-radius:9px;background:#fff;border:1px solid #b7ccda;
+ color:#255473;font-weight:750
+}
+.sgq-operational-shell .secondary:hover:not(:disabled){background:#eef6fb;border-color:#7ba8c2}
+.sgq-operational-shell :is(input:not([type=checkbox]):not([type=radio]),select,textarea){
+ border-radius:9px;border-color:#b9cfde;background:#fff;color:#1c3549;
+ min-height:41px;outline:none;transition:border-color .15s,box-shadow .15s
+}
+.sgq-operational-shell :is(input:not([type=checkbox]):not([type=radio]),select,textarea):focus-visible{
+ border-color:#3788ba!important;box-shadow:0 0 0 3px rgba(42,133,184,.13)
+}
+.sgq-operational-shell :is(button,input,select,textarea):focus-visible{
+ outline:2px solid rgba(42,133,184,.63);outline-offset:2px
+}
+.sgq-operational-shell .section-card,.sgq-operational-shell .panel{padding:clamp(15px,1.9vw,24px)}
+.sgq-operational-shell :is(.metric,.metric-button){border-radius:13px}
+.sgq-operational-shell :is(.metric strong,.metric-button strong){letter-spacing:-.035em}
+.sgq-operational-shell .inspection-stage-tabs{
+ background:rgba(252,253,254,.98)!important;border-radius:11px;
+ border-color:var(--sgq-border)!important;scrollbar-width:thin
+}
+.sgq-operational-shell .inspection-stage-tab{border-radius:8px;font-weight:750}
+.sgq-operational-shell .inspection-stage-tab.active{
+ background:#eaf5fa!important;color:#165c86!important
+}
+.sgq-operational-shell .dimension-item{
+ border-radius:14px!important;border-color:#aec9da!important
+}
+.sgq-operational-shell .dimension-param{
+ border-radius:11px!important;border-color:#c3d7e3!important;border-left-color:#458bac!important
+}
+.sgq-operational-shell .equipment-section-tabs{border-color:#d4e2eb}
+.sgq-operational-shell .equipment-section-tabs button{
+ min-height:43px;border-radius:9px;color:#36566e;background:#f5f9fc
+}
+.sgq-operational-shell .equipment-section-tabs button.active{
+ background:#176f9d;color:#fff;border-color:#176f9d
+}
+.sgq-operational-shell .stock-toolbar,.sgq-operational-shell .equipment-toolbar{
+ background:#fff;border-radius:13px
+}
+.sgq-operational-shell .audit-page .audit-overview-card strong{letter-spacing:-.05em}
+@media(max-width:850px){
+ .sgq-operational-shell{width:calc(100% - 20px)!important;margin:0 auto!important}
+ .sgq-side-nav{background:#fff!important;box-shadow:0 4px 13px #21445c18}
+ .sgq-operational-shell .workspace{padding-top:16px}
+}
+@media(max-width:620px){
+ .sgq-operational-shell :is(.panel,.section-card){padding:14px}
+ .sgq-operational-shell .page-title h1,.sgq-operational-shell .workspace h1{font-size:26px}
+ .sgq-operational-shell .section-title h2,.sgq-operational-shell .section-card h2{font-size:17px}
+ .sgq-operational-shell .form-grid,.sgq-operational-shell .info-grid{gap:12px}
+}
+@media(prefers-reduced-motion:reduce){
+ .sgq-operational-shell :is(.process-card,.row-card,.sample-card,.equipment-row,.stock-card,
+ .primary,.secondary,input,select,textarea){transition:none!important;animation:none!important}
+}
