@@ -540,3 +540,11 @@
   .sgq-operational-shell .audit-manual-evidence img{width:80px}
   .sgq-operational-shell .audit-form-screen .audit-session-title strong{font-size:16px}
 }
+
+
+/* Only the three operational counters remain in Contlog. */
+@media(min-width:761px){
+ .sgq-operational-shell .audit-page.audit-integrated .audit-overview{
+   grid-template-columns:repeat(3,minmax(0,1fr))
+ }
+}
