@@ -11,7 +11,7 @@ test('warehouse reuses same SGQ page title, metric cards, panels and list rows',
   assert.match(ui,/className="audit-page audit-integrated sgq-warehouse-workspace"/)
   assert.match(ui,/className="page-title audit-page-title"/)
   assert.match(ui,/className="metrics audit-overview"/)
-  assert.match(ui,/className="metric-button/)
+  assert.match(ui,/className=\{'metric-button/)
   assert.match(ui,/className="panel section-card audit-new-section"/)
   assert.match(ui,/audit-card row-card/)
   assert.match(ui,/className="panel queue audit-history"/)
