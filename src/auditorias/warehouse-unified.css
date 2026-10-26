@@ -1,0 +1,426 @@
+/* Contlog warehouse UI adopts SGQ shared page-title, metrics, panels and rows.
+   Loaded after auditorias.css to neutralize former standalone dark/illustrated module.
+   No form fields, business states or persistence behavior are modified here. */
+
+.sgq-operational-shell .audit-page.sgq-warehouse-workspace {
+  width:100%;
+  max-width:none;
+  margin:0;
+  padding:0 0 68px;
+  font-family:inherit;
+  font-size:16px;
+  line-height:1.5;
+  color:var(--sgq-text);
+}
+.sgq-operational-shell .sgq-warehouse-workspace .page-title {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:0;
+  margin:0 0 23px;
+  border:0;
+  background:transparent;
+  box-shadow:none;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-contlog-brand {
+  display:inline-block;
+  margin:0 0 3px;
+  font-size:16px;
+  font-weight:850;
+  letter-spacing:0;
+  line-height:1.4;
+  color:#d12e43;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-page-title h1 {
+  margin:3px 0 0;
+  color:#142f43;
+  font-size:clamp(30px,3vw,38px);
+  font-weight:830;
+  letter-spacing:-.03em;
+  line-height:1.17;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-page-title h1 span {color:inherit}
+
+/* Same metric cards and selected state used by SGQ Painel. */
+.sgq-operational-shell .sgq-warehouse-workspace .audit-overview.metrics {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:14px;
+  margin:0 0 18px;
+  padding:0;
+  border:0;
+  background:transparent;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-overview .metric-button {
+  display:block;
+  min-width:0;
+  width:100%;
+  height:100%;
+  padding:0;
+  border:0;
+  background:transparent;
+  text-align:left;
+  cursor:pointer;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-overview .metric {
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  gap:15px;
+  min-height:104px;
+  padding:20px;
+  background:#fff;
+  border:1px solid var(--sgq-line)!important;
+  border-radius:14px;
+  box-shadow:0 2px 8px rgba(19,53,78,.045)!important;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-overview .metric>svg {
+  width:22px;
+  height:22px;
+  flex-shrink:0;
+  color:#176d9d;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-overview .metric strong {
+  display:block;
+  font-size:clamp(27px,2.4vw,34px);
+  line-height:1.2;
+  color:#20374a;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-overview .metric span {
+  display:block;
+  margin:3px 0 0;
+  font-size:15px;
+  color:var(--sgq-secondary);
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-overview .metric-button.selected .metric {
+  border-color:#1581b4!important;
+  box-shadow:inset 0 0 0 2px rgba(138,194,221,.33),0 3px 12px rgba(23,109,157,.09)!important;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-overview .metric-button:hover .metric {
+  border-color:#6aadc9!important;
+}
+
+/* The new inspection grid is a standard SGQ panel with compact operational rows. */
+.sgq-operational-shell .sgq-warehouse-workspace .audit-new-section.panel.section-card,
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history.panel.queue {
+  margin:18px 0 0;
+  padding:clamp(16px,1.9vw,24px);
+  border:1px solid var(--sgq-line)!important;
+  border-radius:14px!important;
+  background:#fff!important;
+  box-shadow:0 2px 8px rgba(19,53,78,.045)!important;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .section-title {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  margin:0 0 16px;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .section-title h2 {
+  margin:0;
+  color:#1b394e;
+  font-size:22px;
+  line-height:1.3;
+  font-weight:800;
+  letter-spacing:-.018em;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+  margin:0;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-card.row-card {
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  justify-content:flex-start;
+  gap:14px;
+  min-width:0;
+  min-height:102px;
+  margin:0;
+  padding:17px!important;
+  overflow:visible;
+  isolation:auto;
+  border:1px solid #c4d5e0!important;
+  border-radius:12px!important;
+  background:#fafdff!important;
+  box-shadow:none!important;
+  transition:border-color .15s,background-color .15s;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-card::after {display:none}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-card:hover {
+  transform:none;
+  border-color:#9bb9cd!important;
+  box-shadow:none!important;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-card-symbol {
+  display:grid;
+  place-items:center;
+  flex:0 0 48px;
+  width:48px;
+  height:48px;
+  margin:0;
+  border-radius:11px;
+  background:#e8f3fa;
+  color:#166f9d;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-card-content {
+  display:grid;
+  align-content:center;
+  gap:5px;
+  min-width:0;
+  flex:1;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-code {
+  width:fit-content;
+  background:transparent;
+  border:0;
+  border-radius:0;
+  padding:0;
+  font-size:14px;
+  letter-spacing:.02em;
+  color:#516b7e;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-card strong {
+  display:block;
+  max-width:none;
+  min-height:0;
+  margin:0;
+  color:#20374a;
+  font-size:17px;
+  font-weight:750;
+  line-height:1.4;
+  letter-spacing:0;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-start-button.primary {
+  display:inline-flex;
+  flex:0 0 auto;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  min-height:48px;
+  margin:0 0 0 auto;
+  padding:10px 15px;
+  background:#176d9d;
+  border:1px solid #176d9d;
+  border-radius:9px;
+  box-shadow:none;
+  color:#fff;
+  font-size:16px;
+  font-weight:750;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-start-button.primary:hover:not(:disabled) {
+  background:#105880;
+  border-color:#105880;
+  box-shadow:none;
+}
+
+/* Warehouse history now looks and behaves like other SGQ process lists. */
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history.panel.queue .audit-section-title {
+  display:flex;
+  flex-wrap:wrap;
+  gap:14px;
+  align-items:end;
+  padding:0 0 16px;
+  margin:0;
+  border-bottom:1px solid #dce7ee;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history-controls {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:end;
+  justify-content:flex-end;
+  gap:10px;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history-search {
+  display:grid;
+  gap:6px;
+  min-width:min(320px,100%);
+  font-size:15px;
+  color:#2a485e;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history-search input {
+  width:100%;
+  min-height:48px;
+  font-size:16px;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history-entry.queue-row {
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin:0;
+  padding:0;
+  border-bottom:1px solid #dce7ee;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history-row {
+  display:flex;
+  flex:1 1 auto;
+  min-width:0;
+  min-height:74px;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:15px 6px;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  color:#20374a;
+  text-align:left;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history-row:hover {
+  background:#f5f9fc;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history-row strong {
+  color:#20374a;
+  font-size:16px;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history-row>div>span {
+  color:var(--sgq-secondary);
+  font-size:15px;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-status {
+  flex-shrink:0;
+  padding:7px 10px;
+  font-size:14px!important;
+  font-weight:700;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-template-tools {
+  margin:0 0 16px;
+  padding:0;
+  border:1px solid var(--sgq-line);
+  border-radius:12px;
+  background:#fff;
+  box-shadow:none;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-template-tools summary {
+  min-height:48px;
+  color:#36566e;
+  font-size:15px;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-template-list {
+  padding:15px;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-notice {
+  font-size:15px;
+}
+
+/* Manual warehouse workflows keep the same panels and field dimensions as Full inspections. */
+.sgq-operational-shell .sgq-warehouse-workspace.audit-form-screen .audit-session-header.page-title {
+  position:sticky;
+  top:70px;
+  z-index:16;
+  display:flex;
+  align-items:center;
+  gap:14px;
+  min-height:76px;
+  padding:16px 18px;
+  margin:0 0 16px;
+  background:#fff;
+  border:1px solid var(--sgq-line);
+  border-radius:14px;
+  box-shadow:0 2px 8px rgba(19,53,78,.045);
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-session-title strong {
+  font-size:21px;
+  line-height:1.35;
+  color:#1b394e;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-back {
+  flex-shrink:0;
+  width:48px;
+  height:48px;
+  border-radius:9px;
+  border:1px solid var(--sgq-line);
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-progress-mini {white-space:nowrap}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-manual-controls.panel.section-card {
+  display:flex;
+  align-items:end;
+  flex-wrap:wrap;
+  gap:14px;
+  padding:18px;
+  margin:0 0 16px;
+  border:1px solid var(--sgq-line)!important;
+  border-radius:14px;
+  background:#fff!important;
+  box-shadow:0 2px 8px rgba(19,53,78,.045)!important;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-manual-panel.panel.section-card {
+  overflow:hidden;
+  margin:0 0 16px;
+  padding:0!important;
+  border:1px solid var(--sgq-line)!important;
+  border-radius:14px;
+  background:#fff!important;
+  box-shadow:0 2px 8px rgba(19,53,78,.045)!important;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-manual-panel-head {
+  padding:17px 20px;
+  background:#f6f9fb;
+  border-bottom:1px solid #dce7ee;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-manual-panel-head h2,
+.sgq-operational-shell .sgq-warehouse-workspace .audit-manual-panel>h2 {
+  margin:0;
+  color:#1b394e;
+  font-size:21px;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-manual-row {
+  padding:18px 20px;
+  border-top:1px solid #e1eaf0;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-manual-question span {font-size:17px;line-height:1.5}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-manual-answer button {
+  min-width:58px;
+  min-height:50px;
+  font-size:16px;
+}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-manual-observation input {min-height:48px;font-size:16px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-evidence-entry textarea {font-size:16px}
+.sgq-operational-shell .sgq-warehouse-workspace :is(.primary,.secondary):focus-visible,
+.sgq-operational-shell .sgq-warehouse-workspace .metric-button:focus-visible,
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history-row:focus-visible {
+  outline:3px solid #297eae;
+  outline-offset:2px;
+}
+
+@media(max-width:1120px){
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-grid {grid-template-columns:1fr}
+}
+@media(max-width:850px){
+  .sgq-operational-shell .sgq-warehouse-workspace.audit-form-screen .audit-session-header.page-title {top:78px}
+}
+@media(max-width:650px){
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-overview.metrics {grid-template-columns:1fr;gap:10px}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-overview .metric {min-height:92px;padding:16px}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-card.row-card {
+    display:grid;
+    grid-template-columns:44px minmax(0,1fr);
+    gap:12px;
+    padding:15px!important;
+  }
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-card-symbol {width:44px;height:44px;flex-basis:44px}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-card-content {min-width:0}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-start-button.primary {
+    grid-column:1/-1;
+    width:100%;
+    margin:0;
+  }
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-history.panel.queue .audit-section-title {align-items:stretch}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-history-controls {width:100%;justify-content:stretch}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-history-search {flex:1 1 100%;min-width:0}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-history-controls>.secondary {flex:1}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-history-row {align-items:flex-start;flex-direction:column;gap:9px}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-manual-row {grid-template-columns:1fr;padding:16px 14px}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-manual-answer {margin-left:0}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-manual-answer button {flex:1;max-width:none}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-manual-observation {margin-left:0}
+  .sgq-operational-shell .sgq-warehouse-workspace.audit-form-screen .audit-session-header.page-title {padding:13px;gap:10px}
+  .sgq-operational-shell .sgq-warehouse-workspace .audit-session-title strong {font-size:18px}
+}
+@media(prefers-reduced-motion:reduce){
+  .sgq-operational-shell .sgq-warehouse-workspace :is(.audit-card,.audit-start-button,.metric) {transition:none}
+}
