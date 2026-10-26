@@ -1,11 +1,11 @@
 import {useEffect,useMemo,useState} from 'react'
-import {AlertTriangle,CheckCircle2,ClipboardCheck,Plus,RefreshCw,Save,SlidersHorizontal,Wrench} from 'lucide-react'
+import {CheckCircle2,ClipboardCheck,Plus,RefreshCw,Save,SlidersHorizontal,Wrench} from 'lucide-react'
 import {authClient} from '../lib/supabase'
-import type {Equipment} from './equipmentData'
+import {equipmentOperationalStatus,type Equipment} from './equipmentData'
 
 type EventRow={id:string;equipamento_id:string;tipo:string;data_evento:string;proximo_vencimento:string|null;resultado:string;prestador:string|null;documento_url:string|null;observacoes:string|null}
 type EventDraft={tipo:string;data_evento:string;proximo_vencimento:string;resultado:string;prestador:string;documento_url:string;observacoes:string}
-const blank=():Partial<Equipment>=>({codigo:'',nome:'',tipo:'instrumento',fabricante:'',modelo:'',numero_serie:'',patrimonio:'',setor:'',localizacao:'',responsavel:'',unidade:'',faixa_medicao:'',resolucao:'',tolerancia:'',aplicacoes:[],requer_calibracao:false,ultima_calibracao:null,proxima_calibracao:null,certificado_calibracao:'',laboratorio_calibracao:'',periodicidade_calibracao_meses:null,proxima_verificacao:null,proxima_manutencao:null,estado:'ativo',observacoes:''})
+const blank=():Partial<Equipment>=>({codigo:'',nome:'',tipo:'instrumento',fabricante:'',modelo:'',numero_serie:'',patrimonio:'',setor:'',localizacao:'',responsavel:'',unidade:'',faixa_medicao:'',resolucao:'',tolerancia:'',aplicacoes:[],requer_calibracao:true,ultima_calibracao:null,proxima_calibracao:null,certificado_calibracao:'',laboratorio_calibracao:'',periodicidade_calibracao_meses:null,proxima_verificacao:null,proxima_manutencao:null,estado:'ativo',observacoes:''})
 const localDate=(date=new Date())=>{
   const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date)
   const pick=(type:string)=>parts.find(p=>p.type===type)?.value||''
@@ -99,19 +99,20 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
     {failure&&<div className="alert error" role="alert">{failure}</div>}
     <div className="equipment-summary">
       <div><strong>{equipments.length}</strong><span>Equipamentos cadastrados</span></div>
-      <div><strong>{equipments.filter(e=>e.estado==='ativo').length}</strong><span>Ativos</span></div>
+      <div><strong>{equipments.filter(e=>equipmentOperationalStatus(e,today)==='ativo').length}</strong><span>Ativos</span></div>
       <div><strong>{alerts.filter(e=>!e.proxima_calibracao||e.proxima_calibracao<today).length}</strong><span>Calibração pendente/vencida</span></div>
       <div><strong>{alerts.filter(e=>e.proxima_calibracao&&e.proxima_calibracao>=today).length}</strong><span>Vencem em até 30 dias</span></div>
     </div>
-    {alerts.length>0&&<div className="equipment-alerts"><AlertTriangle size={17}/><span><strong>Atenção à calibração:</strong> {alerts.map(e=>e.codigo).join(', ')}. Instrumentos vencidos ou sem data não ficam disponíveis para dimensionais.</span></div>}
     <div className="equipment-toolbar"><SlidersHorizontal size={17}/><input aria-label="Buscar equipamentos" placeholder="Buscar por código, nome, local ou número de série" value={search} onChange={e=>setSearch(e.target.value)}/></div>
     {!equipments.length&&<div className="panel section-card"><h2>Cadastro preparado</h2><p>A base está vazia. Cadastre instrumentos manualmente ou importe os registros da planilha quando ela estiver acessível. Nenhum equipamento foi inventado.</p></div>}
     <div className="equipment-list">
-      {shown.map(e=><article key={e.id} className={'equipment-row '+(selected===e.id?'selected':'')}>
+      {shown.map(e=>{
+        const operationalStatus=equipmentOperationalStatus(e,today)
+        return <article key={e.id} className={'equipment-row '+(selected===e.id?'selected':'')}>
         <div><b>{e.codigo} · {e.nome}</b><span>{[String(e.dados_origem?.tipo_controle||'Controle de rotina'),e.localizacao,e.patrimonio].filter(Boolean).join(' · ')}</span></div>
-        <div><span className={'equipment-status '+(e.estado==='ativo'?'valid':'inactive')}>{e.estado.replaceAll('_',' ')}</span>{e.requer_calibracao&&<small>Próxima calibração: {fmt(e.proxima_calibracao)}</small>}</div>
+        <div><span className={'equipment-status '+(operationalStatus==='ativo'?'valid':'inactive')}>{operationalStatus==='calibracao_pendente'?'Calibração pendente':operationalStatus.replaceAll('_',' ')}</span>{e.requer_calibracao&&<small>Próxima calibração: {fmt(e.proxima_calibracao)}</small>}</div>
         <div className="equipment-actions"><button className="secondary small" type="button" onClick={()=>{setSelected(selected===e.id?'':e.id);setSection('historico')}}><ClipboardCheck size={15}/> Histórico</button>{canManage&&<button className="secondary small" type="button" onClick={()=>setEditing({...e})}><Wrench size={15}/> Editar</button>}</div>
-      </article>)}
+      </article>})}
     </div>
     {selected&&<div className="modal-backdrop equipment-history-backdrop" role="presentation" onClick={()=>{if(!saving)setSelected('')}}>
       <section className="sample-detail panel section-card equipment-history" role="dialog" aria-modal="true" aria-labelledby="equipment-history-title" onClick={e=>e.stopPropagation()}>
@@ -150,7 +151,7 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
         {field('Setor','setor')}{field('Localização','localizacao')}{field('Responsável','responsavel')}
         {field('Unidade','unidade')}{field('Faixa de medição','faixa_medicao')}{field('Resolução','resolucao')}{field('Tolerância','tolerancia')}
         <label>Estado<select value={editing.estado||'ativo'} onChange={e=>setEditing({...editing,estado:e.target.value as Equipment['estado']})}><option value="ativo">Ativo</option><option value="em_manutencao">Em manutenção</option><option value="interditado">Interditado</option><option value="inativo">Inativo</option></select></label>
-        <label className="check-option span-2"><input type="checkbox" checked={!!editing.requer_calibracao} onChange={e=>setEditing({...editing,requer_calibracao:e.target.checked})}/> Exige calibração periódica</label>
+        <label className="check-option span-2"><input type="checkbox" checked={editing.requer_calibracao===false} onChange={e=>setEditing({...editing,requer_calibracao:!e.target.checked})}/> Não precisa de calibração</label>
         {field('Última calibração','ultima_calibracao',{type:'date'})}
         {field('Próxima calibração','proxima_calibracao',{type:'date'})}
         {field('Próxima verificação','proxima_verificacao',{type:'date'})}
