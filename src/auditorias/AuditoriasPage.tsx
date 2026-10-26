@@ -520,7 +520,6 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
   if (loadingPage) return <section className="audit-center"><Loader2 className="spin"/> Carregando auditorias…</section>
 
   if (!active) {
-    const readyCount=templates.filter((t)=>t.ativo && t.storage_path).length
     return (
       <section className="audit-page audit-integrated">
         <div className="audit-hero">
@@ -551,9 +550,6 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
             <span className="audit-stat-caption"><CheckCircle2 size={17}/> Concluídas</span><strong>{finishedCount}</strong>
             <ArrowUpRight className="audit-stat-arrow" size={17}/>
           </button>
-          <div className="audit-overview-card audit-stat-document static">
-            <span className="audit-stat-caption"><FileText size={17}/> Documentos</span><strong>{readyCount}<span className="audit-stat-denominator">/4</span></strong>
-          </div>
         </div>
 
         {notice && <div className="audit-notice">{notice}<button onClick={()=>setNotice('')}><X size={15}/></button></div>}
@@ -581,13 +577,12 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
           <div><h2>Nova inspeção</h2></div>
         </div>
         <div className="audit-grid">
-          {AUDIT_DEFINITIONS.map((def,index)=>{
+          {AUDIT_DEFINITIONS.map((def)=>{
             const ready=Boolean(templates.find((x)=>x.rq_code===def.code)?.storage_path)
             return (
               <article className={'audit-card audit-card-'+def.code.toLowerCase()} key={def.code}>
                 <div className="audit-card-head">
                   <span className="audit-code">{def.displayCode}</span>
-                  <span className="audit-card-number">0{index+1}</span>
                 </div>
                 <div className="audit-card-symbol" aria-hidden="true">
                   {def.code==='RQ014'?<Flame size={31} strokeWidth={1.65}/>:
