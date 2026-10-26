@@ -633,121 +633,127 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
   }
 
   return (
-    <section className="audit-page audit-session">
+    <section className="audit-page audit-session audit-form-screen">
       <div className="audit-session-header">
-        <button className="audit-back" onClick={()=>{setActive(null);setMessages([]);setAnswers([]);setFindings([]);setObjects([]);setNotice('')}}><ArrowLeft size={20}/></button>
+        <button className="audit-back" type="button" title="Voltar" onClick={()=>{setActive(null);setMessages([]);setAnswers([]);setFindings([]);setObjects([]);setNotice('')}}><ArrowLeft size={20}/></button>
         <div className="audit-session-title">
-          <span>{definition?.displayCode} · versão {definition?.version}</span>
+          <span>{definition?.displayCode}</span>
           <strong>{definition?.title}</strong>
         </div>
-        <div className="audit-progress-mini">
-          {definition?.fixedChecklist ? <><b>{progressDone}/{progressTotal}</b><small>itens</small></> : definition?.code==='RQ014' ? <><b>{objects.length}</b><small>equipamentos</small></> : <><b>{findings.length}</b><small>achados</small></>}
-        </div>
-        {canDelete&&<button type="button" className="audit-delete-action audit-session-delete" title="Excluir esta inspeção" aria-label="Excluir esta inspeção do armazém" onClick={()=>{setDeletionError('');setDeletionCandidate(active)}}>
-          <Trash2 size={18}/>
-        </button>}
+        <div className="audit-progress-mini"><b>{progressDone}/{progressTotal||definition?.criteria.length||0}</b><small>itens</small></div>
+        {canDelete&&<button type="button" className="audit-delete-action audit-session-delete" title="Excluir inspeção" aria-label="Excluir esta inspeção" onClick={()=>{setDeletionError('');setDeletionCandidate(active)}}><Trash2 size={18}/></button>}
       </div>
 
-      {definition?.fixedChecklist && (
-        <div className="audit-progress">
-          <div><span style={{width:progressPct+'%'}}/></div>
-          <small>{progressPct}% do checklist classificado</small>
-        </div>
-      )}
+      {notice&&<div className="audit-notice" role="status">{notice}<button type="button" onClick={()=>setNotice('')} aria-label="Fechar"><X size={15}/></button></div>}
+      {definition?.fixedChecklist&&<div className="audit-progress"><div><span style={{width:progressPct+'%'}}/></div><small>{progressPct}%</small></div>}
 
-      <div className="audit-context">
-        {definition?.code==='RQ016B' && (
-          <label>
-            Área
-            <select value={rq016bArea} onChange={(e)=>setRq016bArea(e.target.value)}>
-              <option>Ruas</option>
-              <option>Checkouts</option>
-              <option>Docas</option>
-            </select>
-          </label>
-        )}
-        <label className="grow">
-          <MapPin size={15}/> Local / endereço atual
-          <input value={currentLocation} onChange={(e)=>setCurrentLocation(e.target.value)} placeholder={definition?.code==='RQ016B'?'Ex.: Rua 02, Checkout 04, Doca 17':definition?.code==='RQ014'?'Ex.: EXT-022 · Doca 17':'Ex.: Rua 03 / A17'}/>
-        </label>
-        <button className="audit-checklist-button" onClick={()=>setShowChecklist(!showChecklist)}>
-          <ClipboardCheck size={17}/> Checklist
+      <div className="audit-manual-controls">
+        {definition?.code==='RQ016B'&&<label>Área
+          <select value={rq016bArea} onChange={e=>setRq016bArea(e.target.value)}>
+            <option>Ruas</option><option>Checkouts</option><option>Docas</option>
+          </select>
+        </label>}
+        {definition?.code!=='RQ016'&&<label className="audit-manual-location">
+          <MapPin size={15}/> Local / endereço {definition?.code==='RQ014'?'do equipamento':''}
+          <input value={currentLocation} onChange={e=>setCurrentLocation(e.target.value)} placeholder="Informe o local" />
+        </label>}
+        <button type="button" className="audit-checklist-button" onClick={()=>setShowChecklist(x=>!x)}>
+          <ClipboardCheck size={17}/> {showChecklist?'Ocultar itens':'Mostrar itens'}
         </button>
       </div>
 
-      {notice && <div className="audit-notice">{notice}<button onClick={()=>setNotice('')}><X size={15}/></button></div>}
+      {definition?.code!=='RQ016'&&answers.some(row=>row.local_ref)&&(
+        <div className="audit-saved-locations">
+          {Array.from(new Set(answers.map(a=>a.local_ref).filter(Boolean))).map(loc=>
+            <button key={loc} type="button" className={currentLocation===loc?'active':''} onClick={()=>setCurrentLocation(loc)}>{loc}</button>
+          )}
+        </div>
+      )}
 
-      {showChecklist && (
-        <div className="audit-checklist">
-          <div className="audit-checklist-head">
-            <div><strong>Checklist do modelo oficial</strong><span>{definition?.code==='RQ016B' ? rq016bArea+' · informe o local para registrar' : 'Revise os resultados sugeridos pela IA. C / NC / NA podem ser ajustados manualmente.'}</span></div>
-            <button onClick={()=>setShowChecklist(false)}><X size={18}/></button>
+      {definition?.code==='RQ014'&&!readOnly&&(
+        <section className="audit-manual-panel">
+          <h2>Equipamento</h2>
+          <div className="audit-equipment-fields">
+            <label>Tipo<select value={equipmentType} onChange={e=>setEquipmentType(e.target.value as 'extintor'|'hidrante')}><option value="extintor">Extintor</option><option value="hidrante">Hidrante</option></select></label>
+            <label>Identificação<input value={equipmentCode} onChange={e=>setEquipmentCode(e.target.value)} placeholder="Código" /></label>
+            <label>Situação<select value={equipmentStatus} onChange={e=>setEquipmentStatus(e.target.value)}><option value="pendente">Pendente</option><option value="liberado">Liberado</option><option value="bloqueado">Bloqueado</option></select></label>
+            <label className="audit-equipment-notes">Observação<input value={equipmentNotes} onChange={e=>setEquipmentNotes(e.target.value)} placeholder="Observação" /></label>
+            <button className="primary" type="button" disabled={loading||!equipmentCode.trim()||!currentLocation.trim()} onClick={()=>void saveEquipment()}>
+              {loading?<Loader2 size={17} className="spin"/>:<Save size={17}/>} Salvar equipamento
+            </button>
           </div>
-          <div className="audit-checklist-list">
-            {relevantCriteria.map((criterion)=>{
-              const local=definition?.code==='RQ016B' ? currentLocation : ''
-              const current=answerMap.get(answerKey(criterion.key,local))
-              return (
-                <div className="audit-check-row" key={criterion.key}>
-                  <div><b>{criterion.key}</b><span>{criterion.label}</span></div>
-                  <div className="audit-result-actions">
-                    {(['C','NC','NA'] as const).map((r)=>(
-                      <button key={r} disabled={readOnly||loading} className={current?.resultado===r?'active '+r:''} onClick={()=>void saveManualAnswer(criterion,r)}>{r}</button>
+        </section>
+      )}
+      {definition?.code==='RQ014'&&objects.length>0&&(
+        <div className="audit-object-list">
+          {objects.map(item=><div key={item.id}><strong>{item.identificacao||item.chave}</strong><span>{item.objeto_tipo} · {item.local_ref} · {item.status}</span></div>)}
+        </div>
+      )}
+
+      {showChecklist&&<div className="audit-manual-sections">
+        {Array.from(new Set(relevantCriteria.map(c=>c.section))).map(section=>(
+          <section className="audit-manual-panel" key={section}>
+            <div className="audit-manual-panel-head">
+              <h2>{section}</h2>
+              <span>{relevantCriteria.filter(c=>c.section===section).length} itens</span>
+            </div>
+            <div className="audit-manual-rows">
+              {relevantCriteria.filter(c=>c.section===section).map(c=>{
+                const local=localForManual()
+                const key=answerKey(c.key,local)
+                const current=answerMap.get(key)
+                const busy=savingRow===key
+                return <div className={'audit-manual-row '+(current?'is-answered':'')} key={c.key}>
+                  <div className="audit-manual-question"><b>{c.key}</b><span>{c.label}</span></div>
+                  <div className="audit-manual-answer">
+                    {(['C','NC','NA'] as const).map(result=>(
+                      <button type="button" key={result}
+                        aria-label={c.key+' '+result}
+                        aria-pressed={current?.resultado===result}
+                        className={'audit-result-'+result+(current?.resultado===result?' selected':'')}
+                        disabled={readOnly||!!savingRow||loading}
+                        onClick={()=>void saveManualAnswer(c,result)}>{result}</button>
                     ))}
+                    {busy&&<LoaderCircle size={17} className="spin"/>}
+                  </div>
+                  <div className="audit-manual-observation">
+                    <input aria-label={'Observação '+c.key} placeholder="Observação"
+                      value={notes[key]??current?.observacao??''}
+                      onChange={e=>setNotes(old=>({...old,[key]:e.target.value}))}
+                      disabled={readOnly}/>
+                    {!readOnly&&current&&notes[key]!==undefined&&notes[key]!==current.observacao&&
+                      <button type="button" className="secondary" disabled={!!savingRow} onClick={()=>void saveManualAnswer(c,current.resultado)}>Salvar</button>}
                   </div>
                 </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      <div className="audit-chat">
-        {messages.map((m)=>(
-          <div className={'audit-bubble-row '+m.autor} key={m.id}>
-            <div className="audit-bubble">
-              {m.photoUrl && <img src={m.photoUrl} alt="Evidência da inspeção"/>}
-              <p>{m.autor==='assistente' && /^(Avaliação iniciada\.|Pré-avaliação iniciada\.|Inspeção iniciada\.)/i.test(m.texto)?'Avaliação Iniciada':m.texto}</p>
-              {m.autor==='assistente' && m.metadata?.degraded && (
-                <span className="audit-ai-unavailable"><Activity size={13}/> IA indisponível — registro salvo sem classificação</span>
-              )}
-              {m.autor==='assistente' && Array.isArray(m.metadata?.matches) && m.metadata.matches.length>0 && (
-                <div className="audit-tags">{m.metadata.matches.map((x:any)=><span key={x.key}>{x.key} · {x.result}</span>)}</div>
-              )}
-              <small>{new Intl.DateTimeFormat('pt-BR',{hour:'2-digit',minute:'2-digit'}).format(new Date(m.criado_em))}</small>
+              })}
             </div>
+          </section>
+        ))}
+      </div>}
+
+      <section className="audit-manual-panel audit-evidence-section">
+        <div className="audit-manual-panel-head"><h2>Observações e fotos</h2><span>{messages.filter(x=>x.autor==='auditor').length} registros</span></div>
+        {messages.filter(m=>m.autor==='auditor').map(m=>(
+          <div className="audit-manual-evidence" key={m.id}>
+            {m.photoUrl&&<img src={m.photoUrl} alt="Foto da inspeção"/>}
+            <div><p>{m.texto}</p><small>{formatDate(m.criado_em)}</small></div>
           </div>
         ))}
-        {loading && <div className="audit-bubble-row assistente"><div className="audit-bubble typing"><Loader2 className="spin" size={16}/> Analisando o registro…</div></div>}
-        <div ref={bottomRef}/>
-      </div>
+        {!readOnly&&<div className="audit-evidence-entry">
+          <textarea value={draft} onChange={e=>setDraft(e.target.value)} rows={3} placeholder="Observação da inspeção" aria-label="Observação da inspeção"/>
+          {photoPreview&&<div className="audit-photo-preview"><img src={photoPreview} alt="Foto a enviar"/><button type="button" onClick={()=>choosePhoto(null)} aria-label="Remover foto"><X size={16}/></button></div>}
+          <div className="audit-evidence-actions">
+            <input ref={fileRef} hidden type="file" accept="image/*" capture="environment" onChange={e=>choosePhoto(e.target.files?.[0]??null)}/>
+            <button type="button" className="secondary" onClick={()=>fileRef.current?.click()}><Camera size={17}/> Adicionar foto</button>
+            <button type="button" className="primary" disabled={loading||(!draft.trim()&&!photo)} onClick={()=>void saveManualRecord()}>{loading?<Loader2 className="spin" size={17}/>:<Save size={17}/>} Salvar registro</button>
+          </div>
+        </div>}
+      </section>
 
-      {!readOnly ? (
-        <div className="audit-composer">
-          {photoPreview && <div className="audit-photo-preview"><img src={photoPreview}/><button onClick={()=>choosePhoto(null)}><X size={16}/></button></div>}
-          <div className="audit-input-row">
-            {definition?.requiresPhoto && <>
-              <input ref={fileRef} hidden type="file" accept="image/*" capture="environment" onChange={(e)=>choosePhoto(e.target.files?.[0] ?? null)}/>
-              <button className="audit-icon-button" onClick={()=>fileRef.current?.click()} title="Tirar foto"><Camera size={20}/></button>
-            </>}
-            <button className={'audit-icon-button '+(listening?'active':'')} onClick={startVoice} title="Ditar">{listening?<MicOff size={20}/>:<Mic size={20}/>}</button>
-            <textarea value={draft} onChange={(e)=>setDraft(e.target.value)} placeholder="Descreva o que está vendo…" rows={1} onKeyDown={(e)=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void sendMessage()}}}/>
-            <button className="audit-send" onClick={()=>sendMessage()} disabled={loading || (!draft.trim()&&!photo)}><Send size={19}/></button>
-          </div>
-          <div className="audit-composer-foot">
-            <span>{definition?.photoHint || 'Registre a ocorrência em linguagem natural.'}</span>
-            <button onClick={()=>requestFinish()}><CheckCircle2 size={16}/> Finalizar inspeção</button>
-          </div>
-        </div>
-      ) : (
-        <div className="audit-completed">
-          <CheckCircle2 size={22}/>
-          <div><strong>Inspeção concluída</strong><span>{active.documento_gerado_em?'Word oficial gerado e arquivado no SGQ.':'O Word oficial ainda precisa ser gerado.'}</span></div>
-          <button onClick={()=>downloadExisting()} disabled={documentLoading}>
-            {documentLoading?<Loader2 className="spin" size={17}/>:<Download size={17}/>} {active.documento_gerado_em?'Baixar Word':'Gerar Word'}
-          </button>
-        </div>
-      )}
+      <div className="audit-manual-footer">
+        {!readOnly? <button type="button" className="primary" disabled={loading||documentLoading||!!savingRow} onClick={()=>void requestFinish()}><CheckCircle2 size={19}/> Concluir inspeção</button>:
+        <button type="button" className="primary" disabled={documentLoading} onClick={()=>void downloadExisting()}><Download size={19}/> {active.documento_gerado_em?'Baixar Word':'Gerar Word'}</button>}
+      </div>
 
       {deleteDialog}
       {showFinish && !deletionCandidate && (
