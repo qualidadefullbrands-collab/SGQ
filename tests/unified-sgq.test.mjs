@@ -40,7 +40,7 @@ test('all four warehouse forms remain available',()=>{
 })
 
 test('warehouse has matching dashboard and mobile editing layout',()=>{
-  assert.match(audits,/Inspeções Armazém/)
+  assert.match(audits,/<h1>Inspeções <span>Armazém<\/span><\/h1>/)
   assert.match(audits,/audit-overview/)
   assert.match(audits,/audit-history-search/)
   assert.match(styles,/\.sgq-operational-shell \.audit-composer\{[^}]*left:248px/)
