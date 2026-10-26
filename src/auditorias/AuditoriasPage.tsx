@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, ArrowLeft, ArrowUpRight, Boxes, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileText, Flame, Layers3, Loader2, MapPin, Mic, MicOff, Send, ShieldCheck, Sparkles, Trash2, Upload, X } from 'lucide-react'
+import { Activity, ArrowLeft, ArrowUpRight, Boxes, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileText, Flame, Layers3, Loader2, LoaderCircle, MapPin, Save, ShieldCheck, Sparkles, Trash2, Upload, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, supabase } from '../lib/supabase'
 import { AUDIT_DEFINITIONS, getAuditDefinition, type AuditCriterion, type AuditDefinition, type RqCode } from './catalog'
 import './auditorias.css'
@@ -102,28 +102,6 @@ function sectionForLocation(def:AuditDefinition, area:string) {
   return def.criteria.filter((c)=>c.section===area)
 }
 
-async function imageToDataUrl(file:File,max=1280,quality=.78) {
-  const url=URL.createObjectURL(file)
-  try {
-    const img=new Image()
-    await new Promise<void>((resolve,reject)=>{
-      img.onload=()=>resolve()
-      img.onerror=()=>reject(new Error('Falha ao ler foto'))
-      img.src=url
-    })
-    const scale=Math.min(max/img.naturalWidth,max/img.naturalHeight,1)
-    const canvas=document.createElement('canvas')
-    canvas.width=Math.max(1,Math.round(img.naturalWidth*scale))
-    canvas.height=Math.max(1,Math.round(img.naturalHeight*scale))
-    const ctx=canvas.getContext('2d')
-    if (!ctx) throw new Error('Canvas indisponível')
-    ctx.drawImage(img,0,0,canvas.width,canvas.height)
-    return canvas.toDataURL('image/jpeg',quality)
-  } finally {
-    URL.revokeObjectURL(url)
-  }
-}
-
 function statusLabel(value:string) {
   const map:Record<string,string>={
     em_andamento:'Em andamento',
@@ -151,7 +129,12 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
   const [loadingPage,setLoadingPage]=useState(true)
   const [documentLoading,setDocumentLoading]=useState(false)
   const [templateUploading,setTemplateUploading]=useState<RqCode|null>(null)
-  const [listening,setListening]=useState(false)
+  const [savingRow,setSavingRow]=useState('')
+  const [notes,setNotes]=useState<Record<string,string>>({})
+  const [equipmentType,setEquipmentType]=useState<'extintor'|'hidrante'>('extintor')
+  const [equipmentCode,setEquipmentCode]=useState('')
+  const [equipmentStatus,setEquipmentStatus]=useState('pendente')
+  const [equipmentNotes,setEquipmentNotes]=useState('')
   const [showChecklist,setShowChecklist]=useState(false)
   const [showFinish,setShowFinish]=useState(false)
   const [notice,setNotice]=useState('')
@@ -161,7 +144,6 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
   const [historyFilter,setHistoryFilter]=useState<'todas'|'em_andamento'|'concluida'>('todas')
   const [historySearch,setHistorySearch]=useState('')
   const [bootstrapFailed,setBootstrapFailed]=useState(false)
-  const bottomRef=useRef<HTMLDivElement|null>(null)
   const fileRef=useRef<HTMLInputElement|null>(null)
   const startRequestLock=useRef(false)
   const sendRequestLock=useRef(false)
@@ -192,7 +174,6 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
     const timer=window.setTimeout(()=>setNotice(''),5500)
     return()=>window.clearTimeout(timer)
   },[notice])
-  useEffect(()=>{ bottomRef.current?.scrollIntoView({behavior:'smooth'}) },[messages.length,loading])
   useEffect(()=>{
     return ()=>{ if(photoPreview) URL.revokeObjectURL(photoPreview) }
   },[photoPreview])
@@ -286,7 +267,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
   }
 
 
-  async function openAudit(id:string,keepNotice=false) {
+  async function openAudit(id:string,keepNotice=false,preserveContext=false) {
     const requestVersion=++openAuditVersion.current
     setLoading(true)
     if(!keepNotice)setNotice('')
@@ -305,9 +286,13 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
       setAnswers((data.answers ?? []) as AuditAnswer[])
       setFindings((data.findings ?? []) as AuditFinding[])
       setObjects((data.objects ?? []) as AuditObject[])
-      setCurrentLocation('')
-      setRq016bArea('Ruas')
-      setShowChecklist(false)
+      if(!preserveContext) {
+        setCurrentLocation('')
+        setRq016bArea('Ruas')
+        setNotes({})
+        setDraft('')
+      }
+      setShowChecklist(true)
     } catch (e:any) {
       if(requestVersion===openAuditVersion.current)setNotice(e?.message || 'Não foi possível abrir a auditoria.')
     } finally {
@@ -316,93 +301,80 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
   }
 
 
+  function localForManual(){
+    return definition?.code==='RQ016' ? '' : currentLocation.trim()
+  }
+
   async function saveManualAnswer(criterion:AuditCriterion,result:'C'|'NC'|'NA') {
-    if(readOnly){setNotice('Inspeção concluída: o checklist está disponível somente para consulta.');return}
-    if (!active) return
-    const local=definition?.code==='RQ016B' ? currentLocation.trim() : ''
-    if (definition?.code==='RQ016B' && !local) {
-      setNotice('Informe o local avaliado antes de marcar o checklist.')
+    if(readOnly||!active||savingRow)return
+    const local=localForManual()
+    if(definition?.code!=='RQ016'&&!local){
+      setNotice('Informe o local ou equipamento antes de marcar o checklist.')
       return
     }
+    const id=answerKey(criterion.key,local)
+    const note=(notes[id]??answerMap.get(id)?.observacao??'').trim()
+    setSavingRow(id)
     setNotice('')
-    const saved=await apiPut<any>(`/api/auditorias/${active.id}/respostas/${encodeURIComponent(criterion.key)}`,{
-      resultado:result,
-      localRef:local,
-      observacao:'Registro manual do auditor',
-      confianca:1,
-      progressoTotalEsperado:definition?.fixedChecklist ? definition.criteria.length : 0,
-    })
-    if (saved.error || !saved.data?.resposta) return setNotice(saved.error?.message || 'Falha ao salvar resposta.')
-    const row=saved.data.resposta as AuditAnswer
-    const next=[...answers.filter((a)=>!(a.item_key===row.item_key && a.local_ref===row.local_ref)),row]
-    setAnswers(next)
-    setActive((prev)=>prev ? {...prev,progresso_concluido:saved.data.progresso_concluido,progresso_total:saved.data.progresso_total} : prev)
+    try{
+      const saved=await apiPut<any>('/api/auditorias/'+active.id+'/respostas/'+encodeURIComponent(criterion.key),{
+        resultado:result,localRef:local,observacao:note,confianca:1,
+        progressoTotalEsperado:definition?.fixedChecklist ? definition.criteria.length : 0
+      })
+      if(saved.error||!saved.data?.resposta)throw new Error(saved.error?.message||'Não foi possível salvar este item.')
+      const row=saved.data.resposta as AuditAnswer
+      setAnswers(previous=>[...previous.filter(a=>!(a.item_key===row.item_key&&a.local_ref===row.local_ref)),row])
+      setActive(previous=>previous?{...previous,progresso_concluido:saved.data.progresso_concluido,progresso_total:saved.data.progresso_total}:previous)
+    }catch(error:any){
+      setNotice(error?.message||'Falha ao salvar item. Tente novamente.')
+    }finally{setSavingRow('')}
   }
 
-
-  function choosePhoto(file:File|null) {
-    if (photoPreview) URL.revokeObjectURL(photoPreview)
-    setPhoto(file)
-    setPhotoPreview(file ? URL.createObjectURL(file) : '')
-  }
-
-  async function sendMessage() {
-    if (!active || !definition || (!draft.trim() && !photo) || loading || readOnly || sendRequestLock.current) return
+  async function saveManualRecord(){
+    if(!active||readOnly||sendRequestLock.current||(!draft.trim()&&!photo))return
     sendRequestLock.current=true
-    const originalDraft=draft
-    const text=originalDraft.trim() || 'Foto registrada para análise.'
     setLoading(true)
     setNotice('')
-    try {
+    const originalDraft=draft
+    try{
       let photoPath:string|null=null
-      let imageDataUrl:string|undefined
-      if (photo) {
-        imageDataUrl=await imageToDataUrl(photo)
+      if(photo){
         const user=await supabase.auth.getUser()
-        const ext=(photo.name.split('.').pop() || 'jpg').replace(/[^a-z0-9]/gi,'').toLowerCase()
-        photoPath=`${user.data.user?.id || 'user'}/${active.id}/${Date.now()}.${ext}`
-        const upload=await supabase.storage.from('auditoria-evidencias').upload(photoPath,photo,{upsert:false,contentType:photo.type || 'image/jpeg'})
-        if (upload.error) throw upload.error
+        const extension=(photo.name.split('.').pop()||'jpg').replace(/[^a-z0-9]/gi,'').toLowerCase()
+        photoPath=(user.data.user?.id||'user')+'/'+active.id+'/'+Date.now()+'.'+extension
+        const up=await supabase.storage.from('auditoria-evidencias').upload(photoPath,photo,{upsert:false,contentType:photo.type||'image/jpeg'})
+        if(up.error)throw up.error
       }
-
-      const criteriaForAi=(definition.code==='RQ016B' ? relevantCriteria : definition.criteria).map((criterion)=>({
-        key:criterion.key,label:criterion.label,section:criterion.section,
-      }))
-      const state={
-        currentLocation,
-        area:definition.code==='RQ016B'?rq016bArea:null,
-        answers:answers.map((a)=>({key:a.item_key,local:a.local_ref,result:a.resultado})),
-        findings:findings.map((finding)=>({criteria:finding.criterios,location:finding.local_ref,address:finding.endereco,description:finding.descricao_tecnica})),
-        objects:objects.map((obj)=>({type:obj.objeto_tipo,key:obj.chave,identification:obj.identificacao,location:obj.local_ref,status:obj.status})),
-      }
-
-      const processed=await apiPost<any>(`/api/auditorias/${active.id}/mensagens`,{
-        rqCode:definition.code,
-        message:text,
-        imageDataUrl,
-        criteria:criteriaForAi,
-        state,
-        currentLocation:currentLocation || null,
-        area:definition.code==='RQ016B'?rq016bArea:null,
-        photoPath,
-        photoMime:photo?.type || null,
-        fixedChecklist:definition.fixedChecklist,
-        criteriaCount:definition.criteria.length,
+      const result=await apiPost<any>('/api/auditorias/'+active.id+'/registros',{
+        texto:originalDraft.trim(),fotoPath:photoPath,fotoMime:photo?.type||null,
+        local:currentLocation||null,area:definition?.code==='RQ016B'?rq016bArea:null
       })
-      if (processed.error) throw new Error(processed.error.message || 'Não foi possível registrar a mensagem.')
-
+      if(result.error||!result.data)throw new Error(result.error?.message||'Não foi possível salvar o registro.')
       setDraft(old=>old===originalDraft?'':old)
       choosePhoto(null)
-      await openAudit(active.id)
-      if(processed.data?.degraded)
-        setNotice('A IA não conseguiu interpretar este registro. O texto foi salvo; confira e classifique os itens manualmente.')
-      if (processed.data?.finishRequested) await requestFinish()
-    } catch (e:any) {
-      setNotice(e?.message || 'Não foi possível registrar a mensagem.')
-    } finally {
-      sendRequestLock.current=false
-      setLoading(false)
-    }
+      await openAudit(active.id,true,true)
+      setNotice('Registro salvo.')
+    }catch(error:any){setNotice(error?.message||'Não foi possível salvar a evidência.')}
+    finally{sendRequestLock.current=false;setLoading(false)}
+  }
+
+  async function saveEquipment(){
+    if(!active||readOnly||loading)return
+    if(!equipmentCode.trim()){setNotice('Informe o código do equipamento.');return}
+    if(!currentLocation.trim()){setNotice('Informe o local do equipamento.');return}
+    setLoading(true)
+    try{
+      const result=await apiPost<any>('/api/auditorias/'+active.id+'/objetos',{
+        tipo:equipmentType,identificacao:equipmentCode.trim(),local:currentLocation.trim(),
+        status:equipmentStatus,observacao:equipmentNotes.trim()
+      })
+      if(result.error||!result.data)throw new Error(result.error?.message||'Falha ao salvar equipamento.')
+      const row=result.data as AuditObject
+      setObjects(old=>[...old.filter(x=>!(x.objeto_tipo===row.objeto_tipo&&x.chave===row.chave)),row])
+      setEquipmentCode('');setEquipmentNotes('');setEquipmentStatus('pendente')
+      setNotice('Equipamento salvo.')
+    }catch(error:any){setNotice(error?.message||'Falha ao salvar equipamento.')}
+    finally{setLoading(false)}
   }
 
   async function requestFinish(nextAnswers=answers) {
@@ -417,7 +389,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
       }
     }
     if (definition.code==='RQ014' && objects.length===0) {
-      setNotice('Ainda não identifiquei nenhum extintor ou hidrante. Informe pelo menos a identificação/local do equipamento antes de concluir.')
+      setNotice('Cadastre ao menos um extintor ou hidrante antes de concluir.')
       return
     }
     setShowFinish(true)
@@ -497,26 +469,6 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
   }
 
 
-  function startVoice() {
-    const Ctor=(window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    if (!Ctor) {
-      setNotice('Ditado por voz não está disponível neste navegador. No Chrome/Edge mobile ele costuma funcionar.')
-      return
-    }
-    const rec=new Ctor()
-    rec.lang='pt-BR'
-    rec.interimResults=false
-    rec.continuous=false
-    rec.onstart=()=>setListening(true)
-    rec.onend=()=>setListening(false)
-    rec.onerror=()=>setListening(false)
-    rec.onresult=(event:any)=>{
-      const heard=String(event.results?.[0]?.[0]?.transcript || '').trim()
-      if (heard) setDraft((x)=>x ? x+' '+heard : heard)
-    }
-    rec.start()
-  }
-
   async function deleteWarehouseInspection(){
     if(!canDelete||!deletionCandidate||deleting)return
     setDeleting(true)
@@ -567,10 +519,9 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
       <section className="audit-page audit-integrated">
         <div className="audit-hero">
           <div className="audit-hero-copy">
-            <span className="audit-contlog-brand">Contlog<span className="audit-brand-dot">.</span></span>
+            <span className="audit-contlog-brand">Contlog</span>
             <div className="audit-hero-title-row">
               <h1>Inspeções <span>Armazém</span></h1>
-              <span className="audit-hero-edition">CENTRAL DE QUALIDADE <b> / SGQ</b></span>
             </div>
             <div className="audit-hero-rule"><span/><span/><span/></div>
           </div>
@@ -578,7 +529,6 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
             <div className="audit-hero-art-ring ring-one"/>
             <div className="audit-hero-art-ring ring-two"/>
             <div className="audit-hero-art-core"><ShieldCheck size={49} strokeWidth={1.3}/></div>
-            <span className="audit-hero-art-corner">CQ / 26</span>
           </div>
         </div>
 
@@ -622,8 +572,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
         </details>}
 
         <div className="audit-section-heading">
-          <div><span className="audit-section-eyebrow">ROTINAS DE INSPEÇÃO</span><h2>Escolha uma atividade</h2></div>
-          <span className="audit-section-index">04 ROTINAS</span>
+          <div><h2>Nova inspeção</h2></div>
         </div>
         <div className="audit-grid">
           {AUDIT_DEFINITIONS.map((def,index)=>{
@@ -642,7 +591,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
                 </div>
                 <strong>{def.title}</strong>
                 <div className="audit-card-bottom">
-                  <span className="audit-card-category">{def.code==='RQ014'?'SEGURANÇA':def.code==='RQ015'?'ESTRUTURA':def.code==='RQ016'?'ORGANIZAÇÃO':'PREPARAÇÃO'}</span>
+  
                   <button className="audit-start-button" onClick={()=>void startAudit(def)} disabled={loading} aria-label={'Iniciar '+def.title}>
                     <span>{ready?'Iniciar':'Iniciar sem modelo'}</span><ArrowUpRight size={19}/>
                   </button>
@@ -654,7 +603,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
 
         <div className="audit-history">
           <div className="audit-section-title">
-            <div><span className="audit-section-eyebrow">ACOMPANHAMENTO</span><h2>Histórico de inspeções</h2></div>
+            <div><h2>Inspeções</h2></div>
             <div className="audit-history-controls">
               <label className="audit-history-search">Buscar no histórico
                 <input value={historySearch} onChange={e=>setHistorySearch(e.target.value)} placeholder="RQ, inspeção ou responsável" />
@@ -668,7 +617,7 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
               <button type="button" className="audit-history-row" onClick={()=>void openAudit(x.id)}>
                 <div>
                   <strong>{x.rq_code.replace('RQ','RQ ')} · {x.titulo}</strong>
-                  <span>{formatDate(x.data_avaliacao)} · {x.responsavel_nome || 'Responsável não informado'}{x.documento_gerado_em?' · Word gerado':''}</span>
+                  <span>{formatDate(x.data_avaliacao)} · {x.responsavel_nome || 'Responsável não informado'}</span>
                 </div>
                 <span className={'audit-status '+x.status}>{statusLabel(x.status)}</span>
               </button>
