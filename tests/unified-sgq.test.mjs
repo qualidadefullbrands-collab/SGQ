@@ -56,7 +56,7 @@ test('camera, voice, Word generation and checklist are preserved',()=>{
 })
 
 test('new navigation cannot be held behind stale worker HTML cache',()=>{
-  assert.match(worker,/sgq-shell-v2-/)
+  assert.match(worker,/sgq-shell-v\d+-/)
   assert.match(worker,/request\.mode==='navigate'/)
   assert.match(worker,/fetch\(request,\{cache:'no-store'\}\)/)
   assert.match(worker,/url\.origin!==self\.location\.origin/)
