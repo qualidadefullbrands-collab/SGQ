@@ -31,7 +31,8 @@ test('Word templates are authorized in API and UI',()=>{
  assert.match(route,/gestor/)
  assert.match(route,/statusCode:403/)
  assert.match(audits,/canManageTemplates/)
- assert.match(audits,/canManageTemplates&&<input/)
+ assert.match(audits,/canManageTemplates && <details/)
+ assert.match(audits,/<input hidden type="file" accept=".docx"/)
  assert.match(shell,/canManageTemplates=\{!!canManageIts\}/)
 })
 test('warehouse message text survives failed send and the send lock always releases',()=>{
