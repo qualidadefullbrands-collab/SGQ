@@ -2260,3 +2260,33 @@ body:has(.login-shell) {background:#f3f6fa!important;color:#20374a}
 @media(prefers-reduced-motion:reduce){
   .sgq-operational-shell :is(.inspection-stage-tab,.tri-buttons button,.sgq-side-nav button) {transition:none!important}
 }
+
+
+/* One top-level navigation hierarchy; the sidebar is the single source of navigation. */
+.sgq-operational-shell .topbar{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:14px;
+  padding:12px 10px;
+}
+.sgq-operational-shell .sgq-topbar-context{
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:11px;
+  font-size:16px;
+  color:#537083;
+  line-height:1.4;
+}
+.sgq-operational-shell .sgq-topbar-context>svg{color:#176d9d;flex-shrink:0}
+.sgq-operational-shell .sgq-topbar-context strong{font-weight:800;color:#193a51;font-size:17px;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-topbar-separator{color:#99aab5}
+.sgq-operational-shell .topbar .userbox{white-space:nowrap}
+@media(max-width:650px){
+  .sgq-operational-shell .topbar{padding:9px 5px;gap:8px}
+  .sgq-operational-shell .sgq-topbar-context{font-size:14px;gap:6px}
+  .sgq-operational-shell .sgq-topbar-context strong{font-size:15px}
+  .sgq-operational-shell .topbar .userbox>span{display:none}
+  .sgq-operational-shell .topbar .userbox button{min-width:44px;min-height:44px}
+}
