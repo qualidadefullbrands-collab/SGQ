@@ -2055,3 +2055,208 @@ body:has(.sgq-operational-shell){background:var(--sgq-page)!important}
  .sgq-operational-shell :is(.process-card,.row-card,.sample-card,.equipment-row,.stock-card,
  .primary,.secondary,input,select,textarea){transition:none!important;animation:none!important}
 }
+
+
+/* SGQ design system v2 — typographic scale and consistent operational components.
+   Inspired by readable audit workflows and QMS workspaces, without changing business logic. */
+.sgq-operational-shell {
+  --sgq-page:#f3f6fa;
+  --sgq-card:#fff;
+  --sgq-text:#20374a;
+  --sgq-secondary:#516b7e;
+  --sgq-line:#c4d5e0;
+  --sgq-focus:#1875a6;
+  --sgq-control-height:48px;
+  color:var(--sgq-text);
+  font-size:16px;
+  line-height:1.5;
+  -webkit-text-size-adjust:100%;
+}
+.sgq-operational-shell .workspace,
+.sgq-operational-shell .equipment-page,
+.sgq-operational-shell .audit-page {min-width:0}
+.sgq-operational-shell .workspace {padding-top:26px}
+.sgq-operational-shell .topbar {
+  min-height:70px;
+  background:#fff!important;
+  box-shadow:none;
+  border-bottom:1px solid var(--sgq-line)!important;
+}
+.sgq-operational-shell .topbar>.brand-mark {font-size:19px;color:#193b53}
+.sgq-operational-shell .topbar .userbox,
+.sgq-operational-shell .topbar .userbox button {font-size:15px;color:#345971}
+.sgq-side-nav {width:238px;padding:20px 13px;border-right:1px solid var(--sgq-line)!important}
+.sgq-side-brand {padding-bottom:20px}
+.sgq-side-brand b {font-size:27px}
+.sgq-side-brand small {font-size:14px;color:#48687b}
+.sgq-side-caption {font-size:12px;letter-spacing:.095em;color:#526c80}
+.sgq-side-nav>button {
+  min-height:52px;
+  padding:11px 13px;
+  font-size:16px;
+  font-weight:700;
+  line-height:1.3;
+  border-radius:10px;
+}
+.sgq-side-nav>button svg {width:20px;height:20px;flex-basis:20px}
+.sgq-side-nav>button.selected {
+  box-shadow:inset 4px 0 0 #1676aa;
+  background:#e8f3fa!important;
+}
+.sgq-side-footer small,.sgq-side-footer button {font-size:14px}
+@media(min-width:851px){
+  .sgq-operational-shell {width:calc(100% - 286px);max-width:none;margin:0 22px 0 260px}
+}
+.sgq-operational-shell .workspace .page-title {margin-bottom:23px}
+.sgq-operational-shell .page-title h1,
+.sgq-operational-shell .workspace h1 {
+  font-size:clamp(30px,3vw,38px);
+  line-height:1.17;
+  letter-spacing:-.03em;
+}
+.sgq-operational-shell .section-title h2,
+.sgq-operational-shell .section-card h2,
+.sgq-operational-shell .panel h2 {font-size:22px;line-height:1.3}
+.sgq-operational-shell .section-card h3,
+.sgq-operational-shell .panel h3 {font-size:18px;line-height:1.35}
+.sgq-operational-shell :is(.panel,.section-card,.process-card,.row-card,.sample-card,.stock-card,.equipment-row,.test-card,.sku-card) {
+  border-color:var(--sgq-line)!important;
+  box-shadow:0 2px 8px rgba(19,53,78,.045)!important;
+}
+.sgq-operational-shell .section-card {border-left:1px solid var(--sgq-line)!important}
+.sgq-operational-shell :is(label,.field-label) {
+  font-size:16px;
+  line-height:1.4;
+  color:#2a485e;
+  font-weight:700;
+}
+.sgq-operational-shell :is(input:not([type=checkbox]):not([type=radio]),select,textarea) {
+  font-size:16px;
+  line-height:1.4;
+  min-height:var(--sgq-control-height);
+  border:1px solid #aebfce;
+  border-radius:9px;
+  padding:11px 13px;
+  background:#fff;
+  color:var(--sgq-text);
+}
+.sgq-operational-shell textarea {min-height:96px;resize:vertical}
+.sgq-operational-shell :is(input,textarea)::placeholder {color:#697d8c;opacity:1}
+.sgq-operational-shell :is(.primary,.secondary,.danger,.success-button) {
+  min-height:var(--sgq-control-height);
+  padding:11px 16px;
+  font-size:16px;
+  line-height:1.35;
+  border-radius:9px;
+}
+.sgq-operational-shell :is(button,input,select,textarea,summary):focus-visible {
+  outline:3px solid #297eae;
+  outline-offset:2px;
+}
+.sgq-operational-shell :is(.row-card,.process-card,.inspection-row,.queue-row) {
+  gap:16px;
+  line-height:1.5;
+}
+.sgq-operational-shell :is(.row-card,.inspection-row,.queue-row,.process-card) strong {
+  font-size:16px;
+  line-height:1.4;
+}
+.sgq-operational-shell :is(.row-card,.inspection-row,.queue-row,.process-card) span,
+.sgq-operational-shell :is(.muted,.section-note,.field-hint,.field-status) {
+  font-size:15px;
+  line-height:1.5;
+  color:var(--sgq-secondary);
+}
+.sgq-operational-shell :is(small,.small,.eyebrow) {font-size:14px!important;line-height:1.45}
+.sgq-operational-shell .eyebrow {letter-spacing:.09em;color:#376e90}
+.sgq-operational-shell .pill,
+.sgq-operational-shell .equipment-status {font-size:14px!important;line-height:1.35}
+.sgq-operational-shell .metric strong,
+.sgq-operational-shell .metric-button strong {font-size:clamp(27px,2.4vw,34px)}
+.sgq-operational-shell .metric span,
+.sgq-operational-shell .equipment-summary span {font-size:15px;color:#516b7e}
+.sgq-operational-shell :is(.form-grid,.info-grid,.equipment-event-form) {gap:16px}
+.sgq-operational-shell .stock-table-head {font-size:14px;font-weight:800}
+.sgq-operational-shell .stock-data-row>span:not(.stock-product-cell),
+.sgq-operational-shell .stock-product-cell b,
+.sgq-operational-shell .stock-product-cell em,
+.sgq-operational-shell .stock-product-cell small,
+.sgq-operational-shell .equipment-row span,
+.sgq-operational-shell .equipment-row small {font-size:15px!important;line-height:1.45}
+.sgq-operational-shell :is(.stock-data-row,.equipment-row,.it-row) {min-height:58px}
+.sgq-operational-shell :is(.location-badge,.equipment-source span,.equipment-source small) {font-size:14px!important}
+.sgq-operational-shell .inspection-stage-tabs {top:70px;gap:5px;padding:6px;min-height:61px}
+.sgq-operational-shell .inspection-stage-tab {
+  min-height:48px;
+  padding:11px 14px;
+  font-size:16px!important;
+  white-space:nowrap;
+}
+.sgq-operational-shell .inspection-stage-dot {font-size:15px}
+.sgq-operational-shell :is(.inspection-not-started-hint,.inspection-data-summary strong,.inspection-initial-items>div) {font-size:16px}
+.sgq-operational-shell :is(.inspection-data-summary small,.inspection-quick-nav a,.compact-product-select,.dimension-product-meta) {font-size:14px!important}
+.sgq-operational-shell .dimension-product-overline {font-size:14px}
+.sgq-operational-shell .dimension-product-header h3 {font-size:21px!important}
+.sgq-operational-shell .dimension-param .param-title strong {font-size:18px}
+.sgq-operational-shell .dimension-set-tabs button {font-size:15px;min-height:48px}
+.sgq-operational-shell .dimension-set-caption,
+.sgq-operational-shell .dimension-set-caption span {font-size:15px}
+.sgq-operational-shell .compact-checklist .check-copy span,
+.sgq-operational-shell .execution .inspection-stage .check-copy span {
+  font-size:16px;
+  line-height:1.5;
+}
+.sgq-operational-shell .compact-checklist .check-copy small,
+.sgq-operational-shell .execution .inspection-stage .check-copy small {font-size:14px}
+.sgq-operational-shell :is(.tri-buttons button,.tri-buttons.quick button) {
+  font-size:16px;
+  min-height:48px;
+}
+.sgq-operational-shell .compact-checklist .check-row {padding:17px}
+.sgq-operational-shell :is(.test-card p,.field-status,.field-hint,.section-note,.sampling-guidance span,.nc-quantity) {font-size:15px}
+.sgq-operational-shell .equipment-section-tabs button {font-size:16px;min-height:48px}
+.sgq-operational-shell :is(.equipment-alerts,.routine-checklist label) {font-size:16px}
+.sgq-operational-shell :is(.plan-grid small,.detail-grid small,.calc-strip small,.tolerance-strip span,.it-review-row span) {font-size:14px!important}
+.sgq-operational-shell :is(.alert,.inspection-sequence-banner span) {font-size:15px}
+.sgq-operational-shell .sgq-dialog p {font-size:16px}
+
+/* Authentication must belong to the same interface, not the original dark prototype. */
+body:has(.login-shell) {background:#f3f6fa!important;color:#20374a}
+.login-shell .login-card {
+  background:#fff;
+  border:1px solid #c4d5e0;
+  border-radius:16px;
+  box-shadow:0 14px 45px rgba(19,53,78,.1);
+  color:#20374a;
+}
+.login-shell .login-card h1 {font-size:32px;line-height:1.2}
+.login-shell .login-card p {font-size:16px;color:#516b7e}
+.login-shell .login-card label {font-size:16px;color:#2a485e}
+.login-shell .login-card input {background:#fff;color:#20374a;font-size:16px;min-height:48px;border:1px solid #aebfce}
+.login-shell .brand-mark {color:#176d9d;font-size:19px}
+@media(max-width:850px){
+  .sgq-operational-shell {width:calc(100% - 20px)!important;margin:0 auto!important;padding-top:82px}
+  .sgq-side-nav {width:100%;height:76px;gap:6px;padding:10px 12px}
+  .sgq-side-nav>button {font-size:15px;min-height:50px;padding:10px 12px}
+  .sgq-operational-shell .topbar {min-height:55px}
+  .sgq-operational-shell .inspection-stage-tabs {top:78px}
+}
+@media(max-width:650px){
+  .sgq-operational-shell {width:calc(100% - 18px)!important;padding-top:80px}
+  .sgq-operational-shell .workspace {padding-top:16px}
+  .sgq-operational-shell .page-title h1,
+  .sgq-operational-shell .workspace h1 {font-size:29px}
+  .sgq-operational-shell .section-title h2,
+  .sgq-operational-shell .section-card h2,
+  .sgq-operational-shell .panel h2 {font-size:20px}
+  .sgq-operational-shell :is(.panel,.section-card) {padding:16px}
+  .sgq-operational-shell :is(.form-grid,.info-grid) {gap:14px}
+  .sgq-operational-shell .inspection-stage-tab {font-size:15px!important;min-height:48px}
+  .sgq-operational-shell .inspection-stage-tabs {max-width:100%;overflow-x:auto}
+  .sgq-operational-shell .compact-checklist {grid-template-columns:1fr}
+  .sgq-operational-shell :is(.row-card,.equipment-row,.process-card) {overflow-wrap:anywhere}
+  .sgq-operational-shell .topbar .userbox {font-size:14px}
+}
+@media(prefers-reduced-motion:reduce){
+  .sgq-operational-shell :is(.inspection-stage-tab,.tri-buttons button,.sgq-side-nav button) {transition:none!important}
+}
