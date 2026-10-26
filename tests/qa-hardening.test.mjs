@@ -18,7 +18,7 @@ test('warehouse editing API verifies the inspection is still open',()=>{
  assert.match(guard,/em_andamento/)
  assert.match(guard,/revisao/)
  for(const [first,last] of [
-   ['app.MapPut("/api/auditorias/{id}/respostas/','app.MapPost("/api/auditorias/{id}/mensagens"'],
+   ['app.MapPut("/api/auditorias/{id}/respostas/','app.MapPost("/api/auditorias/{id}/registros"'],
    ['app.MapPost("/api/auditorias/{id}/registros"','app.MapPost("/api/auditorias/{id}/concluir"'],
    ['app.MapPost("/api/auditorias/{id}/concluir"','app.MapGet("/api/app/bootstrap"']
  ]){
