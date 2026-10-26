@@ -1957,19 +1957,20 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <button className={tab==='equipamentos'?'selected':''} onClick={()=>{setTab('equipamentos');void refreshEquipments()}}><Wrench size={18}/> Equipamentos</button>
         <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button type="button" onClick={()=>void supabase.auth.signOut()}><LogOut size={14}/> Sair</button></div>
       </aside>
-      <header className="topbar">
-        <div className="brand-mark"><PackageSearch size={24}/><span>SGQ</span></div>
-        <nav>
-          <button className={tab==='painel'?'active':''} onClick={()=>setTab('painel')}>Painel</button>
-          <button className={tab==='inspecoes'?'active':''} onClick={()=>setTab('inspecoes')}>Inspeções</button>
-          <button className={tab==='nova'?'active':''} onClick={()=>setTab('nova')}>Nova inspeção</button>
-          <button className={tab==='its'?'active':''} onClick={()=>setTab('its')}>ITs</button>
-          <button className={tab==='estoque'?'active':''} onClick={()=>setTab('estoque')}>Estoque</button>
-          <button className={tab==='auditorias'?'active':''} onClick={()=>setTab('auditorias')}>Inspeções Armazém</button>
-        </nav>
+      <header className="topbar" aria-label="Cabeçalho do SGQ">
+        <div className="sgq-topbar-context">
+          <PackageSearch size={22} aria-hidden="true"/>
+          <span>SGQ</span>
+          <span className="sgq-topbar-separator" aria-hidden="true">/</span>
+          <strong>{({
+            painel:'Painel',inspecoes:'Inspeções',nova:'Nova inspeção',
+            execucao:'Execução da inspeção',estoque:'Estoque',
+            auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos',
+          } as Record<typeof tab,string>)[tab]}</strong>
+        </div>
         <div className="userbox">
           <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
-          <button title="Sair" onClick={()=>supabase.auth.signOut()}><LogOut size={18}/></button>
+          <button type="button" aria-label="Sair do SGQ" title="Sair" onClick={()=>void supabase.auth.signOut()}><LogOut size={18}/></button>
         </div>
       </header>
 
