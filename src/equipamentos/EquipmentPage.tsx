@@ -110,7 +110,7 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
         const operationalStatus=equipmentOperationalStatus(e,today)
         return <article key={e.id} className={'equipment-row '+(selected===e.id?'selected':'')}>
         <div><b>{e.codigo} · {e.nome}</b><span>{[String(e.dados_origem?.tipo_controle||'Controle de rotina'),e.localizacao,e.patrimonio].filter(Boolean).join(' · ')}</span></div>
-        <div><span className={'equipment-status '+(operationalStatus==='ativo'?'valid':'inactive')}>{operationalStatus==='calibracao_pendente'?'Calibração pendente':operationalStatus.replaceAll('_',' ')}</span>{e.requer_calibracao&&<small>Próxima calibração: {fmt(e.proxima_calibracao)}</small>}</div>
+        <div><span className={'equipment-status '+(operationalStatus==='ativo'?'valid':'inactive')}>{operationalStatus==='calibracao_pendente'?'Calibração pendente':operationalStatus==='ativo'?'Ativo':operationalStatus.replaceAll('_',' ')}</span>{e.requer_calibracao&&<small>Próxima calibração: {fmt(e.proxima_calibracao)}</small>}</div>
         <div className="equipment-actions"><button className="secondary small" type="button" onClick={()=>{setSelected(selected===e.id?'':e.id);setSection('historico')}}><ClipboardCheck size={15}/> Histórico</button>{canManage&&<button className="secondary small" type="button" onClick={()=>setEditing({...e})}><Wrench size={15}/> Editar</button>}</div>
       </article>})}
     </div>
