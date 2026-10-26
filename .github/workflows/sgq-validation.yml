@@ -14,7 +14,13 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
+      - name: Install frontend dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund --package-lock=false
+          fi
       - run: npm test
       - run: npm run build
   api:
