@@ -2290,3 +2290,105 @@ body:has(.login-shell) {background:#f3f6fa!important;color:#20374a}
   .sgq-operational-shell .topbar .userbox>span{display:none}
   .sgq-operational-shell .topbar .userbox button{min-width:44px;min-height:44px}
 }
+
+
+/* SGQ dialogs v3 — open near the top of the visible viewport, not halfway down a page.
+   The animated workspace used transform: translateY(0) with fill-mode both, which
+   creates a containing block for position:fixed descendants. Remove that transform
+   context so overlays are truly viewport-fixed even after the entrance animation. */
+.sgq-operational-shell > .workspace {
+  animation:none!important;
+}
+.sgq-operational-shell .modal-backdrop:not(.stock-drawer-backdrop),
+.sgq-operational-shell .sgq-dialog-backdrop {
+  position:fixed;
+  inset:0;
+  z-index:500;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:flex-start;
+  padding:clamp(20px,5vh,52px) 16px 24px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+}
+.sgq-operational-shell .modal-backdrop:not(.stock-drawer-backdrop) > .sample-detail,
+.sgq-operational-shell .sgq-dialog-backdrop > .sgq-dialog {
+  position:relative;
+  flex:0 0 auto;
+  margin:0 auto;
+  max-height:calc(100dvh - clamp(20px,5vh,52px) - 24px);
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  box-sizing:border-box;
+}
+.sgq-operational-shell .equipment-history-backdrop > .equipment-history.panel.section-card {
+  width:min(940px,100%);
+  max-width:min(940px,100%);
+  min-width:0;
+  padding:clamp(18px,2.4vw,28px)!important;
+  border-radius:16px;
+  background:#fff;
+  box-shadow:0 22px 70px rgba(12,38,62,.23);
+  text-align:left;
+}
+.sgq-operational-shell .equipment-history .section-title:first-child {
+  position:sticky;
+  top:0;
+  z-index:2;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  padding:0 0 16px;
+  margin:0 0 16px;
+  border-bottom:1px solid #dce7ee;
+  background:white;
+}
+.sgq-operational-shell .equipment-history .section-title:first-child h2 {
+  margin:0;
+  font-size:22px;
+}
+.sgq-operational-shell .equipment-history .equipment-section-tabs {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-bottom:16px;
+}
+.sgq-operational-shell .equipment-history .equipment-event-form {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:15px;
+  min-width:0;
+}
+.sgq-operational-shell .equipment-history .equipment-event-form > h3,
+.sgq-operational-shell .equipment-history .equipment-event-form > .span-2 {
+  grid-column:1/-1;
+}
+.sgq-operational-shell .equipment-history .equipment-event-form > label {
+  min-width:0;
+}
+.sgq-operational-shell .equipment-history .equipment-event-form > label :is(input,select,textarea) {
+  display:block;
+  width:100%;
+  min-width:0;
+}
+.sgq-operational-shell .equipment-history .equipment-event-form > button {
+  justify-self:start;
+}
+@media(max-width:650px){
+  .sgq-operational-shell .modal-backdrop:not(.stock-drawer-backdrop),
+  .sgq-operational-shell .sgq-dialog-backdrop {
+    padding:14px 10px 20px;
+  }
+  .sgq-operational-shell .modal-backdrop:not(.stock-drawer-backdrop) > .sample-detail,
+  .sgq-operational-shell .sgq-dialog-backdrop > .sgq-dialog {
+    width:100%;
+    max-height:calc(100dvh - 34px);
+  }
+  .sgq-operational-shell .equipment-history-backdrop > .equipment-history.panel.section-card {padding:16px!important}
+  .sgq-operational-shell .equipment-history .equipment-event-form {grid-template-columns:1fr}
+  .sgq-operational-shell .equipment-history .equipment-event-form > h3,
+  .sgq-operational-shell .equipment-history .equipment-event-form > .span-2 {grid-column:auto}
+  .sgq-operational-shell .equipment-history .equipment-event-form > button {width:100%;justify-content:center}
+}
