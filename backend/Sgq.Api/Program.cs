@@ -300,12 +300,7 @@ app.MapPost("/api/auditorias/criar", async (CreateAuditRequest input,HttpRequest
         if(!found) throw new InvalidOperationException("Falha ao criar auditoria.");
         var executionId=execution!.Value.GetProperty("id").GetString()!;
 
-        var intro=input.RqCode switch {
-            "RQ016B"=>"Pré-avaliação iniciada. Selecione a área e informe o local atual. Registre o que encontrar por mensagem. Neste RQ não é necessário anexar fotos.",
-            "RQ014"=>"Inspeção iniciada. Informe o equipamento e o local, por exemplo “EXT-021, corredor 3”. Depois descreva normalmente o que encontrou ou diga que está tudo certo.",
-            _ when input.FixedChecklist=>"Avaliação iniciada. Vá registrando o que observar por texto, voz ou foto. Eu organizo os achados e acompanho os itens do modelo.",
-            _=>"Inspeção iniciada. Informe o local/endereço atual e registre cada achado por texto, voz ou foto. Eu organizo as evidências no modelo do RQ."
-        };
+        const string intro="Avaliação Iniciada";
         await RestAsync(client,token,HttpMethod.Post,"auditoria_mensagens","",
             new {execucao_id=executionId,autor="assistente",texto=intro},"return=minimal");
 
@@ -551,6 +546,9 @@ app.MapPost("/api/auditorias/{id}/mensagens", async (string id,AuditMessageReque
             }
         }
 
+        var aiDegraded=degraded||(interpreted.TryGetProperty("degraded",out var dgStatus)&&dgStatus.ValueKind==JsonValueKind.True);
+        if(aiDegraded)
+            app.Logger.LogWarning("SGQ warehouse assistant returned degraded classification for {RqCode}",input.RqCode);
         var reply=interpreted.TryGetProperty("reply",out var rp)&&rp.ValueKind==JsonValueKind.String?rp.GetString():"Registro interpretado.";
         var finishRequested=interpreted.TryGetProperty("finishRequested",out var fq)&&fq.ValueKind==JsonValueKind.True;
         var assistantRows=await RestAsync(client,token,HttpMethod.Post,"auditoria_mensagens","select=*",
@@ -561,7 +559,7 @@ app.MapPost("/api/auditorias/{id}/mensagens", async (string id,AuditMessageReque
                     finding=interpreted.TryGetProperty("finding",out var iff)?iff:(JsonElement?)null,
                     subject=interpreted.TryGetProperty("subject",out var isu)?isu:(JsonElement?)null,
                     clarification=interpreted.TryGetProperty("clarification",out var ic)?ic:(JsonElement?)null,
-                    degraded=degraded||(interpreted.TryGetProperty("degraded",out var dg)&&dg.ValueKind==JsonValueKind.True)
+                    degraded=aiDegraded
                 }
             },"return=representation");
         var (assistantMessage,assistantFound)=FirstRow(assistantRows);
@@ -592,7 +590,7 @@ app.MapPost("/api/auditorias/{id}/mensagens", async (string id,AuditMessageReque
             finding=savedFinding,
             subject=savedSubject,
             finishRequested,
-            degraded
+            degraded=aiDegraded
         },error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
