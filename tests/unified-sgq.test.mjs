@@ -49,7 +49,7 @@ test('warehouse has matching dashboard and mobile editing layout',()=>{
 
 test('camera, voice, Word generation and checklist are preserved',()=>{
   assert.match(audits,/capture="environment"/)
-  assert.match(audits,/startVoice/)
+  assert.match(audits,/saveManualRecord/)
   assert.match(audits,/generateWord/)
   assert.match(audits,/saveManualAnswer/)
   assert.match(audits,/confirmFinish/)
