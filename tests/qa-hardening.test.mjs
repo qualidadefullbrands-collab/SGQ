@@ -19,7 +19,7 @@ test('warehouse editing API verifies the inspection is still open',()=>{
  assert.match(guard,/revisao/)
  for(const [first,last] of [
    ['app.MapPut("/api/auditorias/{id}/respostas/','app.MapPost("/api/auditorias/{id}/mensagens"'],
-   ['app.MapPost("/api/auditorias/{id}/mensagens"','app.MapPost("/api/auditorias/{id}/concluir"'],
+   ['app.MapPost("/api/auditorias/{id}/registros"','app.MapPost("/api/auditorias/{id}/concluir"'],
    ['app.MapPost("/api/auditorias/{id}/concluir"','app.MapGet("/api/app/bootstrap"']
  ]){
   assert.match(section(api,first,last),/WarehouseAuditWritable\(client,token,id\)/)
@@ -36,7 +36,7 @@ test('Word templates are authorized in API and UI',()=>{
  assert.match(shell,/canManageTemplates=\{!!canManageIts\}/)
 })
 test('warehouse message text survives failed send and the send lock always releases',()=>{
- const send=section(audits,'async function sendMessage','async function requestFinish')
+ const send=section(audits,'async function saveManualRecord','async function saveEquipment')
  assert.match(send,/const originalDraft=draft/)
  assert.doesNotMatch(send,/const originalDraft=draft\s*setDraft\(''\)/)
  assert.match(send,/setDraft\(old=>old===originalDraft\?'':old\)/)
