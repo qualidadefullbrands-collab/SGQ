@@ -32,7 +32,7 @@ function resultFor(c:Criterion):Answer {
 const showDate=(s:string)=>s&&s.split('-').length===3?s.split('-').reverse().join('/'):'—'
 function PaperHeader({header,logo}:{header:Header;logo:string|null}){
  return <div className="it-test-doc-header">
-  <div className="it-test-doc-logo">{logo?<img src={logo} alt="Logotipo da empresa"/>:'LOGO'}</div>
+  <div className="it-test-doc-logo">{logo?<img src={logo} alt="Logotipo da empresa"/>:<img src="/sgq-icon.svg" alt="Marca SGQ de exemplo"/>}</div>
   <div className="it-test-doc-company"><b>{header.company||'Empresa'}</b><span>{header.sgq||'Sistema de Gestão da Qualidade'}</span></div>
   <div className="it-test-doc-meta"><b>{header.code||'Código'}</b><span>Rev. {header.revision||'—'}</span><span>{showDate(header.date)}</span></div>
  </div>
@@ -75,7 +75,7 @@ export default function ItEditorDemo(){
   {step!=='previa'&&<div className="panel section-card it-test-editor">
    {step==='cabecalho'&&<>
     <div className="section-title"><h2>Cabeçalho</h2><span className="it-test-hint">Repetido nas páginas do documento</span></div>
-    <div className="it-test-logo-row"><div className="it-test-logo">{logo?<img src={logo} alt="Logo de teste"/>:'LOGO'}</div><div>
+    <div className="it-test-logo-row"><div className="it-test-logo">{logo?<img src={logo} alt="Logo de teste"/>:<img src="/sgq-icon.svg" alt="Marca SGQ de exemplo"/>}</div><div>
      <label className="it-test-upload"><ImagePlus size={17}/> Inserir logotipo<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>pick(e.target.files?.[0],'logo')}/></label>
      {logo&&<button type="button" className="secondary small" onClick={()=>setLogo(null)}>Remover logo</button>}
     </div></div>
