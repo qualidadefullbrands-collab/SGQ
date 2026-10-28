@@ -5,6 +5,7 @@ import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
 const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
+const ItEditorDemo=lazy(()=>import('./its/ItEditorDemo'))
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
 type ItVersion = {
@@ -339,6 +340,7 @@ export default function App() {
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos'>('painel')
+  const [itDemoOpen,setItDemoOpen]=useState(false)
   const [dashboardView,setDashboardView]=useState<'processos'|'inspecoes'|'estoque'|'concluidas'>('inspecoes')
   const [popupMessage,setPopupMessage]=useState('')
   const [aiConclusionBusy,setAiConclusionBusy]=useState(false)
@@ -2670,7 +2672,14 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
       {tab==='its' && (
         <section className="workspace">
-          <div className="page-title"><div><span className="eyebrow">DOCUMENTOS</span><h1>Biblioteca de ITs</h1></div></div>
+          <div className="page-title"><div><span className="eyebrow">DOCUMENTOS</span><h1>{itDemoOpen?'Editor de IT · Teste':'Biblioteca de ITs'}</h1></div>
+            <button type="button" className={itDemoOpen?'secondary':'primary'} onClick={()=>setItDemoOpen(x=>!x)}>{itDemoOpen?'Voltar à biblioteca':'Testar editor de IT'}</button>
+          </div>
+          {itDemoOpen ? (
+            <Suspense fallback={<div className="panel section-card">Carregando editor de IT…</div>}>
+              <ItEditorDemo/>
+            </Suspense>
+          ) : (<>
           {canManageIts && (
             <form className="panel section-card" onSubmit={uploadIt}>
               <h2>Nova IT</h2>
@@ -2707,6 +2716,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </article>
             ))}
           </div>
+          </>)}
         </section>
       )}
 
