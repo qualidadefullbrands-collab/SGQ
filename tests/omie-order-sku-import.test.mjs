@@ -1,0 +1,63 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
+
+const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8')
+const edge=read('supabase/functions/sgq-omie-fst/index.ts')
+const app=read('src/App.tsx')
+const skuMerge=app.slice(app.indexOf('function skuRowHasData('),app.indexOf('function fstCode('))
+const lookup=app.slice(app.indexOf('async function lookupFstClient('),app.indexOf('async function saveProcessEdit('))
+const productSection=app.slice(app.indexOf('<h2>Produtos / componentes</h2>'),app.indexOf('<div className="sku-editor">'))
+
+test('Omie listing is used only to resolve exact project and sales order, then full ConsultarPedido loads det',()=>{
+ assert.match(edge,/const expected="FST"\+key/)
+ assert.match(edge,/canonical\(p\?\.nome\)===key/)
+ assert.match(edge,/filtrar_por_projeto:projectId,apenas_resumo:"S"/)
+ assert.match(edge,/omie\(ordersUrl,"ConsultarPedido",\{codigo_pedido:chosen\.codigoPedido\}/)
+ assert.match(edge,/Number\(orderDetail\?\.cabecalho\?\.codigo_pedido\)===chosen\.codigoPedido/)
+ assert.match(edge,/Number\(orderDetail\?\.cabecalho\?\.codigo_cliente\)===clientCode/)
+ assert.match(edge,/itens:extractItems\(order\)/)
+ assert.match(edge,/itens,\s*itensDisponiveis:/)
+})
+test('Only genuine product lines generate SKU, description and ordered quantity',()=>{
+ assert.match(edge,/const sku=String\(p\?\.codigo/)
+ assert.match(edge,/const descricao=String\(p\?\.descricao/)
+ assert.match(edge,/const qty=Number\(p\?\.quantidade\)/)
+ assert.match(edge,/if\(!sku\|\|!descricao\|\|!Number\.isFinite\(qty\)\|\|qty<0\)continue/)
+ assert.match(edge,/old\.quantidade\+=qty/)
+ assert.match(edge,/sku,descricao,quantidade:qty/)
+})
+test('Multiple orders require user selection and requested order must belong to the project',()=>{
+ assert.match(edge,/if\(totalPages>1\)/)
+ assert.match(edge,/reason:"multiple_order_pages"/)
+ assert.match(edge,/reason:"multiple_orders"/)
+ assert.match(edge,/error:"pedido_not_linked"/)
+ assert.match(edge,/linkedOrders\.some\(\(o:any\)=>o\.codigoPedido===requested\)/)
+ assert.match(app,/Selecione o pedido para importar os produtos/)
+ assert.match(app,/aria-label="Selecionar pedido Omie"/)
+ assert.match(app,/lookupFstClient\(inspection\.codigo,Number\(omieSelectedOrder\)\)/)
+})
+test('Blank product form loads products; filled or edited form never gets overwritten automatically',()=>{
+ assert.match(skuMerge,/const populated=rows\.filter\(skuRowHasData\)/)
+ assert.match(skuMerge,/const existing=new Set/)
+ assert.match(skuMerge,/if\(!sku\|\|!nome\|\|!Number\.isFinite\(qty\)\|\|qty<0\|\|existing\.has\(sku\)\)continue/)
+ assert.match(lookup,/!editingInspectionId&&!editingProcessId&&skuRowsRef\.current\.every\(row=>!skuRowHasData\(row\)\)/)
+ assert.match(lookup,/setSkuRows\(rows=>rows\.every\(row=>!skuRowHasData\(row\)\)/)
+ assert.match(lookup,/mergeOmieSkuRows\(rows,itens,code,numeroPedido\)/)
+ assert.match(app,/onClick=\{\(\)=>addOmieSkus\(omieSkuImport\)\}/)
+ assert.match(productSection,/Adicionar SKUs do Omie/)
+})
+test('Ordered quantity is editable and explicitly distinguished from physically received quantity',()=>{
+ assert.match(skuMerge,/quantidade:String\(qty\)/)
+ assert.match(skuMerge,/omieSourcePedido:pedido/)
+ assert.match(app,/Referência: quantidade do PV \{row\.omieSourcePedido\}\. Confirme o recebimento físico\./)
+ assert.match(app,/value=\{row\.quantidade\} onChange=/)
+})
+test('Changing the FST invalidates stale lookups and removes only old Omie-imported rows',()=>{
+ assert.match(app,/fstLookupRequest\.current\+\+;setProcessLookupBusy\(false\)/)
+ assert.match(app,/setOmieSkuImport\(null\);setOmieOrders\(null\);setOmieSelectedOrder\(''\)/)
+ assert.match(app,/rows\.filter\(row=>!row\.omieSourceFst\|\|row\.omieSourceFst===fstCode\(inputValue\)\)/)
+ assert.match(lookup,/if\(requestId!==fstLookupRequest\.current\)return/)
+ assert.match(lookup,/const existing=processes\.find\(p=>fstCode\(p\.codigo\)===code\)/)
+ assert.match(lookup,/body:\{codigo:code,\.\.\.\(codigoPedido\?\{codigoPedido\}:\{\}\)\}/)
+})
