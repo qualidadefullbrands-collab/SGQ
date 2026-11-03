@@ -2286,19 +2286,27 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 {inspection.processoId && <span className="pill">Processo existente</span>}
               </div>
               <div className="form-grid">
-                <label>Processo
-  <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection({...inspection,codigo:inputValue})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
-  {processLookupBusy && <small className="field-hint">Consultando cliente vinculado ao FST…</small>}
-  {!processLookupBusy && processLookupMessage && <small className="field-hint" role="status">{processLookupMessage}</small>}
-  {omieOrders?.codigo===fstCode(inspection.codigo) && <div className="row-actions">
-    <select aria-label="Selecionar pedido Omie" value={omieSelectedOrder} onChange={e=>setOmieSelectedOrder(e.target.value)}>
-      <option value="">Selecione um pedido do projeto</option>
-      {omieOrders.pedidos.map(p=><option key={p.codigoPedido} value={p.codigoPedido}>PV {p.numeroPedido} · {p.quantidadeItens} item(ns)</option>)}
-    </select>
-    <button type="button" className="secondary small" disabled={!omieSelectedOrder||processLookupBusy}
-      onClick={()=>void lookupFstClient(inspection.codigo,Number(omieSelectedOrder))}>Consultar SKUs</button>
-  </div>}
-</label>
+                <div className="sgq-fst-field">
+                  <label htmlFor="sgq-fst-input">Processo</label>
+                  <div className="sgq-fst-controls">
+                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection({...inspection,codigo:inputValue})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
+                    <button type="button" className="secondary sgq-fst-retry" disabled={processLookupBusy||!fstCode(inspection.codigo)}
+                      onMouseDown={e=>e.preventDefault()} onClick={()=>void lookupFstClient(inspection.codigo)} title="Buscar cliente e SKUs no Omie">
+                      <Search size={16}/> Consultar
+                    </button>
+                  </div>
+                  {processLookupBusy && <small className="field-hint" role="status">Consultando cliente e SKUs no Omie…</small>}
+                  {!processLookupBusy && processLookupMessage && <small className="field-hint" role="status">{processLookupMessage}</small>}
+                  {omieOrders?.codigo===fstCode(inspection.codigo) && <div className="row-actions">
+                    <select aria-label="Selecionar pedido Omie" value={omieSelectedOrder} onChange={e=>setOmieSelectedOrder(e.target.value)}>
+                      <option value="">Selecione um pedido do projeto</option>
+                      {omieOrders.pedidos.map(p=><option key={p.codigoPedido} value={p.codigoPedido}>PV {p.numeroPedido} · {p.quantidadeItens} item(ns)</option>)}
+                    </select>
+                    <button type="button" className="secondary small" disabled={!omieSelectedOrder||processLookupBusy}
+                      onClick={()=>void lookupFstClient(inspection.codigo,Number(omieSelectedOrder))}>Consultar SKUs</button>
+                  </div>}
+
+                </div>
                 <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
                 <label>Nota fiscal<input value={inspection.notaFiscal} onChange={(e)=>setInspection({...inspection,notaFiscal:e.target.value})}/></label>
                 <label>Chegada no CD<input type="date" value={inspection.chegadaCd} onChange={(e)=>setInspection({...inspection,chegadaCd:e.target.value})}/></label>

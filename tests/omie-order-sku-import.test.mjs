@@ -14,9 +14,11 @@ test('Omie listing is used only to resolve exact project and sales order, then f
  assert.match(edge,/canonical\(p\?\.nome\)===key/)
  assert.match(edge,/filtrar_por_projeto:projectId,apenas_resumo:"S"/)
  assert.match(edge,/omie\(ordersUrl,"ConsultarPedido",\{codigo_pedido:chosen\.codigoPedido\}/)
- assert.match(edge,/Number\(orderDetail\?\.cabecalho\?\.codigo_pedido\)===chosen\.codigoPedido/)
- assert.match(edge,/Number\(orderDetail\?\.cabecalho\?\.codigo_cliente\)===clientCode/)
+ assert.match(edge,/Number\(resolvedOrder\?\.cabecalho\?\.codigo_pedido\)===chosen\.codigoPedido/)
+ assert.match(edge,/Number\(resolvedOrder\?\.cabecalho\?\.codigo_cliente\)===clientCode/)
  assert.match(edge,/itens:extractItems\(order\)/)
+ assert.match(edge,/const resolvedOrder=unwrapOmiePedido\(orderDetail\)/)
+ assert.match(edge,/itens=detailMatches\?extractItems\(resolvedOrder\):\[\]/)
  assert.match(edge,/itens,\s*itensDisponiveis:/)
 })
 test('Only genuine product lines generate SKU, description and ordered quantity',()=>{

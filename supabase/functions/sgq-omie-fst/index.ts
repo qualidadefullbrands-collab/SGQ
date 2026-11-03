@@ -36,6 +36,12 @@ function canonical(value:unknown){
 const projectsUrl="https://app.omie.com.br/api/v1/geral/projetos/";
 const ordersUrl="https://app.omie.com.br/api/v1/produtos/pedido/";
 const customersUrl="https://app.omie.com.br/api/v1/geral/clientes/";
+// ConsultarPedido returns { pedido_venda_produto: { cabecalho, det } } in Omie's official contract.
+function unwrapOmiePedido(response:any):any|null{
+  const nested=response?.pedido_venda_produto;
+  const order=Array.isArray(nested)?nested[0]:nested;
+  return order&&typeof order==="object"?order:(response?.cabecalho?response:null);
+}
 type OmieItem={sku:string;descricao:string;quantidade:number};
 function extractItems(order:any):OmieItem[]{
   const items=Array.isArray(order?.det)?order.det:[];
@@ -131,10 +137,12 @@ Deno.serve(async req=>{
       if(!name)
         return reply({found:true,cliente:null,source:"omie_projeto",matchedCode:project.nome,
           reason:"customer_unavailable",projectId,pedidos});
-      // Verify the detailed record before trusting its products.
-      const detailMatches=chosen && Number(orderDetail?.cabecalho?.codigo_pedido)===chosen.codigoPedido
-          && Number(orderDetail?.cabecalho?.codigo_cliente)===clientCode;
-      const itens=detailMatches?extractItems(orderDetail):[];
+      // Resolve the official Omie envelope before reading cabecalho and det.
+      const resolvedOrder=unwrapOmiePedido(orderDetail);
+      // Verify the detailed record belongs to the selected project order/customer.
+      const detailMatches=chosen && Number(resolvedOrder?.cabecalho?.codigo_pedido)===chosen.codigoPedido
+          && Number(resolvedOrder?.cabecalho?.codigo_cliente)===clientCode;
+      const itens=detailMatches?extractItems(resolvedOrder):[];
       const itemLookupFailed=!!chosen&&!detailMatches;
       return reply({found:true,cliente:name,source:"omie_projeto_pedido",matchedCode:project.nome,
         projectId,clientCode,pedidos,numeroPedido:chosen?.numeroPedido||null,
@@ -145,7 +153,7 @@ Deno.serve(async req=>{
     // Keep compatibility with legacy installations that use the FST itself as
     // the sales order integration code instead of a project.
     for(const code of [expected,key]){
-      const order=await omie(ordersUrl,"ConsultarPedido",{codigo_pedido_integracao:code},appKey,appSecret);
+      const order=unwrapOmiePedido(await omie(ordersUrl,"ConsultarPedido",{codigo_pedido_integracao:code},appKey,appSecret));
       const clientCode=Number(order?.cabecalho?.codigo_cliente);
       if(!Number.isFinite(clientCode)||clientCode<=0)continue;
       const customer=await omie(customersUrl,"ConsultarCliente",{codigo_cliente_omie:clientCode},appKey,appSecret);
