@@ -212,6 +212,13 @@ function parseBoxDistribution(raw:string) {
   }
 }
 
+// Storage groups are physical boxes remaining in operation; lab takes units, not another box.
+function laboratoryUnits(row:any) {
+  const units=Number(row.unidadesLaboratorio)||0
+  const legacyLabBoxes=Number(row.caixasLaboratorio)||0
+  return Math.max(0,legacyLabBoxes>0?legacyLabBoxes*units:units)
+}
+
 function boxGroupsFromRow(row:any) {
   const groups:Array<{tipo:string;caixas:number;unidades:number}>=[]
   const add=(tipo:string,caixasRaw:any,unidadesRaw:any)=>{
@@ -221,40 +228,82 @@ function boxGroupsFromRow(row:any) {
   }
   add('padrao',row.caixasPadrao,row.unidadesPadrao || row.quantidadePorCaixa)
   add('fracionada',row.caixasFracionadas,row.unidadesFracionadas)
-  add('laboratorio',row.caixasLaboratorio,row.unidadesLaboratorio)
+  const lab=laboratoryUnits(row)
+  if(lab>0) groups.push({tipo:'laboratorio',caixas:0,unidades:lab})
   if (!groups.length && row.distribuicaoCaixas) {
     const legacy=parseBoxDistribution(row.distribuicaoCaixas)
-    if (legacy.valid) return legacy.groups.map((g:any,i:number)=>({...g,tipo:i===0?'padrao':'fracionada'}))
+    if(legacy.valid) return legacy.groups.map((g:any,i:number)=>({...g,tipo:i===0?'padrao':'fracionada'}))
   }
   return groups
 }
 
 function boxDistributionTotals(row:any) {
   const groups=boxGroupsFromRow(row)
+  const storage=groups.filter(g=>g.tipo!=='laboratorio')
+  const units=storage.reduce((sum,g)=>sum+g.caixas*g.unidades,0)
+  const boxes=storage.reduce((sum,g)=>sum+g.caixas,0)
+  const labUnits=groups.filter(g=>g.tipo==='laboratorio')
+    .reduce((sum,g)=>sum+(g.caixas>0?g.caixas*g.unidades:g.unidades),0)
   return {
-    groups,
-    boxes:groups.reduce((s,g)=>s+g.caixas,0),
-    units:groups.reduce((s,g)=>s+(g.caixas*g.unidades),0),
-    expression:groups.map((g)=>`${g.caixas}×${g.unidades}`).join(' + '),
+    groups,boxes,units,labUnits,totalUnits:units+labUnits,
+    expression:storage.map(g=>`${g.caixas}×${g.unidades}`).join(' + '),
   }
 }
 
 function updateBoxDistributionField(row:any,key:string,value:string) {
+  // 'Quantidade por caixa' is the operational standard-box quantity.
+  if(key==='unidadesPadrao')return {...row,unidadesPadrao:value,quantidadePorCaixa:value}
   return {...row,[key]:value}
+}
+
+function setLaboratoryUnits(row:any,value:string) {
+  const next={...row,caixasLaboratorio:'',unidadesLaboratorio:value}
+  const received=Number(row.quantidade)
+  const retained=Number(value)
+  const standardBoxes=Number(row.caixasPadrao)
+  const fractions=Number(row.caixasFracionadas)
+  // Only derive the remaining standard box contents when there is exactly one
+  // storage group; for mixed/fractured boxes the operator must specify each.
+  if(received>0 && retained>=0 && retained<=received &&
+     standardBoxes>0 && fractions===0 && Number.isFinite(received) && Number.isFinite(retained)) {
+    const perBox=(received-retained)/standardBoxes
+    const rounded=Math.round(perBox*100)/100
+    if(rounded>0 && Math.abs(perBox-rounded)<0.000001)
+      return {...next,unidadesPadrao:String(rounded),quantidadePorCaixa:String(rounded)}
+  }
+  return next
 }
 
 function applyBoxGroupsToSku(base:any, groups:any[]|null|undefined) {
   const next={...base}
   for (const g of groups ?? []) {
     const tipo=String(g?.tipo ?? g?.Tipo ?? '').toLowerCase()
-    const caixas=g?.caixas ?? g?.Caixas ?? ''
-    const unidades=g?.unidades ?? g?.Unidades ?? ''
-    if (tipo==='padrao') { next.caixasPadrao=String(caixas); next.unidadesPadrao=String(unidades) }
-    else if (tipo==='laboratorio' || tipo==='retida' || tipo==='retencao') { next.caixasLaboratorio=String(caixas); next.unidadesLaboratorio=String(unidades) }
-    else if (tipo==='fracionada') { next.caixasFracionadas=String(caixas); next.unidadesFracionadas=String(unidades) }
-    else if (!next.caixasPadrao) { next.caixasPadrao=String(caixas); next.unidadesPadrao=String(unidades) }
-    else if (!next.caixasFracionadas) { next.caixasFracionadas=String(caixas); next.unidadesFracionadas=String(unidades) }
-    else { next.caixasLaboratorio=String(caixas); next.unidadesLaboratorio=String(unidades) }
+    const caixas=Number(g?.caixas ?? g?.Caixas ?? 0)
+    const unidades=Number(g?.unidades ?? g?.Unidades ?? 0)
+    if (tipo==='padrao') {
+      next.caixasPadrao=String(caixas)
+      next.unidadesPadrao=String(unidades)
+      next.quantidadePorCaixa=String(unidades)
+    } else if (tipo==='fracionada') {
+      next.caixasFracionadas=String(caixas)
+      next.unidadesFracionadas=String(unidades)
+    } else if (tipo==='laboratorio' || tipo==='retida' || tipo==='retencao') {
+      // Historical records used `Caixas × Unidades`; preserve their quantity
+      // when opening them in the new unit-only laboratory field.
+      const total=caixas>0?caixas*unidades:unidades
+      next.unidadesLaboratorio=String((Number(next.unidadesLaboratorio)||0)+total)
+      next.caixasLaboratorio=''
+    } else if (!next.caixasPadrao) {
+      next.caixasPadrao=String(caixas)
+      next.unidadesPadrao=String(unidades)
+      next.quantidadePorCaixa=String(unidades)
+    } else if (!next.caixasFracionadas) {
+      next.caixasFracionadas=String(caixas)
+      next.unidadesFracionadas=String(unidades)
+    } else {
+      next.unidadesLaboratorio=String((Number(next.unidadesLaboratorio)||0)+(caixas>0?caixas*unidades:unidades))
+      next.caixasLaboratorio=''
+    }
   }
   return next
 }
