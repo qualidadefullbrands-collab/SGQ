@@ -63,3 +63,30 @@ $$;
 REVOKE ALL ON FUNCTION public.sgq_archive_process(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.sgq_archive_process(uuid) FROM anon;
 GRANT EXECUTE ON FUNCTION public.sgq_archive_process(uuid) TO authenticated;
+
+
+-- Repair the operational orphan left by legacy process-only soft deletes.
+-- This is non-destructive: inspection data and evidence remain stored.
+WITH archived_orphans AS (
+    UPDATE public.inspecoes AS i
+    SET excluido_em = p.excluido_em,
+        excluido_por = p.excluido_por,
+        status = 'cancelada'
+    FROM public.grupos_inspecao AS g
+    JOIN public.processos AS p ON p.id = g.processo_id
+    WHERE i.grupo_inspecao_id = g.id
+      AND p.excluido_em IS NOT NULL
+      AND i.excluido_em IS NULL
+    RETURNING i.id AS inspection_id, p.id AS process_id
+)
+INSERT INTO public.audit_log (usuario_id, entidade, entidade_id, acao, dados)
+SELECT NULL, 'inspecoes', inspection_id::text, 'regularizacao_exclusao_logica',
+       jsonb_build_object('processo_id', process_id::text)
+FROM archived_orphans;
+
+UPDATE public.grupos_inspecao AS g
+SET status = 'cancelado'
+FROM public.processos AS p
+WHERE g.processo_id = p.id
+  AND p.excluido_em IS NOT NULL
+  AND g.status IS DISTINCT FROM 'cancelado';
