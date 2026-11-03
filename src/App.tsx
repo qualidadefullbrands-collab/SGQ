@@ -2441,7 +2441,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                           {(()=>{
                             const d=boxDistributionTotals(row)
                             if(!d.groups.length) return null
-                            const mismatch=d.boxes!==Number(row.caixasRecebidas) || Math.abs(d.totalUnits-Number(row.quantidade))>0.0001
+                            const mismatch=Math.abs(d.totalUnits-Number(row.quantidade))>0.0001
                             return <small className={'field-status '+(mismatch?'bad':'ok')}>
                               Armazenagem: {d.units.toLocaleString('pt-BR')} un ({d.boxes} caixa(s))
                               {' + '}laboratório: {d.labUnits.toLocaleString('pt-BR')} un
@@ -3256,7 +3256,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   </label>
                   <small>Não acrescenta caixas à armazenagem.</small>
                 </div>
-                {!!d.groups.length && <small className={'field-status '+((d.boxes!==Number(row.caixasRecebidas)||Math.abs(d.totalUnits-Number(row.quantidade))>0.0001)?'bad':'ok')}>
+                {!!d.groups.length && <small className={'field-status '+((Math.abs(d.totalUnits-Number(row.quantidade))>0.0001)?'bad':'ok')}>
                   Armazenagem {d.units.toLocaleString('pt-BR')} un ({d.boxes} caixa(s))
                   {' + '}laboratório {d.labUnits.toLocaleString('pt-BR')} un
                   {' = '}{d.totalUnits.toLocaleString('pt-BR')} un recebidas
