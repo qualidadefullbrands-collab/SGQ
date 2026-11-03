@@ -123,17 +123,18 @@ const emptySku = () => ({
   suggesting: false,
 })
 
-function fstDigits(value: string) {
-  const raw=String(value ?? '').trim()
-  if (/^TMP-/i.test(raw)) return ''
-  return raw.replace(/\D/g, '').slice(0,5)
+// Canonical FST key: 26169-A and 26169-B are different Omie projects.
+function fstCode(value: string | null | undefined) {
+  const raw=String(value ?? '').trim().toUpperCase().replace(/[–—]/g,'-')
+  if (!raw || /^TMP-/.test(raw)) return ''
+  return raw.replace(/^FST[\s-]*/,'').replace(/\s+/g,'')
 }
 function formatFst(value: string | null | undefined) {
   const raw=String(value ?? '').trim()
   if (!raw) return '—'
   if (/^TMP-/i.test(raw)) return 'Sem FST'
-  const d=raw.replace(/\D/g,'')
-  return d ? 'FST' + d : raw
+  const code=fstCode(raw)
+  return code ? 'FST'+code : raw
 }
 function inspectionDisplay(row:{grupos_inspecao?:{processos?:{codigo?:string|null;cliente?:string|null}|null}|null}) {
   const p=row.grupos_inspecao?.processos
@@ -867,7 +868,7 @@ export default function App() {
     setInspection((x) => ({
       ...x,
       processoId: p.id,
-      codigo: fstDigits(p.codigo),
+      codigo: fstCode(p.codigo),
       cliente: p.cliente ?? '',
       notaFiscal: p.nota_fiscal ?? '',
       origem: p.origem ?? '',
@@ -895,7 +896,7 @@ export default function App() {
         unidadesPorConjunto:String(link.unidades_por_conjunto??1)},x.distribuicao_caixas)
     })
     setEditingInspectionId(data.id);setEditingProcessId(null)
-    setInspection({processoId:data.grupos_inspecao?.processo_id??'',codigo:fstDigits(process.codigo),
+    setInspection({processoId:data.grupos_inspecao?.processo_id??'',codigo:fstCode(process.codigo),
       cliente:process.cliente??'',notaFiscal:process.nota_fiscal??'',origem:process.origem??'',
       transporte:process.transporte??'',chegadaCd:process.chegada_cd??'',
       dataInspecao:String(data.data_inspecao??'').slice(0,10),
@@ -907,13 +908,14 @@ export default function App() {
     const candidate=inspections.find(x=>x.grupos_inspecao?.processo_id===p.id&&x.status!=='concluida')
     if(candidate){void editInspectionFull(candidate.id);return}
     setEditingInspectionId(null);setEditingProcessId(p.id)
-    setInspection({processoId:p.id,codigo:fstDigits(p.codigo),cliente:p.cliente??'',
+    setInspection({processoId:p.id,codigo:fstCode(p.codigo),cliente:p.cliente??'',
       notaFiscal:p.nota_fiscal??'',origem:p.origem??'',transporte:p.transporte??'',
       chegadaCd:p.chegada_cd??'',dataInspecao:new Date().toISOString().slice(0,10),
       itVersionId:'',inspectionLevel:'I',observacaoInterna:''})
     setSkuRows([emptySku()]);setTab('nova');setMessage('')
   }
 
+  const fstLookupRequest=useRef(0)
   const productLookupTimers=useRef<Record<number,number>>({})
   function queueProductSuggestions(index:number, value:string) {
     const prior=productLookupTimers.current[index]
@@ -1005,26 +1007,41 @@ export default function App() {
   }
 
   async function lookupFstClient(value:string){
-    const code=String(value||'').replace(/\D/g,'')
-    if(!code)return
-    const existing=processes.find(p=>String(p.codigo||'').replace(/\D/g,'')===code)
+    const code=fstCode(value)
+    if(!code){setProcessLookupMessage('');return}
+    const requestId=++fstLookupRequest.current
+    setProcessLookupMessage('')
+    const existing=processes.find(p=>fstCode(p.codigo)===code)
     if(existing){
-      setInspection(old=>({...old,processoId:existing.id,cliente:old.cliente||existing.cliente||'',
+      setInspection(old=>fstCode(old.codigo)===code?{
+        ...old,processoId:existing.id,cliente:old.cliente||existing.cliente||'',
         notaFiscal:old.notaFiscal||existing.nota_fiscal||'',origem:old.origem||existing.origem||'',
-        transporte:old.transporte||existing.transporte||'',chegadaCd:old.chegadaCd||existing.chegada_cd||''}))
+        transporte:old.transporte||existing.transporte||'',chegadaCd:old.chegadaCd||existing.chegada_cd||''
+      }:old)
       setProcessLookupMessage(existing.cliente?'Cliente e processo localizados no SGQ.':'Processo localizado, mas cliente não informado.')
       return
     }
     setProcessLookupBusy(true)
     try{
       const {data,error}=await authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code}})
-      if(!error&&data?.found&&data?.cliente){
-        setInspection(old=>String(old.codigo||'').replace(/\D/g,'')===code?{...old,cliente:old.cliente||String(data.cliente)}:old)
-        setProcessLookupMessage('Cliente preenchido pelo Omie.')
-      }else {
-        setProcessLookupMessage('FST sem correspondência exata no Omie. Você pode informar o cliente manualmente.')
+      if(requestId!==fstLookupRequest.current)return
+      if(error){
+        setProcessLookupMessage('Não foi possível consultar o Omie. Tente novamente.')
+      }else if(data?.found&&data?.cliente){
+        setInspection(old=>fstCode(old.codigo)===code?{...old,cliente:old.cliente||String(data.cliente)}:old)
+        setProcessLookupMessage('Projeto '+String(data.matchedCode||formatFst(code))+' localizado no Omie. Cliente preenchido.')
+      }else if(data?.found){
+        setProcessLookupMessage('Projeto '+String(data.matchedCode||formatFst(code))+' localizado no Omie, mas sem cliente único confirmado. Informe o cliente manualmente.')
+      }else if(data?.error){
+        setProcessLookupMessage('Consulta ao Omie indisponível. Tente novamente.')
+      }else{
+        setProcessLookupMessage('Processo '+formatFst(code)+' não localizado no Omie. Verifique o código completo, inclusive o sufixo.')
       }
-    }finally{setProcessLookupBusy(false)}
+    }catch{
+      if(requestId===fstLookupRequest.current)setProcessLookupMessage('Não foi possível consultar o Omie. Tente novamente.')
+    }finally{
+      if(requestId===fstLookupRequest.current)setProcessLookupBusy(false)
+    }
   }
 
   async function saveProcessEdit(e: React.FormEvent) {
@@ -1181,7 +1198,7 @@ export default function App() {
       return applyBoxGroupsToSku(base,item.distribuicao_caixas)
     })
     setEditingInspectionData({
-      codigo:fstDigits(process.codigo),cliente:process.cliente ?? '',notaFiscal:process.nota_fiscal ?? '',origem:process.origem ?? '',transporte:process.transporte ?? '',
+      codigo:fstCode(process.codigo),cliente:process.cliente ?? '',notaFiscal:process.nota_fiscal ?? '',origem:process.origem ?? '',transporte:process.transporte ?? '',
       chegadaCd:process.chegada_cd ?? '',dataInspecao:String(detail.data_inspecao ?? '').slice(0,10),inspectionLevel:detail.nivel_inspecao ?? 'I',
       observacaoInterna:detail.observacao_interna ?? '',itVersionId:detail.it_versao_id ?? '',itens:rows,
     })
@@ -1338,9 +1355,9 @@ export default function App() {
 
     // Show the newly saved record without another round trip to the dashboard.
     const fst=inspection.codigo.trim()
-    const existing=processes.find(p=>fstDigits(p.codigo)===fstDigits(fst))
+    const existing=processes.find(p=>fstCode(p.codigo)===fstCode(fst))
     const processSummary:ProcessRow=existing??{
-      id:'',codigo:fst?('FST'+fstDigits(fst)):'',cliente:inspection.cliente.trim()||null,
+      id:'',codigo:fst?('FST'+fstCode(fst)):'',cliente:inspection.cliente.trim()||null,
       nota_fiscal:inspection.notaFiscal.trim()||null,origem:inspection.origem.trim()||null,
       transporte:inspection.transporte.trim()||null,chegada_cd:inspection.chegadaCd||null,
       data_processo:inspection.dataInspecao||new Date().toISOString().slice(0,10),
@@ -2203,7 +2220,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
               <div className="form-grid">
                 <label>Processo
-  <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>setInspection({...inspection,codigo:e.target.value})} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
+  <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>{fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setInspection({...inspection,codigo:e.target.value})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
   {processLookupBusy && <small className="field-hint">Consultando cliente vinculado ao FST…</small>}
   {!processLookupBusy && processLookupMessage && <small className="field-hint" role="status">{processLookupMessage}</small>}
 </label>

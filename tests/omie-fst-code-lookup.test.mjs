@@ -1,0 +1,51 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
+
+const file=(p)=>readFileSync(new URL('../'+p,import.meta.url),'utf8')
+const app=file('src/App.tsx')
+const edge=file('supabase/functions/sgq-omie-fst/index.ts')
+const frontendCode=app.slice(app.indexOf('function fstCode('),app.indexOf('function inspectionDisplay('))
+const frontendLookup=app.slice(app.indexOf('async function lookupFstClient('),app.indexOf('async function saveProcessEdit('))
+
+test('FST formatting retains A/B suffix for both display and stored identification',()=>{
+ assert.match(frontendCode,/replace\(\/\^FST/)
+ assert.doesNotMatch(frontendCode,/replace\(\/\\D\/g/)
+ assert.match(frontendCode,/return code \? 'FST'\+code/)
+ assert.match(app,/const existing=processes\.find\(p=>fstCode\(p\.codigo\)===fstCode\(fst\)\)/)
+ assert.match(app,/codigo:fst\?\('FST'\+fstCode\(fst\)\):''/)
+ assert.doesNotMatch(app,/fstDigits\(/)
+})
+test('frontend lookup sends exact project identifier and never conflates 26169-A with 26169-B',()=>{
+ assert.match(frontendLookup,/const code=fstCode\(value\)/)
+ assert.match(frontendLookup,/processes\.find\(p=>fstCode\(p\.codigo\)===code\)/)
+ assert.match(frontendLookup,/body:\{codigo:code\}/)
+ assert.match(frontendLookup,/if\(requestId!==fstLookupRequest\.current\)return/)
+ assert.match(frontendLookup,/data\?\.found&&data\?\.cliente/)
+ assert.match(frontendLookup,/Projeto .*localizado no Omie/)
+ assert.match(frontendLookup,/Consulta ao Omie indisponível/)
+ assert.doesNotMatch(frontendLookup,/replace\(\/\\D\/g/)
+})
+test('Omie edge function looks up projects by complete name and checks exact match',()=>{
+ assert.match(edge,/ListarProjetos/)
+ assert.match(edge,/nome_projeto:expected/)
+ assert.match(edge,/canonical\(p\?\.nome\)===key/)
+ assert.match(edge,/filtrar_por_projeto:projectId/)
+ assert.match(edge,/ListarPedidos/)
+ assert.match(edge,/ConsultarCliente/)
+ assert.match(edge,/new Set<number>\(\)/)
+ assert.match(edge,/if\(clients\.size!==1\)/)
+ assert.match(edge,/multiple_order_pages/)
+ assert.match(edge,/source:"omie_projeto_pedido"/)
+ assert.match(edge,/codigo_pedido_integracao:code/)
+ assert.match(edge,/auth\.getUser\(jwt\)/)
+ assert.doesNotMatch(edge,/replace\(\/\\D\/g/)
+})
+test('explicit fallback distinguishes unavailable Omie integration from exact record not found',()=>{
+ assert.match(edge,/error:"omie_projects_unavailable"/)
+ assert.match(edge,/reason:"not_found_exact"/)
+ assert.match(edge,/variants:/)
+ assert.match(edge,/configured:false,error:"omie_not_configured"/)
+ assert.match(frontendLookup,/if\(error\)/)
+ assert.match(frontendLookup,/data\?\.error/)
+})
