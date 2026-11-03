@@ -1,0 +1,70 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
+
+const file=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8')
+const app=file('src/App.tsx')
+const css=file('src/styles.css')
+
+function section(from,to){
+ const begin=app.indexOf(from)
+ assert.notEqual(begin,-1,from+' missing')
+ const end=app.indexOf(to,begin)
+ assert.ok(end>begin,to+' missing after '+from)
+ return app.slice(begin,end)
+}
+
+test('new inspection date starts blank instead of implicitly using today',()=>{
+ const init=section('const [inspection, setInspection] = useState({','const [skuRows, setSkuRows]')
+ assert.match(init,/dataInspecao:\s*''/)
+ assert.doesNotMatch(init,/dataInspecao:\s*new Date/)
+ const reset=section('function resetNewInspection()','function fillTestInspectionData()')
+ assert.match(reset,/dataInspecao:\s*''/)
+ const reuse=section('function reuseProcess(', 'async function editInspectionFull(')
+ assert.match(reuse,/dataInspecao:\s*''/)
+ const processEdit=section('function editProcessFull(', 'const fstLookupRequest')
+ assert.match(processEdit,/dataInspecao:\s*''/)
+ const form=section('<label>Data da inspeção<input type="date"','<label>Nível de inspeção')
+ assert.match(form,/value=\{inspection\.dataInspecao\}/)
+})
+test('editing previously saved inspection retains existing inspection date',()=>{
+ const edit=section('async function editInspectionFull(', 'function editProcessFull(')
+ assert.match(edit,/dataInspecao:String\(data\.data_inspecao\?\?''\)\.slice\(0,10\)/)
+ const startEdit=section('function startEditingInspectionData()', 'async function saveEditingInspectionData()')
+ assert.match(startEdit,/dataInspecao:String\(detail\.data_inspecao \?\? ''\)\.slice\(0,10\)/)
+ const save=section('async function createInspection(', 'function ')
+ assert.match(save,/dataInspecao:inspection\.dataInspecao\|\|null/)
+})
+test('each new inspection component has an independent accessible arrow toggle and summary',()=>{
+ const cards=section('className="sku-editor"','className="panel section-card inspection-it-choice"')
+ assert.match(cards,/className="sgq-sku-toggle"/)
+ assert.match(cards,/aria-expanded=\{expandedSkuIndex===i\}/)
+ assert.match(cards,/aria-controls=\{'sgq-sku-body-'\+i\}/)
+ assert.match(cards,/setExpandedSkuIndex\(current=>current===i\?null:i\)/)
+ assert.match(cards,/<ChevronDown className=\{'sgq-sku-chevron '/)
+ assert.match(cards,/row\.sku\|\|'Novo código'/)
+ assert.match(cards,/row\.nome\|\|'Preencha os dados deste componente'/)
+ assert.match(cards,/Number\(row\.quantidade\)\.toLocaleString\('pt-BR'\)/)
+ assert.match(cards,/id=\{'sgq-sku-body-'\+i\} className="sgq-sku-collapsible" hidden=\{expandedSkuIndex!==i\}/)
+ assert.match(cards,/className="form-grid"/)
+ assert.match(cards,/className="computed"/)
+})
+test('cards can collapse without clearing inputs, including Omie-imported SKU quantities',()=>{
+ assert.match(app,/const \[expandedSkuIndex,setExpandedSkuIndex\]=useState<number\|null>\(0\)/)
+ assert.match(app,/setSkuRows\(rows=>applyOmieReviewedRows\(rows,review\)\)\s*setExpandedSkuIndex\(null\)/)
+ assert.match(app,/setExpandedSkuIndex\(skuRows\.length\);setSkuRows\(\[\.\.\.skuRows,emptySku\(\)\]\)/)
+ assert.match(app,/setExpandedSkuIndex\(current=>current===null\?null:current===i\?null:current>i\?current-1:current\)/)
+ assert.doesNotMatch(app,/expandedSkuIndex!==i && setSkuRows/)
+ assert.match(css,/\.sgq-sku-collapsible\[hidden\]\{\s*display:none!important/)
+ assert.match(css,/\.sgq-sku-chevron\.open\{\s*transform:rotate\(0deg\)/)
+ assert.match(css,/prefers-reduced-motion:reduce/)
+})
+test('edit-data modal also supports individually collapsible SKU cards',()=>{
+ const modal=section('<div className="edit-items-list">','Adicionar produto à inspeção')
+ assert.match(modal,/aria-expanded=\{expandedEditSkuIndex===i\}/)
+ assert.match(modal,/setExpandedEditSkuIndex\(current=>current===i\?null:i\)/)
+ assert.match(modal,/aria-controls=\{'sgq-edit-sku-body-'\+i\}/)
+ assert.match(modal,/id=\{'sgq-edit-sku-body-'\+i\} className="sgq-sku-collapsible" hidden=\{expandedEditSkuIndex!==i\}/)
+ assert.match(app,/setExpandedEditSkuIndex\(rows\.length>1\?null:0\)/)
+ assert.match(modal,/setExpandedEditSkuIndex\(\(editingInspectionData\.itens\?\?\[\]\)\.length\)/)
+})
