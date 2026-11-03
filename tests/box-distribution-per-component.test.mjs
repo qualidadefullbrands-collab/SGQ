@@ -75,6 +75,16 @@ test('previously saved lab box groups remain readable and migrate non-destructiv
  assert.deepEqual(boxGroupsFromRow(converted).at(-1),{tipo:'laboratorio',caixas:0,unidades:60})
  assert.equal(boxDistributionTotals(converted).boxes,45)
 })
+test('entire receipt moved to the lab does not invent a warehouse box',()=>{
+ const data=row({caixasPadrao:'',unidadesPadrao:'',quantidadePorCaixa:'',
+   quantidade:'1025',caixasRecebidas:'1',unidadesLaboratorio:'1025'})
+ const totals=boxDistributionTotals(data)
+ assert.equal(totals.boxes,0)
+ assert.equal(totals.units,0)
+ assert.equal(totals.labUnits,1025)
+ assert.equal(totals.totalUnits,1025)
+ assert.doesNotMatch(app,/d\.boxes!==Number\(row\.caixasRecebidas\)/)
+})
 test('warehouse quantity per box follows its operational standard even after edits',()=>{
  const changed=updateBoxDistributionField(row(),'unidadesPadrao','1000')
  assert.equal(changed.quantidadePorCaixa,'1000')
