@@ -119,11 +119,37 @@ const emptySku = () => ({
   fotoPrincipalPath: '',
   omieStatus: '' as '' | 'loading' | 'found' | 'not_found' | 'not_configured' | 'error',
   omieMessage: '',
+  omieSourceFst: '',
+  omieSourcePedido: '',
   suggestions: [] as Array<{sku:string;nome:string;origem?:string}>,
   suggesting: false,
 })
 
 // Canonical FST key: 26169-A and 26169-B are different Omie projects.
+type OmieOrderItem={sku:string;descricao:string;quantidade:number}
+type OmieOrder={codigoPedido:number;numeroPedido:string;quantidadeItens:number}
+type OmieSkuImport={codigo:string;numeroPedido:string;itens:OmieOrderItem[]}
+function skuRowHasData(row:ReturnType<typeof emptySku>){
+  return Boolean(row.sku.trim()||row.nome.trim()||row.lote.trim()||row.material.trim()||
+    row.capacidade.trim()||row.quantidade.trim()||row.quantidadePorCaixa.trim()||
+    row.caixasRecebidas.trim()||row.caixasInspecionadas.trim()||row.caixasPadrao.trim()||
+    row.caixasFracionadas.trim()||row.caixasLaboratorio.trim()||row.fotoFile)
+}
+function mergeOmieSkuRows(rows:ReturnType<typeof emptySku>[],items:OmieOrderItem[],codigo:string,pedido:string){
+  const populated=rows.filter(skuRowHasData)
+  const existing=new Set(populated.map(r=>r.sku.trim().toUpperCase()).filter(Boolean))
+  const added:ReturnType<typeof emptySku>[]=[]
+  for(const item of items){
+    const sku=String(item.sku||'').trim().toUpperCase(),nome=String(item.descricao||'').trim()
+    const qty=Number(item.quantidade)
+    if(!sku||!nome||!Number.isFinite(qty)||qty<0||existing.has(sku))continue
+    existing.add(sku)
+    added.push({...emptySku(),sku,nome,quantidade:String(qty),
+      omieSourceFst:codigo,omieSourcePedido:pedido,
+      omieStatus:'found',omieMessage:'PV '+pedido+' · confira a quantidade efetivamente recebida.'})
+  }
+  return [...populated,...added].length?[...populated,...added]:rows
+}
 function fstCode(value: string | null | undefined) {
   const raw=String(value ?? '').trim().toUpperCase().replace(/[–—]/g,'-')
   if (!raw || /^TMP-/.test(raw)) return ''
@@ -415,6 +441,11 @@ export default function App() {
     observacaoInterna: '',
   })
   const [skuRows, setSkuRows] = useState([emptySku()])
+  const skuRowsRef=useRef(skuRows)
+  useEffect(()=>{skuRowsRef.current=skuRows},[skuRows])
+  const [omieSkuImport,setOmieSkuImport]=useState<OmieSkuImport|null>(null)
+  const [omieOrders,setOmieOrders]=useState<{codigo:string;pedidos:OmieOrder[]}|null>(null)
+  const [omieSelectedOrder,setOmieSelectedOrder]=useState('')
   const productSearchTimers = useRef<Record<number,number>>({})
   const loadAppRequest = useRef<Promise<void> | null>(null)
   const catalogsRequest=useRef<Promise<void>|null>(null)
@@ -813,6 +844,7 @@ export default function App() {
     createRequestId.current=crypto.randomUUID()
     setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0)
     manualItSelection.current=false;lastItSuggested.current='';setItSuggestionNote('');setProcessLookupMessage('')
+    fstLookupRequest.current++;setOmieSkuImport(null);setOmieOrders(null);setOmieSelectedOrder('')
     setInspection({
       processoId: '', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
       dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I', observacaoInterna: '',
@@ -1006,11 +1038,18 @@ export default function App() {
     setInspections((res.data.inspections??[]) as InspectionRow[])
   }
 
-  async function lookupFstClient(value:string){
+  function addOmieSkus(suggestion:OmieSkuImport){
+    if(fstCode(inspection.codigo)!==suggestion.codigo)return
+    setSkuRows(rows=>mergeOmieSkuRows(rows,suggestion.itens,suggestion.codigo,suggestion.numeroPedido))
+    setProcessLookupMessage('SKUs do PV '+suggestion.numeroPedido+' vinculados. Confira as quantidades recebidas.')
+  }
+
+  async function lookupFstClient(value:string,codigoPedido?:number){
     const code=fstCode(value)
     if(!code){setProcessLookupMessage('');return}
     const requestId=++fstLookupRequest.current
     setProcessLookupMessage('')
+    setProcessLookupBusy(true)
     const existing=processes.find(p=>fstCode(p.codigo)===code)
     if(existing){
       setInspection(old=>fstCode(old.codigo)===code?{
@@ -1018,27 +1057,54 @@ export default function App() {
         notaFiscal:old.notaFiscal||existing.nota_fiscal||'',origem:old.origem||existing.origem||'',
         transporte:old.transporte||existing.transporte||'',chegadaCd:old.chegadaCd||existing.chegada_cd||''
       }:old)
-      setProcessLookupMessage(existing.cliente?'Cliente e processo localizados no SGQ.':'Processo localizado, mas cliente não informado.')
-      return
     }
-    setProcessLookupBusy(true)
     try{
-      const {data,error}=await authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code}})
+      const {data,error}=await authClient.functions.invoke('sgq-omie-fst',
+        {body:{codigo:code,...(codigoPedido?{codigoPedido}:{})}})
       if(requestId!==fstLookupRequest.current)return
-      if(error){
-        setProcessLookupMessage('Não foi possível consultar o Omie. Tente novamente.')
-      }else if(data?.found&&data?.cliente){
-        setInspection(old=>fstCode(old.codigo)===code?{...old,cliente:old.cliente||String(data.cliente)}:old)
-        setProcessLookupMessage('Projeto '+String(data.matchedCode||formatFst(code))+' localizado no Omie. Cliente preenchido.')
-      }else if(data?.found){
-        setProcessLookupMessage('Projeto '+String(data.matchedCode||formatFst(code))+' localizado no Omie, mas sem cliente único confirmado. Informe o cliente manualmente.')
-      }else if(data?.error){
-        setProcessLookupMessage('Consulta ao Omie indisponível. Tente novamente.')
+      if(error||data?.error){
+        setProcessLookupMessage('Não foi possível consultar os itens no Omie. Tente novamente.')
+        return
+      }
+      if(!data?.found){
+        setProcessLookupMessage(existing?'Processo cadastrado no SGQ; itens não localizados no Omie.':
+          'Processo '+formatFst(code)+' não localizado no Omie. Verifique o código completo.')
+        return
+      }
+      if(data.cliente)setInspection(old=>fstCode(old.codigo)===code?{...old,cliente:old.cliente||String(data.cliente)}:old)
+      const orders:OmieOrder[]=Array.isArray(data.pedidos)?data.pedidos.filter((o:any)=>
+        Number.isInteger(Number(o.codigoPedido))&&Number(o.codigoPedido)>0).map((o:any)=>({
+        codigoPedido:Number(o.codigoPedido),numeroPedido:String(o.numeroPedido||''),
+        quantidadeItens:Number(o.quantidadeItens)||0
+      })):[]
+      setOmieOrders(orders.length>1?{codigo:code,pedidos:orders}:null)
+      if(orders.length>1&&!codigoPedido){
+        setProcessLookupMessage('Projeto localizado. Selecione o pedido para importar os produtos.')
+        return
+      }
+      const itens:OmieOrderItem[]=Array.isArray(data.itens)?data.itens:[]
+      const numeroPedido=String(data.numeroPedido||'')
+      if(itens.length){
+        const suggestion={codigo:code,numeroPedido,itens}
+        setOmieSkuImport(suggestion)
+        const canAuto=!editingInspectionId&&!editingProcessId&&skuRowsRef.current.every(row=>!skuRowHasData(row))
+        if(canAuto){
+          setSkuRows(rows=>rows.every(row=>!skuRowHasData(row))
+            ?mergeOmieSkuRows(rows,itens,code,numeroPedido):rows)
+          setProcessLookupMessage(itens.length+' SKU(s) do pedido '+numeroPedido+
+            ' carregados. Confira as quantidades recebidas.')
+        }else{
+          setProcessLookupMessage(itens.length+' SKU(s) encontrados no pedido '+numeroPedido+
+            '. Use Adicionar SKUs do Omie para complementar sem sobrescrever.')
+        }
       }else{
-        setProcessLookupMessage('Processo '+formatFst(code)+' não localizado no Omie. Verifique o código completo, inclusive o sufixo.')
+        setOmieSkuImport(null)
+        setProcessLookupMessage(data.itensDisponiveis===false?
+          'Projeto localizado, mas não foi possível carregar os itens do pedido. Tente novamente.':
+          'Projeto localizado no Omie, sem itens disponíveis para importação.')
       }
     }catch{
-      if(requestId===fstLookupRequest.current)setProcessLookupMessage('Não foi possível consultar o Omie. Tente novamente.')
+      if(requestId===fstLookupRequest.current)setProcessLookupMessage('Consulta ao Omie indisponível. Tente novamente.')
     }finally{
       if(requestId===fstLookupRequest.current)setProcessLookupBusy(false)
     }
@@ -2220,9 +2286,17 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
               <div className="form-grid">
                 <label>Processo
-  <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>{fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setInspection({...inspection,codigo:e.target.value})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
+  <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>{fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(e.target.value));return retained.length?retained:[emptySku()]});setInspection({...inspection,codigo:e.target.value})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
   {processLookupBusy && <small className="field-hint">Consultando cliente vinculado ao FST…</small>}
   {!processLookupBusy && processLookupMessage && <small className="field-hint" role="status">{processLookupMessage}</small>}
+  {omieOrders?.codigo===fstCode(inspection.codigo) && <div className="row-actions">
+    <select aria-label="Selecionar pedido Omie" value={omieSelectedOrder} onChange={e=>setOmieSelectedOrder(e.target.value)}>
+      <option value="">Selecione um pedido do projeto</option>
+      {omieOrders.pedidos.map(p=><option key={p.codigoPedido} value={p.codigoPedido}>PV {p.numeroPedido} · {p.quantidadeItens} item(ns)</option>)}
+    </select>
+    <button type="button" className="secondary small" disabled={!omieSelectedOrder||processLookupBusy}
+      onClick={()=>void lookupFstClient(inspection.codigo,Number(omieSelectedOrder))}>Consultar SKUs</button>
+  </div>}
 </label>
                 <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
                 <label>Nota fiscal<input value={inspection.notaFiscal} onChange={(e)=>setInspection({...inspection,notaFiscal:e.target.value})}/></label>
@@ -2255,7 +2329,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <section className="panel section-card">
               <div className="section-title">
                 <h2>Produtos / componentes</h2>
-                <button type="button" className="secondary" onClick={()=>setSkuRows([...skuRows,emptySku()])}><Plus size={16}/> Adicionar código</button>
+                <div className="row-actions">
+                  {omieSkuImport?.codigo===fstCode(inspection.codigo) && omieSkuImport.itens.some(item=>!skuRows.some(r=>r.sku.trim().toUpperCase()===item.sku.trim().toUpperCase())) &&
+                    <button type="button" className="secondary" onClick={()=>addOmieSkus(omieSkuImport)}><Boxes size={16}/> Adicionar SKUs do Omie · PV {omieSkuImport.numeroPedido}</button>}
+                  <button type="button" className="secondary" onClick={()=>setSkuRows([...skuRows,emptySku()])}><Plus size={16}/> Adicionar código</button>
+                </div>
               </div>
               <div className="sku-editor">
                 {skuRows.map((row,i)=>{
@@ -2289,7 +2367,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                         <label>Lote<input value={row.lote} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,lote:e.target.value}:r))}/></label>
                         <label>Material<input value={row.material} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,material:e.target.value}:r))}/></label>
                         <label>Capacidade<input value={row.capacidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,capacidade:e.target.value}:r))}/></label>
-                        <label>Quantidade total recebida<input type="number" step="0.01" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/></label>
+                        <label>Quantidade total recebida<input type="number" step="0.01" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/>
+                          {row.omieSourcePedido && <small className="field-hint">Referência: quantidade do PV {row.omieSourcePedido}. Confirme o recebimento físico.</small>}
+                        </label>
                         <label>Caixas recebidas<input type="number" step="0.01" value={row.caixasRecebidas} onChange={(e)=>{
                           const received=e.target.value
                           const calc=received ? String(boxesToInspect(Number(received))) : ''
