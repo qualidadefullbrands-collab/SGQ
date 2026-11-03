@@ -2038,7 +2038,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <div className="sgq-side-caption">OPERAÇÃO</div>
         <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={18}/> Painel</button>
         <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>setTab('inspecoes')}><ClipboardCheck size={18}/> Inspeções</button>
-        <button className={tab==='fotos-mobile'?'selected':''} onClick={()=>setTab('fotos-mobile')}><Camera size={18}/> Modo Fotos</button>
+        <button className="" onClick={()=>setTab('fotos-mobile')}><Camera size={18}/> Modo Fotos</button>
         <button className={tab==='nova'?'selected':''} onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
         <button className={tab==='estoque'?'selected':''} onClick={()=>setTab('estoque')}><Warehouse size={18}/> Estoque</button>
         <button className={tab==='auditorias'?'selected':''} onClick={()=>{setTab('auditorias');setError('')}}><ClipboardCheck size={18}/> Inspeções Armazém</button>
@@ -2055,7 +2055,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <strong>{({
             painel:'Painel',inspecoes:'Inspeções',nova:'Nova inspeção',
             execucao:'Execução da inspeção',estoque:'Estoque',
-            auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos', 'fotos-mobile':'Modo Fotos',
+            auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos',
           } as Record<typeof tab,string>)[tab]}</strong>
         </div>
         <div className="userbox">
