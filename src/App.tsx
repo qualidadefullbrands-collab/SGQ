@@ -374,6 +374,7 @@ export default function App() {
   const [processes, setProcesses] = useState<ProcessRow[]>([])
   const [inspections, setInspections] = useState<InspectionRow[]>([])
   const [editingProcess, setEditingProcess] = useState<ProcessRow | null>(null)
+  const [deletingProcessId,setDeletingProcessId]=useState<string|null>(null)
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null)
   const [activeStage, setActiveStage] = useState<'dados'|'amostragem'|'verificacoes'|'dimensionais'|'testes'|'fotos'|'resultado'|'retencao'>('dados')
   const [detail, setDetail] = useState<any>(null)
@@ -422,6 +423,8 @@ export default function App() {
   const [stockLoading,setStockLoading]=useState(false)
   const [photoUploadBusy,setPhotoUploadBusy]=useState(false)
   const loadSequence=useRef(0)
+  const listRefreshSequence=useRef(0)
+  const processDeletionLock=useRef<string|null>(null)
   const {equipments,setEquipments,busy:equipmentBusy,refresh:refreshEquipments}=useEquipmentList()
   const [editingInspectionData, setEditingInspectionData] = useState<any>(null)
   const [retentionSuggestion, setRetentionSuggestion] = useState<{quantidade:number|null;fonte:string|null}>({quantidade:null,fonte:null})
@@ -454,6 +457,19 @@ export default function App() {
   const canWrite = profile && profile.perfil !== 'consulta'
   const canManageIts = profile && ['administrador', 'gestor'].includes(profile.perfil)
   const canDelete = profile && ['administrador', 'gestor'].includes(profile.perfil)
+
+  // Avoid filtering the whole inspection array once for every process card.
+  const inspectionsByProcess=useMemo(()=>{
+    const grouped=new Map<string,InspectionRow[]>()
+    for(const item of inspections){
+      const processId=item.grupos_inspecao?.processo_id
+      if(!processId)continue
+      const items=grouped.get(processId)??[]
+      items.push(item)
+      grouped.set(processId,items)
+    }
+    return grouped
+  },[inspections])
 
   const statisticalLot = useMemo(() => {
     const valid = skuRows
@@ -976,8 +992,11 @@ export default function App() {
 
   async function refreshLists() {
     const version=loadSequence.current
+    const refreshId=++listRefreshSequence.current
     const res=await apiGet<any>('/api/app/listas')
-    if(res.error||!res.data||version!==loadSequence.current)return
+    // A newer refresh or a process deletion must win over any slower response.
+    if(res.error||!res.data||version!==loadSequence.current||
+       refreshId!==listRefreshSequence.current)return
     setProcesses((res.data.processes??[]) as ProcessRow[])
     setInspections((res.data.inspections??[]) as InspectionRow[])
   }
@@ -1022,15 +1041,44 @@ export default function App() {
   }
 
   async function deleteProcess(p: ProcessRow) {
-    if (!canDelete) return
-    if (!window.confirm(`Excluir o processo ${p.codigo} da visão operacional? O histórico será preservado para auditoria.`)) return
-    const deleted=await apiPost<any>(`/api/processos/${p.id}/excluir`,{})
-    if (deleted.error) return setError(deleted.error.message)
-    loadSequence.current++
-    setProcesses(current=>current.filter(row=>row.id!==p.id))
-    setInspections(current=>current.filter(row=>row.grupos_inspecao?.processo_id!==p.id))
-    setMessage('Processo excluído.')
-    void refreshLists()
+    if (!canDelete || processDeletionLock.current) return
+    if (!window.confirm(`Excluir o processo ${p.codigo} da visão operacional? As inspeções vinculadas sairão da operação, mas todo o histórico será preservado para auditoria.`)) return
+    processDeletionLock.current=p.id
+    setDeletingProcessId(p.id)
+    setError('')
+    // Invalidate requests already in flight before the mutation begins.
+    listRefreshSequence.current++
+    try {
+      const deleted=await apiPost<any>(`/api/processos/${encodeURIComponent(p.id)}/excluir`,{})
+      if (deleted.error || !deleted.data?.ok) {
+        setError(deleted.error?.message||'Não foi possível excluir o processo.')
+        // The server may have committed the archival before a later step failed.
+        void refreshLists()
+        return
+      }
+      loadSequence.current++
+      listRefreshSequence.current++
+      // Server-side archival succeeded: update the operational UI in one local pass.
+      setProcesses(current=>current.filter(row=>row.id!==p.id))
+      setInspections(current=>current.filter(row=>row.grupos_inspecao?.processo_id!==p.id))
+      setGroups(current=>current.filter(row=>row.processo_id!==p.id))
+      setEditingProcess(current=>current?.id===p.id?null:current)
+      const affectedInspectionIds=new Set(inspections
+        .filter(row=>row.grupos_inspecao?.processo_id===p.id).map(row=>row.id))
+      if(selectedInspectionId && affectedInspectionIds.has(selectedInspectionId)) {
+        setSelectedInspectionId(null)
+        setDetail(null)
+        setActiveStage('dados')
+        setTab('inspecoes')
+      }
+      setMessage(deleted.data.auditRecorded===false
+        ? 'Processo excluído. O registro de auditoria precisa de verificação pelo administrador.'
+        : 'Processo excluído. Inspeções vinculadas removidas da visão operacional.')
+      // No full reload: the list and its counters already reflect the confirmed change.
+    } finally {
+      processDeletionLock.current=null
+      setDeletingProcessId(null)
+    }
   }
 
   async function deleteInspection(i: InspectionRow | { id:string; numero?:string }) {
@@ -2068,7 +2116,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
           <div className="process-list">
             {processes.map((p)=>{
-              const related=inspections.filter((i)=>i.grupos_inspecao?.processo_id===p.id)
+              const related=inspectionsByProcess.get(p.id)??[]
               return (
                 <article className="process-card" key={p.id}>
                   <div className="process-head">
@@ -2080,7 +2128,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     <div className="row-actions">
                       <button className="secondary" onClick={()=>reuseProcess(p)}><Copy size={15}/> Nova inspeção neste processo</button>
                       <button className="secondary icon-only" title="Editar processo" onClick={()=>editProcessFull(p)}><Edit3 size={16}/></button>
-                      {canDelete && <button className="danger icon-only" title="Excluir processo" onClick={()=>deleteProcess(p)}><Trash2 size={16}/></button>}
+                      {canDelete && <button className="danger icon-only" type="button" title={deletingProcessId===p.id?'Excluindo processo…':'Excluir processo'} aria-label={deletingProcessId===p.id?'Excluindo processo':'Excluir processo'} disabled={deletingProcessId!==null} onClick={()=>deleteProcess(p)}><Trash2 size={16}/></button>}
                     </div>
                   </div>
                   <div className="inspection-sublist">

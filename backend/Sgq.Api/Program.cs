@@ -120,6 +120,54 @@ async Task<string> CurrentUserId(HttpClient client, string token)
     return (element.Value[0].Clone(), true);
 }
 
+// An archived process must not leave its inspection or group active in operational screens.
+// Filter results using the already-loaded active process IDs; this adds no database roundtrip.
+List<JsonElement> OperationalInspections(JsonElement? activeProcesses, JsonElement? inspections)
+{
+    var activeIds = new HashSet<string>(StringComparer.Ordinal);
+    if (activeProcesses?.ValueKind == JsonValueKind.Array)
+        foreach (var process in activeProcesses.Value.EnumerateArray())
+            if (process.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+                activeIds.Add(id.GetString()!);
+
+    var visible = new List<JsonElement>();
+    if (inspections?.ValueKind != JsonValueKind.Array) return visible;
+    foreach (var inspection in inspections.Value.EnumerateArray())
+    {
+        if (inspection.TryGetProperty("grupos_inspecao", out var group) &&
+            group.ValueKind == JsonValueKind.Object &&
+            group.TryGetProperty("processo_id", out var processId) &&
+            processId.ValueKind == JsonValueKind.String &&
+            !activeIds.Contains(processId.GetString() ?? "")) continue;
+        visible.Add(inspection.Clone());
+    }
+    return visible;
+}
+
+// Retain standalone groups while omitting groups of soft-deleted processes.
+List<JsonElement> OperationalGroups(JsonElement? groups)
+{
+    var visible = new List<JsonElement>();
+    if (groups?.ValueKind != JsonValueKind.Array) return visible;
+    foreach (var group in groups.Value.EnumerateArray())
+    {
+        // A recycled process code must not reopen groups from its prior archive.
+        if (group.TryGetProperty("status", out var status) &&
+            status.ValueKind == JsonValueKind.String &&
+            status.GetString() == "cancelado") continue;
+        if (group.TryGetProperty("processo_id", out var processId) &&
+            processId.ValueKind == JsonValueKind.String)
+        {
+            if (!group.TryGetProperty("processos", out var process) ||
+                process.ValueKind != JsonValueKind.Object ||
+                (process.TryGetProperty("excluido_em", out var excluded) &&
+                 excluded.ValueKind != JsonValueKind.Null)) continue;
+        }
+        visible.Add(group.Clone());
+    }
+    return visible;
+}
+
 (string Code, int Sample, int? Ac, int? Re) SamplingPlan(long lot, string level)
 {
     if (lot <= 0) return ("", 0, null, null);
@@ -545,7 +593,8 @@ app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory f
         var (profile,found)=FirstRow(profileTask.Result);
         if(!found)return Results.Json(Error("Usuário sem perfil autorizado no SGQ."),statusCode:403);
         return Results.Ok(new {data=new {
-            profile,processes=processesTask.Result,inspections=inspectionsTask.Result
+            profile,processes=processesTask.Result,
+            inspections=OperationalInspections(processesTask.Result,inspectionsTask.Result)
         },error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -562,9 +611,9 @@ app.MapGet("/api/app/catalogos", async (HttpRequest request,IHttpClientFactory f
         var its=RestAsync(client,token,HttpMethod.Get,"it_versoes",
             "select=id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)&order=criado_em.desc");
         var groups=RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
-            "select=id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente)&order=criado_em.desc");
+            "select=id,nome,codigo,tipo,status,tamanho_lote_estatistico,processo_id,processos(codigo,cliente,excluido_em)&order=criado_em.desc");
         await Task.WhenAll(its,groups);
-        return Results.Ok(new {data=new {itVersions=its.Result,groups=groups.Result},error=(object?)null});
+        return Results.Ok(new {data=new {itVersions=its.Result,groups=OperationalGroups(groups.Result)},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao carregar instruções e grupos.",e.Message),statusCode:500);}
@@ -596,7 +645,8 @@ app.MapGet("/api/app/listas", async (HttpRequest request,IHttpClientFactory fact
         var inspections=RestAsync(client,token,HttpMethod.Get,"inspecoes",
             "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
         await Task.WhenAll(processes,inspections);
-        return Results.Ok(new{data=new{processes=processes.Result,inspections=inspections.Result},error=(object?)null});
+        return Results.Ok(new{data=new{processes=processes.Result,
+            inspections=OperationalInspections(processes.Result,inspections.Result)},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao atualizar as listas.",e.Message),statusCode:500);}
@@ -745,13 +795,21 @@ app.MapPost("/api/processos/{id}/excluir", async (string id,HttpRequest request,
     try
     {
         var token=Token(request);
-        var client=factory.CreateClient("supabase");
-        var userId=await CurrentUserId(client,token);
-        await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(id)}",
-            new {excluido_em=DateTimeOffset.UtcNow,excluido_por=userId,status="cancelado"},"return=minimal");
-        await RestAsync(client,token,HttpMethod.Post,"audit_log","",
-            new {usuario_id=userId,entidade="processos",entidade_id=id,acao="exclusao_logica",dados=new {}},"return=minimal");
-        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+        // Single PostgreSQL transaction: archive the process, inspections, groups and
+        // audit log together, or roll back everything. RLS and role checks are enforced
+        // by the SECURITY INVOKER function (see Supabase migration).
+        var rows=await RestAsync(factory.CreateClient("supabase"),token,
+            HttpMethod.Post,"rpc/sgq_archive_process","",new {p_id=id});
+        var (row,found)=FirstRow(rows);
+        if (!found)return Results.Json(Error("Não foi possível concluir o arquivamento do processo."),statusCode:500);
+        var data=row!.Value;
+        return Results.Ok(new {data=new {
+            ok=true,
+            alreadyExcluded=!data.GetProperty("process_archived").GetBoolean(),
+            inspectionsArchived=data.GetProperty("inspections_archived").GetInt32(),
+            groupsArchived=data.GetProperty("groups_archived").GetInt32(),
+            auditRecorded=true
+        },error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao excluir processo.",e.Message),statusCode:500);}
