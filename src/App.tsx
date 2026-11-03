@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, RefreshCw, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, X } from 'lucide-react'
+import { Boxes, Camera, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Edit3, RefreshCw, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/supabase'
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 
@@ -477,6 +477,8 @@ export default function App() {
   const submitLock=useRef(false)
   const createRequestId=useRef(crypto.randomUUID())
   const [activeProductIndex,setActiveProductIndex]=useState(0)
+  const [expandedSkuIndex,setExpandedSkuIndex]=useState<number|null>(0)
+  const [expandedEditSkuIndex,setExpandedEditSkuIndex]=useState<number|null>(0)
   const [itSuggestBusy,setItSuggestBusy]=useState(false)
   const [itSuggestionNote,setItSuggestionNote]=useState('')
   const lastItSuggested=useRef('')
@@ -529,7 +531,7 @@ export default function App() {
     origem: 'China',
     transporte: '',
     chegadaCd: '',
-    dataInspecao: new Date().toISOString().slice(0, 10),
+    dataInspecao: '',
     itVersionId: '',
     inspectionLevel: 'I',
     observacaoInterna: '',
@@ -930,12 +932,12 @@ export default function App() {
 
   function resetNewInspection() {
     createRequestId.current=crypto.randomUUID()
-    setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0)
+    setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0);setExpandedSkuIndex(0)
     manualItSelection.current=false;lastItSuggested.current='';setItSuggestionNote('');setProcessLookupMessage('')
     fstLookupRequest.current++;setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('')
     setInspection({
       processoId: '', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
-      dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I', observacaoInterna: '',
+      dataInspecao: '', itVersionId: '', inspectionLevel: 'I', observacaoInterna: '',
     })
     setSkuRows([emptySku()])
   }
@@ -952,7 +954,7 @@ export default function App() {
       origem:'China',
       transporte:'Marítimo',
       chegadaCd:today,
-      dataInspecao:today,
+      dataInspecao:'',
       observacaoInterna:'DADOS FICTÍCIOS PARA TESTE. Ex.: 60 un retiradas no laboratório para retenção.',
     }))
     setSkuRows([{
@@ -996,8 +998,9 @@ export default function App() {
       origem: p.origem ?? '',
       transporte: p.transporte ?? '',
       chegadaCd: p.chegada_cd ?? '',
-      dataInspecao: new Date().toISOString().slice(0,10),
+      dataInspecao: '',
     }))
+    setExpandedSkuIndex(0)
     setSkuRows([emptySku()])
     setTab('nova')
     setMessage('Dados gerais reutilizados. Informe o novo código/produto desta inspeção.')
@@ -1024,7 +1027,7 @@ export default function App() {
       dataInspecao:String(data.data_inspecao??'').slice(0,10),
       itVersionId:data.it_versao_id??'',inspectionLevel:data.nivel_inspecao??'I',
       observacaoInterna:data.observacao_interna??''})
-    setSkuRows(items.length?items:[emptySku()]);setActiveProductIndex(0);setTab('nova');setMessage('')
+    setSkuRows(items.length?items:[emptySku()]);setExpandedSkuIndex(items.length>1?null:0);setActiveProductIndex(0);setTab('nova');setMessage('')
   }
   function editProcessFull(p:ProcessRow){
     const candidate=inspections.find(x=>x.grupos_inspecao?.processo_id===p.id&&x.status!=='concluida')
@@ -1032,9 +1035,9 @@ export default function App() {
     setEditingInspectionId(null);setEditingProcessId(p.id)
     setInspection({processoId:p.id,codigo:fstCode(p.codigo),cliente:p.cliente??'',
       notaFiscal:p.nota_fiscal??'',origem:p.origem??'',transporte:p.transporte??'',
-      chegadaCd:p.chegada_cd??'',dataInspecao:new Date().toISOString().slice(0,10),
+      chegadaCd:p.chegada_cd??'',dataInspecao:'',
       itVersionId:'',inspectionLevel:'I',observacaoInterna:''})
-    setSkuRows([emptySku()]);setTab('nova');setMessage('')
+    setExpandedSkuIndex(0);setSkuRows([emptySku()]);setTab('nova');setMessage('')
   }
 
   const fstLookupRequest=useRef(0)
@@ -1156,6 +1159,7 @@ export default function App() {
       skuRowsRef.current.filter(row=>row.sku.trim().toUpperCase()===item.sku.trim().toUpperCase()).length>1
     )
     setSkuRows(rows=>applyOmieReviewedRows(rows,review))
+    setExpandedSkuIndex(null)
     setOmieSkuReview(null)
     setOmieSkuReviewError('')
     setProcessLookupMessage(review.itens.length+' código(s) revisados do PV '+review.numeroPedido+
@@ -1382,6 +1386,7 @@ export default function App() {
       const base={...emptySku(),processoItemId:item.id,sku:item.produtos?.sku ?? '',nome:item.produtos?.nome ?? '',lote:item.lote ?? '',material:item.material ?? '',capacidade:item.capacidade ?? '',quantidade:String(item.quantidade ?? ''),quantidadePorCaixa:String(item.quantidade_por_caixa ?? ''),caixasRecebidas:String(item.caixas_recebidas ?? ''),caixasInspecionadas:String(item.caixas_inspecionadas ?? ''),unidadesPorConjunto:String(link.unidades_por_conjunto ?? 1)}
       return applyBoxGroupsToSku(base,item.distribuicao_caixas)
     })
+    setExpandedEditSkuIndex(rows.length>1?null:0)
     setEditingInspectionData({
       codigo:fstCode(process.codigo),cliente:process.cliente ?? '',notaFiscal:process.nota_fiscal ?? '',origem:process.origem ?? '',transporte:process.transporte ?? '',
       chegadaCd:process.chegada_cd ?? '',dataInspecao:String(detail.data_inspecao ?? '').slice(0,10),inspectionLevel:detail.nivel_inspecao ?? 'I',
