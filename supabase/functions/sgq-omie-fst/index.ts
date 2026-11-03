@@ -36,6 +36,23 @@ function canonical(value:unknown){
 const projectsUrl="https://app.omie.com.br/api/v1/geral/projetos/";
 const ordersUrl="https://app.omie.com.br/api/v1/produtos/pedido/";
 const customersUrl="https://app.omie.com.br/api/v1/geral/clientes/";
+type OmieItem={sku:string;descricao:string;quantidade:number};
+function extractItems(order:any):OmieItem[]{
+  const items=Array.isArray(order?.det)?order.det:[];
+  const bySku=new Map<string,OmieItem>();
+  for(const row of items){
+    const p=row?.produto;
+    const sku=String(p?.codigo||"").trim().toUpperCase();
+    const descricao=String(p?.descricao||"").trim();
+    const qty=Number(p?.quantidade);
+    if(!sku||!descricao||!Number.isFinite(qty)||qty<0)continue;
+    const old=bySku.get(sku);
+    if(old)old.quantidade+=qty;
+    else bySku.set(sku,{sku,descricao,quantidade:qty});
+  }
+  return [...bySku.values()];
+}
+
 
 Deno.serve(async req=>{
   if(req.method==="OPTIONS")return new Response("ok",{headers:cors});
@@ -45,7 +62,7 @@ Deno.serve(async req=>{
     const jwt=authorization.startsWith("Bearer ")?authorization.slice(7):"";
     const {data:{user}}=await admin.auth.getUser(jwt);
     if(!user)return reply({found:false,error:"unauthorized"},401);
-    const {codigo}=await req.json();
+    const {codigo,codigoPedido:pedidoSolicitado}=await req.json();
     const key=canonical(codigo);
     if(!/^\d{1,8}(?:-[A-Z0-9]+)?$/.test(key))
       return reply({found:false,error:"invalid_code"},400);
@@ -73,24 +90,56 @@ Deno.serve(async req=>{
       },appKey,appSecret);
       if(!orders)
         return reply({found:true,cliente:null,source:"omie_projeto",matchedCode:project.nome,reason:"orders_unavailable",projectId});
-      const clients=new Set<number>();
-      for(const row of (Array.isArray(orders.pedido_venda_produto)?orders.pedido_venda_produto:[])){
-        const id=Number(row?.cabecalho?.codigo_cliente);
-        if(Number.isFinite(id)&&id>0)clients.add(id);
-      }
-      // Do not autofill a random customer when multiple unrelated orders exist.
-      // A second page must be inspected too before claiming a unique customer.
+      const orderRows=Array.isArray(orders.pedido_venda_produto)?orders.pedido_venda_produto:[];
+      const linkedOrders=orderRows.map((row:any)=>({
+        codigoPedido:Number(row?.cabecalho?.codigo_pedido),
+        numeroPedido:String(row?.cabecalho?.numero_pedido||""),
+        codigoCliente:Number(row?.cabecalho?.codigo_cliente),
+        quantidadeItens:Number(row?.cabecalho?.quantidade_itens||0)
+      })).filter((o:any)=>Number.isFinite(o.codigoPedido)&&o.codigoPedido>0);
+      const clientes=new Set<number>();
+      for(const row of linkedOrders)if(Number.isFinite(row.codigoCliente)&&row.codigoCliente>0)clientes.add(row.codigoCliente);
+      const clients=clientes;
       const totalPages=Number(orders.total_de_paginas||1);
       if(totalPages>1)
-        return reply({found:true,cliente:null,source:"omie_projeto",matchedCode:project.nome,reason:"multiple_order_pages",projectId});
-      if(clients.size!==1)
-        return reply({found:true,cliente:null,source:"omie_projeto",matchedCode:project.nome,reason:clients.size?"multiple_clients":"no_linked_sales_order",projectId});
-      const clientCode=[...clients][0];
-      const customer=await omie(customersUrl,"ConsultarCliente",{codigo_cliente_omie:clientCode},appKey,appSecret);
+        return reply({found:true,cliente:null,source:"omie_projeto",matchedCode:project.nome,
+          reason:"multiple_order_pages",projectId,pedidos:[]});
+      const requested=pedidoSolicitado===undefined||pedidoSolicitado===null?0:Number(pedidoSolicitado);
+      if(requested && (!Number.isInteger(requested)||!linkedOrders.some((o:any)=>o.codigoPedido===requested)))
+        return reply({found:false,error:"pedido_not_linked"},400);
+      const chosen=linkedOrders.find((o:any)=>o.codigoPedido===requested)
+        || (linkedOrders.length===1?linkedOrders[0]:null);
+      const pedidos=linkedOrders.map((o:any)=>({
+        codigoPedido:o.codigoPedido,numeroPedido:o.numeroPedido,quantidadeItens:o.quantidadeItens
+      }));
+      if(!chosen && linkedOrders.length>1)
+        return reply({found:true,cliente:null,source:"omie_projeto",matchedCode:project.nome,
+          reason:"multiple_orders",projectId,pedidos});
+      if(clients.size!==1 && !chosen)
+        return reply({found:true,cliente:null,source:"omie_projeto",matchedCode:project.nome,
+          reason:clients.size?"multiple_clients":"no_linked_sales_order",projectId,pedidos});
+      const clientCode=chosen?.codigoCliente||[...clients][0];
+      if(!Number.isFinite(clientCode)||clientCode<=0)
+        return reply({found:true,cliente:null,source:"omie_projeto",matchedCode:project.nome,
+          reason:"invalid_customer",projectId,pedidos});
+      // Separate detailed lookup: ListarPedidos with apenas_resumo:S does not contain det[].
+      const [customer,orderDetail]=await Promise.all([
+        omie(customersUrl,"ConsultarCliente",{codigo_cliente_omie:clientCode},appKey,appSecret),
+        chosen?omie(ordersUrl,"ConsultarPedido",{codigo_pedido:chosen.codigoPedido},appKey,appSecret):Promise.resolve(null)
+      ]);
       const name=String(customer?.nome_fantasia||customer?.razao_social||"").trim();
       if(!name)
-        return reply({found:true,cliente:null,source:"omie_projeto",matchedCode:project.nome,reason:"customer_unavailable",projectId});
-      return reply({found:true,cliente:name,source:"omie_projeto_pedido",matchedCode:project.nome,projectId,clientCode});
+        return reply({found:true,cliente:null,source:"omie_projeto",matchedCode:project.nome,
+          reason:"customer_unavailable",projectId,pedidos});
+      // Verify the detailed record before trusting its products.
+      const detailMatches=chosen && Number(orderDetail?.cabecalho?.codigo_pedido)===chosen.codigoPedido
+          && Number(orderDetail?.cabecalho?.codigo_cliente)===clientCode;
+      const itens=detailMatches?extractItems(orderDetail):[];
+      const itemLookupFailed=!!chosen&&!detailMatches;
+      return reply({found:true,cliente:name,source:"omie_projeto_pedido",matchedCode:project.nome,
+        projectId,clientCode,pedidos,numeroPedido:chosen?.numeroPedido||null,
+        codigoPedido:chosen?.codigoPedido||null,itens,
+        itensDisponiveis:!itemLookupFailed,reason:itemLookupFailed?"order_details_unavailable":null});
     }
 
     // Keep compatibility with legacy installations that use the FST itself as
@@ -101,7 +150,9 @@ Deno.serve(async req=>{
       if(!Number.isFinite(clientCode)||clientCode<=0)continue;
       const customer=await omie(customersUrl,"ConsultarCliente",{codigo_cliente_omie:clientCode},appKey,appSecret);
       const name=String(customer?.nome_fantasia||customer?.razao_social||"").trim();
-      if(name)return reply({found:true,cliente:name,source:"omie_pedido",matchedCode:code,clientCode});
+      if(name)return reply({found:true,cliente:name,source:"omie_pedido",matchedCode:code,clientCode,
+        numeroPedido:String(order?.cabecalho?.numero_pedido||""),codigoPedido:Number(order?.cabecalho?.codigo_pedido||0),
+        itens:extractItems(order),itensDisponiveis:true,pedidos:[]});
     }
     // Never claim "not found" when the Omie Projects API failed entirely.
     if(!projectPage)return reply({found:false,error:"omie_projects_unavailable"});
