@@ -2520,3 +2520,77 @@ body:has(.login-shell) {background:#f3f6fa!important;color:#20374a}
   .omie-review-actions .omie-review-note{flex-basis:100%;}
   .omie-review-actions button{flex:1 1 auto;}
 }
+
+
+/* New/edit inspection: compact, individually selectable component cards. */
+.sgq-operational-shell .sku-card .sku-card-head{
+  gap:10px;
+  align-items:center;
+}
+.sgq-operational-shell .sgq-sku-toggle{
+  display:flex;
+  flex:1 1 auto;
+  align-items:center;
+  min-width:0;
+  min-height:45px;
+  gap:12px;
+  padding:3px 0;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:#1e4056;
+  cursor:pointer;
+  text-align:left;
+}
+.sgq-operational-shell .sgq-sku-toggle:hover{
+  color:#146c96;
+}
+.sgq-operational-shell .sgq-sku-toggle:focus-visible{
+  outline:2px solid #1688bd;
+  outline-offset:3px;
+}
+.sgq-operational-shell .sgq-sku-chevron{
+  flex:0 0 auto;
+  transition:transform .18s ease;
+  transform:rotate(-90deg);
+  color:#337a9f;
+}
+.sgq-operational-shell .sgq-sku-chevron.open{
+  transform:rotate(0deg);
+}
+.sgq-operational-shell .sgq-sku-summary{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  min-width:0;
+}
+.sgq-operational-shell .sgq-sku-summary strong{
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:14px;
+  font-weight:800;
+}
+.sgq-operational-shell .sgq-sku-summary small{
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#64798a;
+  font-size:12px;
+}
+.sgq-operational-shell .sgq-sku-collapsible[hidden]{
+  display:none!important;
+}
+.sgq-operational-shell .sku-card .sku-card-head:has(.sgq-sku-toggle[aria-expanded="false"]){
+  border-bottom:0;
+  margin-bottom:0;
+  padding-bottom:0;
+}
+.sgq-operational-shell .sgq-sku-collapsible .form-grid{
+  margin-top:0;
+}
+@media (prefers-reduced-motion:reduce){
+  .sgq-operational-shell .sgq-sku-chevron{transition:none}
+}
