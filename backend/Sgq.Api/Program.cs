@@ -1015,6 +1015,45 @@ decimal EffectiveReceived(CreateInspectionItem item)
     return Math.Max(0m,item.Quantidade);
 }
 
+// Every process item/SKU has its own warehouse distribution. Laboratory
+// withdrawals are units only, including when older clients supply box counts.
+List<BoxDistribution>? NormalizeComponentDistribution(CreateInspectionItem item)
+{
+    if (item.DistribuicaoCaixas is not {Count:>0}) return null;
+    var normalized=new List<BoxDistribution>();
+    decimal laboratoryUnits=0m;
+    foreach(var group in item.DistribuicaoCaixas)
+    {
+        var tipo=(group.Tipo??"").Trim().ToLowerInvariant();
+        if(tipo is "laboratorio" or "retida" or "retencao")
+        {
+            if(group.Unidades>0m)
+                laboratoryUnits+=group.Unidades*(group.Caixas>0m?group.Caixas:1m);
+            continue;
+        }
+        if(group.Caixas<=0m || group.Unidades<=0m) continue;
+        normalized.Add(new BoxDistribution {
+            Tipo=tipo is "fracionada"?"fracionada":"padrao",
+            Caixas=group.Caixas,Unidades=group.Unidades
+        });
+    }
+    if(laboratoryUnits>0m)
+        normalized.Add(new BoxDistribution {
+            Tipo="laboratorio",Caixas=0m,Unidades=laboratoryUnits
+        });
+    return normalized.Count>0?normalized:null;
+}
+
+// Quantity per box is the quantity sent to warehousing, after lab withdrawal.
+// The normalised standard box overrides a stale quantity from the original receipt.
+decimal? OperationalUnitsPerBox(CreateInspectionItem item)
+{
+    var standard=NormalizeComponentDistribution(item)?
+        .FirstOrDefault(x=>x.Tipo=="padrao"&&x.Caixas>0m&&x.Unidades>0m);
+    return standard!=null?standard.Unidades:
+        item.QuantidadePorCaixa is >0m?item.QuantidadePorCaixa:null;
+}
+
 app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRequest request, IHttpClientFactory factory) =>
 {
     try
@@ -1197,10 +1236,10 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     material = string.IsNullOrWhiteSpace(item.Material) ? null : item.Material.Trim(),
                     capacidade = string.IsNullOrWhiteSpace(item.Capacidade) ? null : item.Capacidade.Trim(),
                     quantidade = effectiveQuantity,
-                    quantidade_por_caixa = item.QuantidadePorCaixa is > 0 ? item.QuantidadePorCaixa : null,
+                    quantidade_por_caixa = OperationalUnitsPerBox(item),
                     caixas_recebidas = item.CaixasRecebidas > 0 ? (decimal?)item.CaixasRecebidas : null,
                     caixas_inspecionadas = item.CaixasInspecionadas > 0 ? (decimal?)item.CaixasInspecionadas : null,
-                    distribuicao_caixas = item.DistribuicaoCaixas is { Count: > 0 } ? item.DistribuicaoCaixas : null
+                    distribuicao_caixas = NormalizeComponentDistribution(item)
                 }, "return=representation");
             var (ir, inf) = FirstRow(itemCreated);
             if (!inf) throw new InvalidOperationException($"Falha ao cadastrar item {normalizedSku}.");
@@ -1367,10 +1406,10 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                         material=string.IsNullOrWhiteSpace(item.Material)?null:item.Material.Trim(),
                         capacidade=string.IsNullOrWhiteSpace(item.Capacidade)?null:item.Capacidade.Trim(),
                         quantidade=quantity,
-                        quantidade_por_caixa=item.QuantidadePorCaixa is >0?item.QuantidadePorCaixa:null,
+                        quantidade_por_caixa=OperationalUnitsPerBox(item),
                         caixas_recebidas=item.CaixasRecebidas>0?(decimal?)item.CaixasRecebidas:null,
                         caixas_inspecionadas=item.CaixasInspecionadas>0?(decimal?)item.CaixasInspecionadas:null,
-                        distribuicao_caixas=item.DistribuicaoCaixas is {Count:>0}?item.DistribuicaoCaixas:null
+                        distribuicao_caixas=NormalizeComponentDistribution(item)
                     },"return=representation");
                 var (newItem,itemFound)=FirstRow(createdItem);
                 if(!itemFound) throw new InvalidOperationException("Não foi possível adicionar o item à inspeção.");
@@ -1408,10 +1447,10 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 ["material"]=string.IsNullOrWhiteSpace(item.Material)?null:item.Material.Trim(),
                 ["capacidade"]=string.IsNullOrWhiteSpace(item.Capacidade)?null:item.Capacidade.Trim(),
                 ["quantidade"]=effectiveQuantity,
-                ["quantidade_por_caixa"]=item.QuantidadePorCaixa is >0?item.QuantidadePorCaixa:null,
+                ["quantidade_por_caixa"]=OperationalUnitsPerBox(item),
                 ["caixas_recebidas"]=item.CaixasRecebidas>0?(decimal?)item.CaixasRecebidas:null,
                 ["caixas_inspecionadas"]=item.CaixasInspecionadas>0?(decimal?)item.CaixasInspecionadas:null,
-                ["distribuicao_caixas"]=item.DistribuicaoCaixas is {Count:>0}?item.DistribuicaoCaixas:null
+                ["distribuicao_caixas"]=NormalizeComponentDistribution(item)
             };
             if(!string.IsNullOrWhiteSpace(productId)) patch["produto_id"]=productId;
             await RestAsync(client,token,HttpMethod.Patch,"processo_itens",$"id=eq.{Uri.EscapeDataString(item.ProcessoItemId)}",patch,"return=minimal");
