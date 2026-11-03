@@ -142,7 +142,7 @@ export default function MobileFotos({processes,inspections,canWrite,onRefresh,on
   <div className="sgq-mobile-body">
    <div className="sgq-mobile-title">
     {(processId||inspectionId)&&<button className="sgq-mobile-back" type="button" disabled={busy} onClick={back} aria-label="Voltar"><ArrowLeft size={21}/></button>}
-    <div><span>COLETA DE EVIDÊNCIAS</span><h1>{inspectionId?'Fotos da inspeção':processId?'Inspeções do processo':'Processos em andamento'}</h1></div>
+    <div><h1>{inspectionId?'Fotos da inspeção':processId?'Inspeções do processo':'Processos em andamento'}</h1></div>
     {!processId&&<button className="sgq-mobile-refresh" type="button" disabled={refreshing} onClick={()=>void refreshList()} aria-label="Atualizar processos"><RefreshCw size={19}/></button>}
    </div>
    {error&&<div role="alert" className="sgq-mobile-notice error">{error}</div>}
