@@ -151,6 +151,10 @@ List<JsonElement> OperationalGroups(JsonElement? groups)
     if (groups?.ValueKind != JsonValueKind.Array) return visible;
     foreach (var group in groups.Value.EnumerateArray())
     {
+        // A recycled process code must not reopen groups from its prior archive.
+        if (group.TryGetProperty("status", out var status) &&
+            status.ValueKind == JsonValueKind.String &&
+            status.GetString() == "cancelado") continue;
         if (group.TryGetProperty("processo_id", out var processId) &&
             processId.ValueKind == JsonValueKind.String)
         {
@@ -607,7 +611,7 @@ app.MapGet("/api/app/catalogos", async (HttpRequest request,IHttpClientFactory f
         var its=RestAsync(client,token,HttpMethod.Get,"it_versoes",
             "select=id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)&order=criado_em.desc");
         var groups=RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
-            "select=id,nome,codigo,tipo,tamanho_lote_estatistico,processo_id,processos(codigo,cliente,excluido_em)&order=criado_em.desc");
+            "select=id,nome,codigo,tipo,status,tamanho_lote_estatistico,processo_id,processos(codigo,cliente,excluido_em)&order=criado_em.desc");
         await Task.WhenAll(its,groups);
         return Results.Ok(new {data=new {itVersions=its.Result,groups=OperationalGroups(groups.Result)},error=(object?)null});
     }
@@ -791,30 +795,21 @@ app.MapPost("/api/processos/{id}/excluir", async (string id,HttpRequest request,
     try
     {
         var token=Token(request);
-        var client=factory.CreateClient("supabase");
-        var userId=await CurrentUserId(client,token);
-        // Restrict updates to operational rows; retries are idempotent.
-        var changed = await RestAsync(client,token,HttpMethod.Patch,"processos",
-            $"id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null",
-            new {excluido_em=DateTimeOffset.UtcNow,excluido_por=userId,status="cancelado"},"return=representation");
-        var (_, wasChanged) = FirstRow(changed);
-        if (!wasChanged)
-            return Results.Ok(new {data=new {ok=true,alreadyExcluded=true,auditRecorded=true},error=(object?)null});
-
-        // The process deletion is already committed. Audit failures must not incorrectly tell
-        // the frontend the deletion failed and leave stale operational cards on screen.
-        var auditRecorded=true;
-        try
-        {
-            await RestAsync(client,token,HttpMethod.Post,"audit_log","",
-                new {usuario_id=userId,entidade="processos",entidade_id=id,acao="exclusao_logica",dados=new {}},"return=minimal");
-        }
-        catch(Exception auditError)
-        {
-            auditRecorded=false;
-            app.Logger.LogError(auditError,"Audit log failed after process archival. ProcessId: {ProcessId}",id);
-        }
-        return Results.Ok(new {data=new {ok=true,alreadyExcluded=false,auditRecorded},error=(object?)null});
+        // Single PostgreSQL transaction: archive the process, inspections, groups and
+        // audit log together, or roll back everything. RLS and role checks are enforced
+        // by the SECURITY INVOKER function (see Supabase migration).
+        var rows=await RestAsync(factory.CreateClient("supabase"),token,
+            HttpMethod.Post,"rpc/sgq_archive_process","",new {p_id=id});
+        var (row,found)=FirstRow(rows);
+        if (!found)return Results.Json(Error("Não foi possível concluir o arquivamento do processo."),statusCode:500);
+        var data=row!.Value;
+        return Results.Ok(new {data=new {
+            ok=true,
+            alreadyExcluded=!data.GetProperty("process_archived").GetBoolean(),
+            inspectionsArchived=data.GetProperty("inspections_archived").GetInt32(),
+            groupsArchived=data.GetProperty("groups_archived").GetInt32(),
+            auditRecorded=true
+        },error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao excluir processo.",e.Message),statusCode:500);}
