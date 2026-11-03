@@ -34,7 +34,7 @@ test('Multiple orders require user selection and requested order must belong to 
  assert.match(edge,/reason:"multiple_orders"/)
  assert.match(edge,/error:"pedido_not_linked"/)
  assert.match(edge,/linkedOrders\.some\(\(o:any\)=>o\.codigoPedido===requested\)/)
- assert.match(app,/Selecione o pedido para importar os produtos/)
+ assert.match(app,/Selecione o pedido no popup para conferir os produtos/)
  assert.match(app,/aria-label="Selecionar pedido Omie"/)
  assert.match(app,/lookupFstClient\(inspection\.codigo,Number\(omieSelectedOrder\)\)/)
 })
