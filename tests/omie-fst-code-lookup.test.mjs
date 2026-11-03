@@ -19,7 +19,7 @@ test('FST formatting retains A/B suffix for both display and stored identificati
 test('frontend lookup sends exact project identifier and never conflates 26169-A with 26169-B',()=>{
  assert.match(frontendLookup,/const code=fstCode\(value\)/)
  assert.match(frontendLookup,/processes\.find\(p=>fstCode\(p\.codigo\)===code\)/)
- assert.match(frontendLookup,/body:\{codigo:code\}/)
+ assert.match(frontendLookup,/body:\{codigo:code,\.\.\.\(codigoPedido\?\{codigoPedido\}:\{\}\)\}/)
  assert.match(frontendLookup,/if\(requestId!==fstLookupRequest\.current\)return/)
  assert.match(frontendLookup,/if\(data\.cliente\)setInspection/)
  assert.match(frontendLookup,/Projeto localizado/)
