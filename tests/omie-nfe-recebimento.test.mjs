@@ -46,7 +46,7 @@ test('receipt API uses Omie ListarRecebimentos and checks all queried pages befo
  assert.match(edge,/Number\(row\?\.infoAdicionais\?\.nIdProjeto\)!==projectId/)
  assert.match(edge,/nTotalPaginas/)
  assert.match(edge,/receiptLimitPages=25/)
- assert.match(edge,/if\(!complete\)/) // prevents partial scans from producing a made-up match
+ assert.match(edge,/const result=!complete\?\{status:"incomplete",numeroNota:null\}/) // partial scans never auto-fill
  assert.match(edge,/modo==="nfe"/)
  assert.match(edge,/auth\.getUser\(jwt\)/)
  assert.doesNotMatch(edge,/process\.env|VITE_OMIE_APP_KEY/)
