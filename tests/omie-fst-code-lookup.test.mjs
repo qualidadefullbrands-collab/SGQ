@@ -34,7 +34,7 @@ test('Omie edge function looks up projects by complete name and checks exact mat
  assert.match(edge,/ListarPedidos/)
  assert.match(edge,/ConsultarCliente/)
  assert.match(edge,/new Set<number>\(\)/)
- assert.match(edge,/if\(clients\.size!==1\)/)
+ assert.match(edge,/if\(clients\.size!==1 && !chosen\)/)
  assert.match(edge,/multiple_order_pages/)
  assert.match(edge,/source:"omie_projeto_pedido"/)
  assert.match(edge,/codigo_pedido_integracao:code/)
