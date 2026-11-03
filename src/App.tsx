@@ -5,6 +5,8 @@ import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
 const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
+// Canonical production target: password emails must never redirect to localhost.
+const RECOVERY_REDIRECT_URL = 'https://app-sgq.onrender.com/?auth=recovery'
 const ItEditorDemo=lazy(()=>import('./its/ItEditorDemo'))
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
@@ -363,6 +365,8 @@ export default function App() {
   const [login, setLogin] = useState({ email: '', password: '' })
   const [forgotPassword, setForgotPassword] = useState(false)
   const [recoveryMode, setRecoveryMode] = useState(new URLSearchParams(window.location.search).get('auth') === 'recovery')
+  const [recoveryVerified, setRecoveryVerified] = useState(false)
+  const recoveryUrlError = new URLSearchParams(window.location.search).get('error_code')
   const [recoveryPassword, setRecoveryPassword] = useState('')
   const [recoveryConfirmation, setRecoveryConfirmation] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
@@ -519,7 +523,10 @@ export default function App() {
     })
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active) return
-      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true)
+      if (event === 'PASSWORD_RECOVERY') {
+        setRecoveryMode(true)
+        setRecoveryVerified(!!session?.user)
+      }
       setUserId(session?.user.id ?? null)
     })
     return () => { active = false; listener.subscription.unsubscribe() }
@@ -724,6 +731,9 @@ export default function App() {
   function clearRecoveryUrl() {
     const url = new URL(window.location.href)
     url.searchParams.delete('auth')
+    url.searchParams.delete('error')
+    url.searchParams.delete('error_code')
+    url.searchParams.delete('error_description')
     url.hash = ''
     window.history.replaceState({}, '', url.pathname + url.search)
   }
@@ -737,7 +747,7 @@ export default function App() {
     const email = login.email.trim().toLowerCase()
     try {
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin + window.location.pathname + '?auth=recovery',
+        redirectTo: RECOVERY_REDIRECT_URL,
       })
       if (resetError) {
         setError(authErrorText(resetError.message))
@@ -756,7 +766,7 @@ export default function App() {
     if (authBusy) return
     setError('')
     setMessage('')
-    if (!userId) return setError('Link inválido ou expirado. Solicite outro e-mail de recuperação.')
+    if (!userId || !recoveryVerified) return setError('Link inválido ou expirado. Solicite outro e-mail de recuperação.')
     if (recoveryPassword.length < 8) return setError('A nova senha precisa ter pelo menos 8 caracteres.')
     if (recoveryPassword !== recoveryConfirmation) return setError('As senhas informadas não são iguais.')
     setAuthBusy(true)
@@ -766,6 +776,7 @@ export default function App() {
       await supabase.auth.signOut()
       clearRecoveryUrl()
       setRecoveryMode(false)
+      setRecoveryVerified(false)
       setForgotPassword(false)
       setRecoveryPassword('')
       setRecoveryConfirmation('')
@@ -1906,17 +1917,17 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <form className="login-card" onSubmit={finishPasswordRecovery}>
             <div className="brand-mark"><ShieldCheck size={28}/><span>SGQ</span></div>
             <h1>Definir nova senha</h1>
-            {userId ? (
+            {userId && recoveryVerified ? (
               <>
                 <p>Crie uma nova senha para acessar o Sistema SGQ.</p>
                 <label>Nova senha<input type="password" minLength={8} autoComplete="new-password" value={recoveryPassword} onChange={e=>setRecoveryPassword(e.target.value)} required/></label>
                 <label>Confirmar nova senha<input type="password" minLength={8} autoComplete="new-password" value={recoveryConfirmation} onChange={e=>setRecoveryConfirmation(e.target.value)} required/></label>
               </>
-            ) : <p>Este link de recuperação não está válido ou expirou. Solicite um novo link.</p>}
+            ) : <p>{recoveryUrlError === 'otp_expired' ? 'Este link de recuperação já foi usado ou expirou. Solicite um novo e-mail.' : 'O link de recuperação ainda não foi validado ou expirou. Solicite um novo e-mail.'}</p>}
             {error && <div className="alert error" role="alert">{error}</div>}
             {message && <div className="alert success" role="status">{message}</div>}
-            {userId && <button className="primary" type="submit" disabled={authBusy}>{authBusy ? 'Salvando…' : 'Salvar nova senha'}</button>}
-            {!userId && <button className="secondary" type="button" onClick={()=>{clearRecoveryUrl();setRecoveryMode(false);setForgotPassword(true);setError('');setMessage('')}}>Solicitar novo link</button>}
+            {userId && recoveryVerified && <button className="primary" type="submit" disabled={authBusy}>{authBusy ? 'Salvando…' : 'Salvar nova senha'}</button>}
+            {(!userId || !recoveryVerified) && <button className="secondary" type="button" onClick={()=>{clearRecoveryUrl();setRecoveryMode(false);setRecoveryVerified(false);setForgotPassword(true);setError('');setMessage('')}}>Solicitar novo link</button>}
           </form>
         ) : (
           <form className="login-card" onSubmit={forgotPassword ? requestPasswordReset : signIn}>
