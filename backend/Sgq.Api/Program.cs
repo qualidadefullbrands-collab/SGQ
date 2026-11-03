@@ -2218,7 +2218,7 @@ app.MapGet("/api/mobile/fotos/inspecoes/{id}", async (string id,HttpRequest requ
         var (ins,found)=FirstRow(rows);
         if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var record=ins!.Value;
-        var status=Field(record,"status");
+        var status=record.GetProperty("status").GetString();
         if(status!="em_andamento")return Results.Json(Error("Somente inspeções em andamento podem receber fotos."),statusCode:409);
         var group=record.GetProperty("grupos_inspecao");
         if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process)
@@ -2229,7 +2229,7 @@ app.MapGet("/api/mobile/fotos/inspecoes/{id}", async (string id,HttpRequest requ
         var photos=await RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
             $"select=id,storage_path,legenda,criado_em&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
         return Results.Ok(new {data=new {
-            inspecao=new {id,numero=Field(record,"numero"),status},
+            inspecao=new {id,numero=record.GetProperty("numero").GetString(),status},
             photos=photos
         },error=(object?)null});
     }
@@ -2248,7 +2248,7 @@ app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInsp
         var (ins,found)=FirstRow(inspectionRows);
         if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var record=ins!.Value;
-        if(Field(record,"status")!="em_andamento")return Results.Json(Error("Inspeção não está em andamento."),statusCode:409);
+        if(record.GetProperty("status").GetString()!="em_andamento")return Results.Json(Error("Inspeção não está em andamento."),statusCode:409);
         var group=record.GetProperty("grupos_inspecao");
         if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process) ||
            process.ValueKind!=JsonValueKind.Object ||
