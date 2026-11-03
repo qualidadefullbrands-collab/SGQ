@@ -45,7 +45,7 @@ test('API uses a lightweight read endpoint and rejects archived or finished insp
  assert.match(api,/Processo arquivado ou indisponível/)
  const upload=api.slice(api.indexOf('app.MapPost("/api/inspecoes/{id}/fotos/registrar"'),api.indexOf('app.MapPost("/api/inspecoes/{id}/laudo"'))
  assert.match(upload,/excluido_em=is\.null/)
- assert.match(upload,/Field\(record,"status"\)!="em_andamento"/)
+ assert.match(upload,/record\.GetProperty\("status"\)\.GetString\(\)!="em_andamento"/)
  assert.match(upload,/photo\.StoragePath\.StartsWith\(id\+"\/gerais\/"/)
  assert.match(upload,/storage_path=eq\./)
 })
