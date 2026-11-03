@@ -2457,7 +2457,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <div className="row-actions">
                   {omieSkuImport?.codigo===fstCode(inspection.codigo) &&
                     <button type="button" className="secondary" onClick={()=>openOmieSkuReview(omieSkuImport)}><Boxes size={16}/> Revisar SKUs · PV {omieSkuImport.numeroPedido}</button>}
-                  <button type="button" className="secondary" onClick={()=>setSkuRows([...skuRows,emptySku()])}><Plus size={16}/> Adicionar código</button>
+                  <button type="button" className="secondary" onClick={()=>{setExpandedSkuIndex(skuRows.length);setSkuRows([...skuRows,emptySku()])}}><Plus size={16}/> Adicionar código</button>
                 </div>
               </div>
               <div className="sku-editor">
@@ -2467,9 +2467,19 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   return (
                     <article className="sku-card" key={i}>
                       <div className="sku-card-head">
-                        <strong>{skuRows.length>1?'Componente '+(i+1):'Produto'}</strong>
-                        {skuRows.length>1 && <button type="button" className="icon-button" onClick={()=>setSkuRows(skuRows.filter((_,j)=>j!==i))}><X size={16}/></button>}
+                        <button type="button" className="sgq-sku-toggle"
+                          aria-expanded={expandedSkuIndex===i} aria-controls={'sgq-sku-body-'+i}
+                          onClick={()=>setExpandedSkuIndex(current=>current===i?null:i)}>
+                          <ChevronDown className={'sgq-sku-chevron '+(expandedSkuIndex===i?'open':'')} size={19}/>
+                          <span className="sgq-sku-summary">
+                            <strong>{skuRows.length>1?'Componente '+(i+1):'Produto'} · {row.sku||'Novo código'}</strong>
+                            <small>{row.nome||'Preencha os dados deste componente'}{row.quantidade?' · '+Number(row.quantidade).toLocaleString('pt-BR')+' un':''}</small>
+                          </span>
+                        </button>
+                        {skuRows.length>1 && <button type="button" className="icon-button" aria-label={'Remover componente '+(i+1)}
+                          onClick={()=>{setSkuRows(skuRows.filter((_,j)=>j!==i));setExpandedSkuIndex(current=>current===null?null:current===i?null:current>i?current-1:current)}}><X size={16}/></button>}
                       </div>
+                      <div id={'sgq-sku-body-'+i} className="sgq-sku-collapsible" hidden={expandedSkuIndex!==i}>
                       <div className="form-grid">
                         <label className="product-search-field">Código / produto
                           <div className="input-action">
@@ -2530,6 +2540,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                       <div className="computed">
                         <span>Caixas recebidas <b>{boxes || '—'}</b></span>
                         <span>Caixas inspecionadas <b>{inspect || '—'}</b></span>
+                      </div>
                       </div>
                     </article>
                   )
@@ -3307,7 +3318,18 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
             <div className="edit-items-list">
               {(editingInspectionData.itens ?? []).map((row:any,i:number)=>{ const d=boxDistributionTotals(row); return <article className="sku-card compact" key={row.processoItemId || i}>
-                <div className="sku-card-head"><strong>{row.sku || 'Produto'} · {row.nome || 'Em preenchimento'}</strong></div>
+                <div className="sku-card-head">
+                  <button type="button" className="sgq-sku-toggle"
+                    aria-expanded={expandedEditSkuIndex===i} aria-controls={'sgq-edit-sku-body-'+i}
+                    onClick={()=>setExpandedEditSkuIndex(current=>current===i?null:i)}>
+                    <ChevronDown className={'sgq-sku-chevron '+(expandedEditSkuIndex===i?'open':'')} size={19}/>
+                    <span className="sgq-sku-summary">
+                      <strong>{row.sku||'Novo código'}</strong>
+                      <small>{row.nome||'Em preenchimento'}{row.quantidade?' · '+Number(row.quantidade).toLocaleString('pt-BR')+' un':''}</small>
+                    </span>
+                  </button>
+                </div>
+                <div id={'sgq-edit-sku-body-'+i} className="sgq-sku-collapsible" hidden={expandedEditSkuIndex!==i}>
                 <div className="form-grid">
                   <label>Código<input value={row.sku} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,sku:e.target.value}:x)})}/></label>
                   <label>Descrição<input value={row.nome} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,nome:e.target.value}:x)})}/></label>
@@ -3336,9 +3358,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   {' + '}laboratório {d.labUnits.toLocaleString('pt-BR')} un
                   {' = '}{d.totalUnits.toLocaleString('pt-BR')} un recebidas
                 </small>}
+                </div>
               </article>})}
             </div>
-            <button className="secondary" type="button" onClick={()=>setEditingInspectionData({...editingInspectionData,itens:[...(editingInspectionData.itens ?? []),{...emptySku(),processoItemId:null}]})}><Plus size={16}/> Adicionar produto à inspeção</button>
+            <button className="secondary" type="button" onClick={()=>{setExpandedEditSkuIndex((editingInspectionData.itens??[]).length);setEditingInspectionData({...editingInspectionData,itens:[...(editingInspectionData.itens ?? []),{...emptySku(),processoItemId:null}]})}}><Plus size={16}/> Adicionar produto à inspeção</button>
             <button className="primary wide" type="button" onClick={saveEditingInspectionData}>Salvar</button>
           </article>
         </div>
