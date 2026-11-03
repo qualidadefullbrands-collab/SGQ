@@ -129,6 +129,8 @@ const emptySku = () => ({
 type OmieOrderItem={sku:string;descricao:string;quantidade:number}
 type OmieOrder={codigoPedido:number;numeroPedido:string;quantidadeItens:number}
 type OmieSkuImport={codigo:string;numeroPedido:string;itens:OmieOrderItem[]}
+type OmieSkuReviewLine={sku:string;descricao:string;quantidadePedido:number;quantidadeInformada:string}
+type OmieSkuReview={codigo:string;numeroPedido:string;itens:OmieSkuReviewLine[]}
 function skuRowHasData(row:ReturnType<typeof emptySku>){
   return Boolean(row.sku.trim()||row.nome.trim()||row.lote.trim()||row.material.trim()||
     row.capacidade.trim()||row.quantidade.trim()||row.quantidadePorCaixa.trim()||
@@ -136,20 +138,62 @@ function skuRowHasData(row:ReturnType<typeof emptySku>){
     row.caixasFracionadas.trim()||row.caixasLaboratorio.trim()||row.unidadesLaboratorio.trim()||
     row.unidadesPadrao.trim()||row.unidadesFracionadas.trim()||row.fotoFile)
 }
-function mergeOmieSkuRows(rows:ReturnType<typeof emptySku>[],items:OmieOrderItem[],codigo:string,pedido:string){
-  const populated=rows.filter(skuRowHasData)
-  const existing=new Set(populated.map(r=>r.sku.trim().toUpperCase()).filter(Boolean))
-  const added:ReturnType<typeof emptySku>[]=[]
-  for(const item of items){
-    const sku=String(item.sku||'').trim().toUpperCase(),nome=String(item.descricao||'').trim()
-    const qty=Number(item.quantidade)
-    if(!sku||!nome||!Number.isFinite(qty)||qty<0||existing.has(sku))continue
-    existing.add(sku)
-    added.push({...emptySku(),sku,nome,quantidade:String(qty),
-      omieSourceFst:codigo,omieSourcePedido:pedido,
-      omieStatus:'found',omieMessage:'PV '+pedido+' · confira a quantidade efetivamente recebida.'})
+// Review first; only apply the Omie quantities to the inspection after the popup closes.
+function prepareOmieSkuReview(suggestion:OmieSkuImport,rows:ReturnType<typeof emptySku>[]):OmieSkuReview {
+  const existing=new Map<string,ReturnType<typeof emptySku>[]>()
+  for(const row of rows){
+    const key=row.sku.trim().toUpperCase()
+    if(!key)continue
+    const same=existing.get(key)||[]
+    same.push(row)
+    existing.set(key,same)
   }
-  return [...populated,...added].length?[...populated,...added]:rows
+  return {codigo:suggestion.codigo,numeroPedido:suggestion.numeroPedido,
+    itens:suggestion.itens.map(item=>{
+      const same=existing.get(item.sku.trim().toUpperCase())||[]
+      return {
+        sku:item.sku,descricao:item.descricao,quantidadePedido:item.quantidade,
+        // For an existing single SKU, default to what the operator already typed.
+        quantidadeInformada:same.length===1&&same[0].quantidade.trim()!==''?
+          same[0].quantidade:String(item.quantidade)
+      }
+    })
+  }
+}
+function validOmieSkuReview(review:OmieSkuReview){
+  return review.itens.length>0 && review.itens.every(item=>{
+    const value=item.quantidadeInformada.trim()
+    return value!==''&&Number.isFinite(Number(value))&&Number(value)>=0
+  })
+}
+function applyOmieReviewedRows(rows:ReturnType<typeof emptySku>[],review:OmieSkuReview){
+  const result=rows.filter(skuRowHasData).map(row=>({...row}))
+  const matches=new Map<string,number[]>()
+  for(let i=0;i<result.length;i++){
+    const sku=result[i].sku.trim().toUpperCase()
+    if(!sku)continue
+    const indexes=matches.get(sku)||[]
+    indexes.push(i);matches.set(sku,indexes)
+  }
+  for(const item of review.itens){
+    const code=item.sku.trim().toUpperCase()
+    const indices=matches.get(code)||[]
+    // Never overwrite multiple lot rows with one order total (which would duplicate units).
+    if(indices.length>1)continue
+    const amount=item.quantidadeInformada.trim()
+    if(indices.length===1){
+      const i=indices[0],old=result[i]
+      result[i]={...old,quantidade:amount,nome:old.nome.trim()||item.descricao,
+        omieSourceFst:review.codigo,omieSourcePedido:review.numeroPedido}
+    }else{
+      const i=result.length
+      result.push({...emptySku(),sku:code,nome:item.descricao,quantidade:amount,
+        omieSourceFst:review.codigo,omieSourcePedido:review.numeroPedido,
+        omieStatus:'found',omieMessage:'PV '+review.numeroPedido+' · confirme o recebimento físico.'})
+      matches.set(code,[i])
+    }
+  }
+  return result.length?result:[emptySku()]
 }
 function fstCode(value: string | null | undefined) {
   const raw=String(value ?? '').trim().toUpperCase().replace(/[–—]/g,'-')
@@ -494,6 +538,9 @@ export default function App() {
   const skuRowsRef=useRef(skuRows)
   useEffect(()=>{skuRowsRef.current=skuRows},[skuRows])
   const [omieSkuImport,setOmieSkuImport]=useState<OmieSkuImport|null>(null)
+  const [omieSkuReview,setOmieSkuReview]=useState<OmieSkuReview|null>(null)
+  const [omieSkuReviewError,setOmieSkuReviewError]=useState('')
+  const [omieOrderPickerOpen,setOmieOrderPickerOpen]=useState(false)
   const [omieOrders,setOmieOrders]=useState<{codigo:string;pedidos:OmieOrder[]}|null>(null)
   const [omieSelectedOrder,setOmieSelectedOrder]=useState('')
   const productSearchTimers = useRef<Record<number,number>>({})
@@ -885,7 +932,7 @@ export default function App() {
     createRequestId.current=crypto.randomUUID()
     setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0)
     manualItSelection.current=false;lastItSuggested.current='';setItSuggestionNote('');setProcessLookupMessage('')
-    fstLookupRequest.current++;setOmieSkuImport(null);setOmieOrders(null);setOmieSelectedOrder('')
+    fstLookupRequest.current++;setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('')
     setInspection({
       processoId: '', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
       dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I', observacaoInterna: '',
@@ -937,6 +984,8 @@ export default function App() {
   }
 
   function reuseProcess(p: ProcessRow) {
+    fstLookupRequest.current++
+    setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('')
     setEditingInspectionId(null);setEditingProcessId(null);
     setInspection((x) => ({
       ...x,
@@ -1079,10 +1128,39 @@ export default function App() {
     setInspections((res.data.inspections??[]) as InspectionRow[])
   }
 
-  function addOmieSkus(suggestion:OmieSkuImport){
+  function openOmieSkuReview(suggestion:OmieSkuImport){
     if(fstCode(inspection.codigo)!==suggestion.codigo)return
-    setSkuRows(rows=>mergeOmieSkuRows(rows,suggestion.itens,suggestion.codigo,suggestion.numeroPedido))
-    setProcessLookupMessage('SKUs do PV '+suggestion.numeroPedido+' vinculados. Confira as quantidades recebidas.')
+    setOmieOrderPickerOpen(false)
+    setOmieSkuReviewError('')
+    setOmieSkuReview(prepareOmieSkuReview(suggestion,skuRowsRef.current))
+  }
+
+  function updateOmieReviewQuantity(sku:string,value:string){
+    setOmieSkuReview(current=>current?{...current,itens:current.itens.map(item=>
+      item.sku===sku?{...item,quantidadeInformada:value}:item)}:null)
+    setOmieSkuReviewError('')
+  }
+
+  function closeOmieSkuReview(){
+    if(!omieSkuReview)return
+    const review=omieSkuReview
+    if(fstCode(inspection.codigo)!==review.codigo){
+      setOmieSkuReview(null)
+      return
+    }
+    if(!validOmieSkuReview(review)){
+      setOmieSkuReviewError('Confira as quantidades: preencha valores numéricos maiores ou iguais a zero.')
+      return
+    }
+    const duplicated=review.itens.filter(item=>
+      skuRowsRef.current.filter(row=>row.sku.trim().toUpperCase()===item.sku.trim().toUpperCase()).length>1
+    )
+    setSkuRows(rows=>applyOmieReviewedRows(rows,review))
+    setOmieSkuReview(null)
+    setOmieSkuReviewError('')
+    setProcessLookupMessage(review.itens.length+' código(s) revisados do PV '+review.numeroPedido+
+      '. Quantidades atualizadas no formulário; clique em Salvar para registrar a inspeção.'+
+      (duplicated.length?' SKUs com vários lotes foram preservados: '+duplicated.map(x=>x.sku).join(', ')+'.':''))
   }
 
   async function lookupFstClient(value:string,codigoPedido?:number){
@@ -1091,6 +1169,9 @@ export default function App() {
     const requestId=++fstLookupRequest.current
     setProcessLookupMessage('')
     setOmieSkuImport(null)
+    setOmieSkuReview(null)
+    setOmieSkuReviewError('')
+    setOmieOrderPickerOpen(false)
     setProcessLookupBusy(true)
     const existing=processes.find(p=>fstCode(p.codigo)===code)
     if(existing){
@@ -1121,7 +1202,8 @@ export default function App() {
       })):[]
       setOmieOrders(orders.length>1?{codigo:code,pedidos:orders}:null)
       if(orders.length>1&&!codigoPedido){
-        setProcessLookupMessage('Projeto localizado. Selecione o pedido para importar os produtos.')
+        setOmieOrderPickerOpen(true)
+        setProcessLookupMessage('Projeto localizado. Selecione o pedido no popup para conferir os produtos.')
         return
       }
       const itens:OmieOrderItem[]=Array.isArray(data.itens)?data.itens:[]
@@ -1129,16 +1211,11 @@ export default function App() {
       if(itens.length){
         const suggestion={codigo:code,numeroPedido,itens}
         setOmieSkuImport(suggestion)
-        const canAuto=!editingInspectionId&&!editingProcessId&&skuRowsRef.current.every(row=>!skuRowHasData(row))
-        if(canAuto){
-          setSkuRows(rows=>rows.every(row=>!skuRowHasData(row))
-            ?mergeOmieSkuRows(rows,itens,code,numeroPedido):rows)
-          setProcessLookupMessage(itens.length+' SKU(s) do pedido '+numeroPedido+
-            ' carregados. Confira as quantidades recebidas.')
-        }else{
-          setProcessLookupMessage(itens.length+' SKU(s) encontrados no pedido '+numeroPedido+
-            '. Use Adicionar SKUs do Omie para complementar sem sobrescrever.')
-        }
+        // Opening the popup does not mutate inspection products. Its close action
+        // applies all reviewed quantities in a single state update.
+        openOmieSkuReview(suggestion)
+        setProcessLookupMessage(itens.length+' SKU(s) encontrados no PV '+numeroPedido+
+          '. Revise as quantidades no popup e feche para atualizar o formulário.')
       }else{
         setOmieSkuImport(null)
         setProcessLookupMessage(data.itensDisponiveis===false?
@@ -2330,7 +2407,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <div className="sgq-fst-field">
                   <label htmlFor="sgq-fst-input">Processo</label>
                   <div className="sgq-fst-controls">
-                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection({...inspection,codigo:inputValue})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
+                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection({...inspection,codigo:inputValue})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
                     <button type="button" className="secondary sgq-fst-retry" disabled={processLookupBusy||!fstCode(inspection.codigo)}
                       onMouseDown={e=>e.preventDefault()} onClick={()=>void lookupFstClient(inspection.codigo)} title="Buscar cliente e SKUs no Omie">
                       <Search size={16}/> Consultar
@@ -2338,14 +2415,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   </div>
                   {processLookupBusy && <small className="field-hint" role="status">Consultando cliente e SKUs no Omie…</small>}
                   {!processLookupBusy && processLookupMessage && <small className="field-hint" role="status">{processLookupMessage}</small>}
-                  {omieOrders?.codigo===fstCode(inspection.codigo) && <div className="row-actions">
-                    <select aria-label="Selecionar pedido Omie" value={omieSelectedOrder} onChange={e=>setOmieSelectedOrder(e.target.value)}>
-                      <option value="">Selecione um pedido do projeto</option>
-                      {omieOrders.pedidos.map(p=><option key={p.codigoPedido} value={p.codigoPedido}>PV {p.numeroPedido} · {p.quantidadeItens} item(ns)</option>)}
-                    </select>
-                    <button type="button" className="secondary small" disabled={!omieSelectedOrder||processLookupBusy}
-                      onClick={()=>void lookupFstClient(inspection.codigo,Number(omieSelectedOrder))}>Consultar SKUs</button>
-                  </div>}
+
 
                 </div>
                 <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
@@ -2380,8 +2450,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <div className="section-title">
                 <h2>Produtos / componentes</h2>
                 <div className="row-actions">
-                  {omieSkuImport?.codigo===fstCode(inspection.codigo) && omieSkuImport.itens.some(item=>!skuRows.some(r=>r.sku.trim().toUpperCase()===item.sku.trim().toUpperCase())) &&
-                    <button type="button" className="secondary" onClick={()=>addOmieSkus(omieSkuImport)}><Boxes size={16}/> Adicionar SKUs do Omie · PV {omieSkuImport.numeroPedido}</button>}
+                  {omieSkuImport?.codigo===fstCode(inspection.codigo) &&
+                    <button type="button" className="secondary" onClick={()=>openOmieSkuReview(omieSkuImport)}><Boxes size={16}/> Revisar SKUs · PV {omieSkuImport.numeroPedido}</button>}
                   <button type="button" className="secondary" onClick={()=>setSkuRows([...skuRows,emptySku()])}><Plus size={16}/> Adicionar código</button>
                 </div>
               </div>
@@ -3286,6 +3356,83 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </div>
       )}
 
+
+
+      {omieOrderPickerOpen && omieOrders?.codigo===fstCode(inspection.codigo) && (
+        <div className="modal-backdrop sgq-omie-modal-layer">
+          <article className="sample-detail omie-review-modal omie-order-picker" role="dialog" aria-modal="true" aria-labelledby="sgq-omie-order-title">
+            <button className="close" type="button" aria-label="Fechar seleção de pedido" onClick={()=>setOmieOrderPickerOpen(false)}>×</button>
+            <span className="eyebrow">{formatFst(omieOrders.codigo)}</span>
+            <h2 id="sgq-omie-order-title">Selecionar pedido</h2>
+            <p>Este processo tem mais de um pedido vinculado. Selecione o PV para conferir seus componentes.</p>
+            <label className="omie-order-selector">Pedido de venda
+              <select aria-label="Selecionar pedido Omie" value={omieSelectedOrder} onChange={e=>setOmieSelectedOrder(e.target.value)}>
+                <option value="">Selecione um pedido do projeto</option>
+                {omieOrders.pedidos.map(p=><option key={p.codigoPedido} value={p.codigoPedido}>
+                  PV {p.numeroPedido} · {p.quantidadeItens} item(ns)
+                </option>)}
+              </select>
+            </label>
+            <div className="omie-review-actions">
+              <button type="button" className="secondary" onClick={()=>setOmieOrderPickerOpen(false)}>Fechar</button>
+              <button type="button" className="primary" disabled={!omieSelectedOrder||processLookupBusy}
+                onClick={()=>void lookupFstClient(inspection.codigo,Number(omieSelectedOrder))}>
+                Consultar SKUs
+              </button>
+            </div>
+          </article>
+        </div>
+      )}
+      {omieSkuReview && omieSkuReview.codigo===fstCode(inspection.codigo) && (
+        <div className="modal-backdrop sgq-omie-modal-layer">
+          <article className="sample-detail omie-review-modal" role="dialog" aria-modal="true"
+            aria-labelledby="sgq-omie-review-title" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();closeOmieSkuReview()}}}>
+            <button className="close" type="button" aria-label="Atualizar e fechar tabela de SKUs" onClick={closeOmieSkuReview}>×</button>
+            <span className="eyebrow">{formatFst(omieSkuReview.codigo)} · PV {omieSkuReview.numeroPedido}</span>
+            <h2 id="sgq-omie-review-title">Conferir códigos e quantidades</h2>
+            <p>Corrija a quantidade recebida de cada componente, se necessário.</p>
+            <div className="omie-review-table-scroll">
+              <table className="omie-review-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Código / SKU</th>
+                    <th scope="col">Descrição</th>
+                    <th scope="col" className="omie-review-number">Qtd. pedido</th>
+                    <th scope="col" className="omie-review-number">Qtd. recebida</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {omieSkuReview.itens.map(item=><tr key={item.sku}>
+                    <td><strong>{item.sku}</strong></td>
+                    <td>{item.descricao}</td>
+                    <td className="omie-review-number">{item.quantidadePedido.toLocaleString('pt-BR',{maximumFractionDigits:3})}</td>
+                    <td className="omie-review-edit">
+                      <input type="number" min="0" step="any"
+                        aria-label={'Quantidade recebida '+item.sku}
+                        aria-invalid={item.quantidadeInformada.trim()===''||!Number.isFinite(Number(item.quantidadeInformada))||Number(item.quantidadeInformada)<0}
+                        value={item.quantidadeInformada}
+                        onChange={e=>updateOmieReviewQuantity(item.sku,e.target.value)}/>
+                      {skuRows.filter(row=>row.sku.trim().toUpperCase()===item.sku.trim().toUpperCase()).length>1 &&
+                        <small>Vários lotes: manteremos as quantidades existentes.</small>}
+                    </td>
+                  </tr>)}
+                </tbody>
+                <tfoot><tr>
+                  <th colSpan={2} scope="row">Total</th>
+                  <td className="omie-review-number">{omieSkuReview.itens.reduce((sum,item)=>sum+item.quantidadePedido,0).toLocaleString('pt-BR',{maximumFractionDigits:3})}</td>
+                  <td className="omie-review-number">{omieSkuReview.itens.reduce((sum,item)=>sum+(Number(item.quantidadeInformada)||0),0).toLocaleString('pt-BR',{maximumFractionDigits:3})}</td>
+                </tr></tfoot>
+              </table>
+            </div>
+            {omieSkuReviewError && <p className="omie-review-validation" role="alert">{omieSkuReviewError}</p>}
+            <div className="omie-review-actions">
+              <span className="omie-review-note">Ao fechar, os componentes e cálculos da inspeção serão atualizados.</span>
+              <button type="button" className="secondary" onClick={()=>{setOmieSkuReview(null);setOmieSkuReviewError('');setProcessLookupMessage('Revisão descartada. Os componentes permanecem inalterados.')}}>Descartar</button>
+              <button type="button" className="primary" onClick={closeOmieSkuReview}>Atualizar e fechar</button>
+            </div>
+          </article>
+        </div>
+      )}
 
       {!!pendingModal.length && (
         <div className="modal-backdrop" onClick={()=>setPendingModal([])}>
