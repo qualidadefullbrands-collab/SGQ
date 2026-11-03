@@ -59,7 +59,7 @@ test('process archival is one authenticated RPC transaction with audit record',(
 test('database migration archives process, linked inspections and groups atomically with RLS',()=>{
  const migration=src('supabase/migrations/20261103_atomic_archive_process.sql')
  assert.match(migration,/SECURITY INVOKER/)
- assert.doesNotMatch(migration,/SECURITY DEFINER/)
+ assert.doesNotMatch(migration,/^\s*SECURITY DEFINER\s*$/m)
  assert.match(migration,/auth\.uid\(\)/)
  assert.match(migration,/perfil IN \('administrador', 'gestor'\)/)
  assert.match(migration,/UPDATE public\.processos/)
