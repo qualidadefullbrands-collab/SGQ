@@ -32,7 +32,7 @@ test('editing previously saved inspection retains existing inspection date',()=>
  assert.match(edit,/dataInspecao:String\(data\.data_inspecao\?\?''\)\.slice\(0,10\)/)
  const startEdit=section('function startEditingInspectionData()', 'async function saveEditingInspectionData()')
  assert.match(startEdit,/dataInspecao:String\(detail\.data_inspecao \?\? ''\)\.slice\(0,10\)/)
- const save=section('async function createInspection(', 'function ')
+ const save=app.slice(app.indexOf('async function createInspection('))
  assert.match(save,/dataInspecao:inspection\.dataInspecao\|\|null/)
 })
 test('each new inspection component has an independent accessible arrow toggle and summary',()=>{
