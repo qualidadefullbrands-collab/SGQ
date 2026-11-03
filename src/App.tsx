@@ -947,7 +947,7 @@ export default function App() {
     createRequestId.current=crypto.randomUUID()
     setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0)
     manualItSelection.current=false;lastItSuggested.current='';setItSuggestionNote('');setProcessLookupMessage('')
-    fstLookupRequest.current++;setOmieSkuImport(null);setOmieOrders(null);setOmieSelectedOrder('')
+    fstLookupRequest.current++;setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('')
     setInspection({
       processoId: '', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
       dataInspecao: new Date().toISOString().slice(0,10), itVersionId: '', inspectionLevel: 'I', observacaoInterna: '',
@@ -999,6 +999,8 @@ export default function App() {
   }
 
   function reuseProcess(p: ProcessRow) {
+    fstLookupRequest.current++
+    setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('')
     setEditingInspectionId(null);setEditingProcessId(null);
     setInspection((x) => ({
       ...x,
@@ -1147,12 +1149,44 @@ export default function App() {
     setProcessLookupMessage('SKUs do PV '+suggestion.numeroPedido+' vinculados. Confira as quantidades recebidas.')
   }
 
+  function openOmieSkuReview(suggestion:OmieSkuImport){
+    if(fstCode(inspection.codigo)!==suggestion.codigo)return
+    setOmieOrderPickerOpen(false)
+    setOmieSkuReviewError('')
+    setOmieSkuReview(prepareOmieSkuReview(suggestion,skuRowsRef.current))
+  }
+
+  function closeOmieSkuReview(){
+    if(!omieSkuReview)return
+    const review=omieSkuReview
+    if(fstCode(inspection.codigo)!==review.codigo){
+      setOmieSkuReview(null)
+      return
+    }
+    if(!validOmieSkuReview(review)){
+      setOmieSkuReviewError('Confira as quantidades: preencha valores numéricos maiores ou iguais a zero.')
+      return
+    }
+    const duplicated=review.itens.filter(item=>
+      skuRowsRef.current.filter(row=>row.sku.trim().toUpperCase()===item.sku.trim().toUpperCase()).length>1
+    )
+    setSkuRows(rows=>applyOmieReviewedRows(rows,review))
+    setOmieSkuReview(null)
+    setOmieSkuReviewError('')
+    setProcessLookupMessage(review.itens.length+' código(s) revisados do PV '+review.numeroPedido+
+      '. Quantidades atualizadas no formulário; clique em Salvar para registrar a inspeção.'+
+      (duplicated.length?' SKUs com vários lotes foram preservados: '+duplicated.map(x=>x.sku).join(', ')+'.':''))
+  }
+
   async function lookupFstClient(value:string,codigoPedido?:number){
     const code=fstCode(value)
     if(!code){setProcessLookupMessage('');return}
     const requestId=++fstLookupRequest.current
     setProcessLookupMessage('')
     setOmieSkuImport(null)
+    setOmieSkuReview(null)
+    setOmieSkuReviewError('')
+    setOmieOrderPickerOpen(false)
     setProcessLookupBusy(true)
     const existing=processes.find(p=>fstCode(p.codigo)===code)
     if(existing){
@@ -1183,7 +1217,8 @@ export default function App() {
       })):[]
       setOmieOrders(orders.length>1?{codigo:code,pedidos:orders}:null)
       if(orders.length>1&&!codigoPedido){
-        setProcessLookupMessage('Projeto localizado. Selecione o pedido para importar os produtos.')
+        setOmieOrderPickerOpen(true)
+        setProcessLookupMessage('Projeto localizado. Selecione o pedido no popup para conferir os produtos.')
         return
       }
       const itens:OmieOrderItem[]=Array.isArray(data.itens)?data.itens:[]
@@ -1191,16 +1226,11 @@ export default function App() {
       if(itens.length){
         const suggestion={codigo:code,numeroPedido,itens}
         setOmieSkuImport(suggestion)
-        const canAuto=!editingInspectionId&&!editingProcessId&&skuRowsRef.current.every(row=>!skuRowHasData(row))
-        if(canAuto){
-          setSkuRows(rows=>rows.every(row=>!skuRowHasData(row))
-            ?mergeOmieSkuRows(rows,itens,code,numeroPedido):rows)
-          setProcessLookupMessage(itens.length+' SKU(s) do pedido '+numeroPedido+
-            ' carregados. Confira as quantidades recebidas.')
-        }else{
-          setProcessLookupMessage(itens.length+' SKU(s) encontrados no pedido '+numeroPedido+
-            '. Use Adicionar SKUs do Omie para complementar sem sobrescrever.')
-        }
+        // Opening the popup does not mutate inspection products. Its close action
+        // applies all reviewed quantities in a single state update.
+        openOmieSkuReview(suggestion)
+        setProcessLookupMessage(itens.length+' SKU(s) encontrados no PV '+numeroPedido+
+          '. Revise as quantidades no popup e feche para atualizar o formulário.')
       }else{
         setOmieSkuImport(null)
         setProcessLookupMessage(data.itensDisponiveis===false?
@@ -2392,7 +2422,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <div className="sgq-fst-field">
                   <label htmlFor="sgq-fst-input">Processo</label>
                   <div className="sgq-fst-controls">
-                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection({...inspection,codigo:inputValue})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
+                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection({...inspection,codigo:inputValue})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
                     <button type="button" className="secondary sgq-fst-retry" disabled={processLookupBusy||!fstCode(inspection.codigo)}
                       onMouseDown={e=>e.preventDefault()} onClick={()=>void lookupFstClient(inspection.codigo)} title="Buscar cliente e SKUs no Omie">
                       <Search size={16}/> Consultar
