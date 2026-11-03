@@ -1048,8 +1048,7 @@ List<BoxDistribution>? NormalizeComponentDistribution(CreateInspectionItem item)
 // The normalised standard box overrides a stale quantity from the original receipt.
 decimal? OperationalUnitsPerBox(CreateInspectionItem item)
 {
-    var standard=NormalizeComponentDistribution(item)?
-        .FirstOrDefault(x=>x.Tipo=="padrao"&&x.Caixas>0m&&x.Unidades>0m);
+    var standard=NormalizeComponentDistribution(item)?.FirstOrDefault(x=>x.Tipo=="padrao"&&x.Caixas>0m&&x.Unidades>0m);
     return standard!=null?standard.Unidades:
         item.QuantidadePorCaixa is >0m?item.QuantidadePorCaixa:null;
 }
