@@ -133,7 +133,8 @@ function skuRowHasData(row:ReturnType<typeof emptySku>){
   return Boolean(row.sku.trim()||row.nome.trim()||row.lote.trim()||row.material.trim()||
     row.capacidade.trim()||row.quantidade.trim()||row.quantidadePorCaixa.trim()||
     row.caixasRecebidas.trim()||row.caixasInspecionadas.trim()||row.caixasPadrao.trim()||
-    row.caixasFracionadas.trim()||row.caixasLaboratorio.trim()||row.fotoFile)
+    row.caixasFracionadas.trim()||row.caixasLaboratorio.trim()||row.unidadesLaboratorio.trim()||
+    row.unidadesPadrao.trim()||row.unidadesFracionadas.trim()||row.fotoFile)
 }
 function mergeOmieSkuRows(rows:ReturnType<typeof emptySku>[],items:OmieOrderItem[],codigo:string,pedido:string){
   const populated=rows.filter(skuRowHasData)
