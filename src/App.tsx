@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, X } from 'lucide-react'
+import { Boxes, Camera, CheckCircle2, ChevronRight, ClipboardCheck, Copy, Edit3, RefreshCw, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/supabase'
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 
@@ -8,6 +8,7 @@ const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
 // Canonical production target: password emails must never redirect to localhost.
 const RECOVERY_REDIRECT_URL = 'https://app-sgq.onrender.com/?auth=recovery'
 const ItEditorDemo=lazy(()=>import('./its/ItEditorDemo'))
+const MobileFotos=lazy(()=>import('./mobile/MobileFotos'))
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
 type ItVersion = {
@@ -341,7 +342,7 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos'>('painel')
+  const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile'>(()=>window.matchMedia('(max-width: 768px)').matches || new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'painel')
   const [itDemoOpen,setItDemoOpen]=useState(false)
   const [dashboardView,setDashboardView]=useState<'processos'|'inspecoes'|'estoque'|'concluidas'>('inspecoes')
   const [popupMessage,setPopupMessage]=useState('')
@@ -567,6 +568,8 @@ export default function App() {
       return
     }
     void loadApp().then(()=>{
+      // Mobile photo mode needs only the minimal operational bootstrap; defer heavy catalogs/stock.
+      if(tab==='fotos-mobile')return
       void loadCatalogs()
       void loadStock()
       void refreshEquipments()
@@ -1097,6 +1100,25 @@ export default function App() {
     }
     setMessage('Inspeção excluída.')
     void refreshLists()
+  }
+
+  async function refreshInspectionPhotoEvidence() {
+    if(!selectedInspectionId) return
+    const id=selectedInspectionId
+    const [details,urls]=await Promise.all([
+      apiGet<any>('/api/mobile/fotos/inspecoes/'+encodeURIComponent(id)),
+      apiGet<{photoUrls:Record<string,string|null>}>('/api/inspecoes/'+encodeURIComponent(id)+'/fotos/links'),
+    ])
+    if(details.error||!details.data){
+      setError(details.error?.message||'Não foi possível atualizar as fotos.')
+      return
+    }
+    setDetail((current:any)=>current?.id===id?{
+      ...current,photos:(details.data.photos??[]).map((p:any)=>({
+        ...p,signed_url:urls.data?.photoUrls?.[p.storage_path]??null
+      }))
+    }:current)
+    setMessage('Fotos atualizadas.')
   }
 
   async function openInspection(id: string) {
@@ -1998,6 +2020,12 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
   if (!profile) return <div className="center-screen">{error || 'Carregando perfil…'}</div>
 
+  if(tab==='fotos-mobile')return <Suspense fallback={<div className="center-screen">Carregando Modo Fotos…</div>}>
+    <MobileFotos processes={processes} inspections={inspections} canWrite={!!canWrite}
+      onRefresh={refreshLists}
+      onExit={()=>{setTab('painel');void loadCatalogs();void loadStock();void refreshEquipments()}}/>
+  </Suspense>
+
   const checklistDone = detail ? (detail.checklist?.length ?? 0) === 0 || (detail.checklistResults?.length ?? 0) >= detail.checklist.length : false
   const dimsDone = detail ? (detail.params?.length ?? 0) === 0 || detail.dimensionais_finalizados : false
   const testsDone = detail ? (detail.tests?.length ?? 0) === 0 || !!detail.testes_finalizados : false
@@ -2010,6 +2038,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <div className="sgq-side-caption">OPERAÇÃO</div>
         <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={18}/> Painel</button>
         <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>setTab('inspecoes')}><ClipboardCheck size={18}/> Inspeções</button>
+        <button className={tab==='fotos-mobile'?'selected':''} onClick={()=>setTab('fotos-mobile')}><Camera size={18}/> Modo Fotos</button>
         <button className={tab==='nova'?'selected':''} onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
         <button className={tab==='estoque'?'selected':''} onClick={()=>setTab('estoque')}><Warehouse size={18}/> Estoque</button>
         <button className={tab==='auditorias'?'selected':''} onClick={()=>{setTab('auditorias');setError('')}}><ClipboardCheck size={18}/> Inspeções Armazém</button>
@@ -2026,7 +2055,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <strong>{({
             painel:'Painel',inspecoes:'Inspeções',nova:'Nova inspeção',
             execucao:'Execução da inspeção',estoque:'Estoque',
-            auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos',
+            auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos', 'fotos-mobile':'Modo Fotos',
           } as Record<typeof tab,string>)[tab]}</strong>
         </div>
         <div className="userbox">
@@ -2613,7 +2642,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <section id="sec-fotos" className={'panel section-card inspection-stage'+(activeStage==='fotos' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
             <div className="section-title">
               <div><h2>Fotos da inspeção</h2><span className="section-note">Fotografias e identificação visual do produto.</span></div>
-              <span className="pill">{detail.photos?.length ?? 0} enviada(s)</span>
+              <div className="row-actions"><span className="pill">{detail.photos?.length ?? 0} enviada(s)</span>
+                <button className="secondary small" type="button" onClick={()=>void refreshInspectionPhotoEvidence()}><RefreshCw size={15}/> Atualizar fotos</button>
+              </div>
             </div>
 
             {detail.status!=='concluida' && (
