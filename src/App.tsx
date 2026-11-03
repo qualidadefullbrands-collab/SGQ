@@ -1049,6 +1049,7 @@ export default function App() {
     if(!code){setProcessLookupMessage('');return}
     const requestId=++fstLookupRequest.current
     setProcessLookupMessage('')
+    setOmieSkuImport(null)
     setProcessLookupBusy(true)
     const existing=processes.find(p=>fstCode(p.codigo)===code)
     if(existing){
@@ -2286,7 +2287,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
               <div className="form-grid">
                 <label>Processo
-  <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>{fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(e.target.value));return retained.length?retained:[emptySku()]});setInspection({...inspection,codigo:e.target.value})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
+  <div className="fst-input"><span>FST</span><input value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection({...inspection,codigo:inputValue})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
   {processLookupBusy && <small className="field-hint">Consultando cliente vinculado ao FST…</small>}
   {!processLookupBusy && processLookupMessage && <small className="field-hint" role="status">{processLookupMessage}</small>}
   {omieOrders?.codigo===fstCode(inspection.codigo) && <div className="row-actions">
