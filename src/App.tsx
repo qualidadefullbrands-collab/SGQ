@@ -932,6 +932,7 @@ export default function App() {
 
   function resetNewInspection() {
     createRequestId.current=crypto.randomUUID()
+    autoNfeRef.current=null
     setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0);setExpandedSkuIndex(0)
     manualItSelection.current=false;lastItSuggested.current='';setItSuggestionNote('');setProcessLookupMessage('')
     fstLookupRequest.current++;setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('')
@@ -986,6 +987,7 @@ export default function App() {
   }
 
   function reuseProcess(p: ProcessRow) {
+    autoNfeRef.current=null
     fstLookupRequest.current++
     setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('')
     setEditingInspectionId(null);setEditingProcessId(null);
@@ -1041,6 +1043,7 @@ export default function App() {
   }
 
   const fstLookupRequest=useRef(0)
+  const autoNfeRef=useRef<{fst:string;numero:string}|null>(null)
   const productLookupTimers=useRef<Record<number,number>>({})
   function queueProductSuggestions(index:number, value:string) {
     const prior=productLookupTimers.current[index]
@@ -1155,16 +1158,29 @@ export default function App() {
       setOmieSkuReviewError('Confira as quantidades: preencha valores numéricos maiores ou iguais a zero.')
       return
     }
-    const duplicated=review.itens.filter(item=>
-      skuRowsRef.current.filter(row=>row.sku.trim().toUpperCase()===item.sku.trim().toUpperCase()).length>1
-    )
     setSkuRows(rows=>applyOmieReviewedRows(rows,review))
     setExpandedSkuIndex(null)
     setOmieSkuReview(null)
     setOmieSkuReviewError('')
-    setProcessLookupMessage(review.itens.length+' código(s) revisados do PV '+review.numeroPedido+
-      '. Quantidades atualizadas no formulário; clique em Salvar para registrar a inspeção.'+
-      (duplicated.length?' SKUs com vários lotes foram preservados: '+duplicated.map(x=>x.sku).join(', ')+'.':''))
+    setProcessLookupMessage('')
+  }
+
+  async function lookupFstNfe(code:string,lookupId:number){
+    // Supplier NF-e lookup is deliberately asynchronous and separate from SKU import.
+    try{
+      const {data,error}=await authClient.functions.invoke('sgq-omie-fst',
+        {body:{codigo:code,modo:'nfe'}})
+      if(error||lookupId!==fstLookupRequest.current)return
+      const numero=String(data?.numeroNota||'').trim()
+      if(data?.status!=='matched'||!numero)return
+      setInspection(current=>{
+        if(fstCode(current.codigo)!==code || current.notaFiscal.trim())return current
+        autoNfeRef.current={fst:code,numero}
+        return {...current,notaFiscal:numero}
+      })
+    }catch{
+      // Lookup failure must never overwrite a manually entered NF number.
+    }
   }
 
   async function lookupFstClient(value:string,codigoPedido?:number){
@@ -1194,10 +1210,11 @@ export default function App() {
         return
       }
       if(!data?.found){
-        setProcessLookupMessage(existing?'Processo cadastrado no SGQ; itens não localizados no Omie.':
-          'Processo '+formatFst(code)+' não localizado no Omie. Verifique o código completo.')
+        setProcessLookupMessage(existing?'':'Processo não localizado no Omie.')
         return
       }
+      if(Number.isFinite(Number(data.projectId))&&Number(data.projectId)>0)
+        void lookupFstNfe(code,requestId)
       if(data.cliente)setInspection(old=>fstCode(old.codigo)===code?{...old,cliente:old.cliente||String(data.cliente)}:old)
       const orders:OmieOrder[]=Array.isArray(data.pedidos)?data.pedidos.filter((o:any)=>
         Number.isInteger(Number(o.codigoPedido))&&Number(o.codigoPedido)>0).map((o:any)=>({
@@ -1218,8 +1235,7 @@ export default function App() {
         // Opening the popup does not mutate inspection products. Its close action
         // applies all reviewed quantities in a single state update.
         openOmieSkuReview(suggestion)
-        setProcessLookupMessage(itens.length+' SKU(s) encontrados no PV '+numeroPedido+
-          '. Revise as quantidades no popup e feche para atualizar o formulário.')
+        setProcessLookupMessage('')
       }else{
         setOmieSkuImport(null)
         setProcessLookupMessage(data.itensDisponiveis===false?
@@ -2412,7 +2428,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <div className="sgq-fst-field">
                   <label htmlFor="sgq-fst-input">Processo</label>
                   <div className="sgq-fst-controls">
-                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection({...inspection,codigo:inputValue})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
+                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection(current=>{const prev=autoNfeRef.current;const clear=prev&&fstCode(inputValue)!==prev.fst&&current.notaFiscal===prev.numero;if(clear)autoNfeRef.current=null;return {...current,codigo:inputValue,notaFiscal:clear?'':current.notaFiscal}})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
                     <button type="button" className="secondary sgq-fst-retry" disabled={processLookupBusy||!fstCode(inspection.codigo)}
                       onMouseDown={e=>e.preventDefault()} onClick={()=>void lookupFstClient(inspection.codigo)} title="Buscar cliente e SKUs no Omie">
                       <Search size={16}/> Consultar
@@ -2424,7 +2440,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
                 </div>
                 <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
-                <label>Nota fiscal<input value={inspection.notaFiscal} onChange={(e)=>setInspection({...inspection,notaFiscal:e.target.value})}/></label>
+                <label>Nota fiscal<input value={inspection.notaFiscal} onChange={(e)=>{autoNfeRef.current=null;setInspection({...inspection,notaFiscal:e.target.value})}}/></label>
                 <label>Chegada no CD<input type="date" value={inspection.chegadaCd} onChange={(e)=>setInspection({...inspection,chegadaCd:e.target.value})}/></label>
                 <label>Origem<input value={inspection.origem} onChange={(e)=>setInspection({...inspection,origem:e.target.value})} placeholder="China"/></label>
                 <div className="field-label"><span>Transporte</span><div className="transport-checks">
@@ -2445,7 +2461,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   </select>
                 </label>
                 <label className="span-2">Observação interna
-                  <textarea rows={3} value={inspection.observacaoInterna} onChange={(e)=>setInspection({...inspection,observacaoInterna:e.target.value})} placeholder="Ex.: 60 un retiradas no laboratório para retenção; caixa fracionada com 16 un."/>
+                  <textarea rows={3} value={inspection.observacaoInterna} onChange={(e)=>setInspection({...inspection,observacaoInterna:e.target.value})}/>
                   
                 </label>
               </div>

@@ -36,6 +36,67 @@ function canonical(value:unknown){
 const projectsUrl="https://app.omie.com.br/api/v1/geral/projetos/";
 const ordersUrl="https://app.omie.com.br/api/v1/produtos/pedido/";
 const customersUrl="https://app.omie.com.br/api/v1/geral/clientes/";
+const receiptsUrl="https://app.omie.com.br/api/v1/produtos/recebimentonfe/";
+const receiptCache=new Map<number,{timestamp:number;result:any}>();
+const receiptPageSize=100;
+const receiptLimitPages=25;
+
+// Incoming supplier NF-e: only an explicit Omie project association can
+// automatically populate a legal document number. SKU/client similarity is unsafe.
+function receiptsForProject(rows:any[],projectId:number){
+  const byKey=new Map<string,{numero:string;serie:string;chave:string;recebId:number}>();
+  for(const row of rows){
+    if(Number(row?.infoAdicionais?.nIdProjeto)!==projectId)continue;
+    const status=row?.infoCadastro||{};
+    if(status.cCancelada==="S"||status.cDenegado==="S"||status.cDevolvido==="S"||status.cDevolvidoParc==="S")continue;
+    const head=row?.cabec||{};
+    const raw=String(head.cNumeroNFe||"").trim();
+    if(!/^\d{1,12}$/.test(raw))continue;
+    const numero=raw.replace(/^0+(?=\d)/,"");
+    const serie=String(head.cSerieNFe||"").trim();
+    const chave=String(head.cChaveNfe||"").trim();
+    const recebId=Number(head.nIdReceb||0);
+    const key=chave.length===44?chave:serie+"/"+numero+"/"+recebId;
+    byKey.set(key,{numero,serie,chave,recebId});
+  }
+  return [...byKey.values()];
+}
+async function lookupIncomingNfe(projectId:number,appKey:string,appSecret:string){
+  const previous=receiptCache.get(projectId);
+  if(previous && Date.now()-previous.timestamp<120000)return previous.result;
+  // Two-year horizon, evaluated independently from the SKU lookup so this
+  // paginated operation never delays opening the inspection or product popup.
+  const since=new Date(Date.now()-730*24*3600*1000);
+  const formatted=[String(since.getUTCDate()).padStart(2,"0"),String(since.getUTCMonth()+1).padStart(2,"0"),since.getUTCFullYear()].join("/");
+  const payload=(page:number)=>({
+    nPagina:page,nRegistrosPorPagina:receiptPageSize,cExibirDetalhes:"S",dtEmissaoDe:formatted
+  });
+  const first=await omie(receiptsUrl,"ListarRecebimentos",payload(1),appKey,appSecret);
+  if(!first)return {status:"unavailable",numeroNota:null};
+  const pages=Number(first.nTotalPaginas||1);
+  if(!Number.isInteger(pages)||pages<1||pages>receiptLimitPages)
+    return {status:"incomplete",numeroNota:null};
+  let matches=receiptsForProject(Array.isArray(first.recebimentos)?first.recebimentos:[],projectId);
+  let complete=true;
+  // Keep Omie request concurrency bounded, and stop if multiple distinct NF-es match.
+  for(let page=2;page<=pages;page+=4){
+    const batch=Array.from({length:Math.min(4,pages-page+1)},(_,i)=>page+i);
+    const responses=await Promise.all(batch.map(n=>omie(receiptsUrl,"ListarRecebimentos",payload(n),appKey,appSecret)));
+    for(const response of responses){
+      if(!response){complete=false;continue}
+      matches.push(...receiptsForProject(Array.isArray(response.recebimentos)?response.recebimentos:[],projectId))
+    }
+    if(matches.length>1)break;
+  }
+  const unique=new Map(matches.map(item=>[item.chave||item.serie+"/"+item.numero+"/"+item.recebId,item]));
+  matches=[...unique.values()];
+  const result=!complete?{status:"incomplete",numeroNota:null}:
+    matches.length===1?{status:"matched",numeroNota:matches[0].numero,serie:matches[0].serie,source:"recebimento_nfe"}:
+    {status:matches.length>1?"multiple":"not_found",numeroNota:null};
+  receiptCache.set(projectId,{timestamp:Date.now(),result});
+  return result;
+}
+
 // ConsultarPedido returns { pedido_venda_produto: { cabecalho, det } } in Omie's official contract.
 function unwrapOmiePedido(response:any):any|null{
   const nested=response?.pedido_venda_produto;
@@ -68,7 +129,7 @@ Deno.serve(async req=>{
     const jwt=authorization.startsWith("Bearer ")?authorization.slice(7):"";
     const {data:{user}}=await admin.auth.getUser(jwt);
     if(!user)return reply({found:false,error:"unauthorized"},401);
-    const {codigo,codigoPedido:pedidoSolicitado}=await req.json();
+    const {codigo,codigoPedido:pedidoSolicitado,modo}=await req.json();
     const key=canonical(codigo);
     if(!/^\d{1,8}(?:-[A-Z0-9]+)?$/.test(key))
       return reply({found:false,error:"invalid_code"},400);
@@ -89,6 +150,10 @@ Deno.serve(async req=>{
       const projectId=Number(project.codigo);
       if(!Number.isFinite(projectId)||projectId<=0)
         return reply({found:true,cliente:null,source:"omie_projeto",matchedCode:project.nome,reason:"project_id_unavailable"});
+      if(modo==="nfe"){
+        const nf=await lookupIncomingNfe(projectId,appKey,appSecret);
+        return reply({found:true,matchedCode:project.nome,projectId,...nf});
+      }
       // The project catalog does not contain a client. A sales order associated
       // with the exact project is an auditable relationship to the customer.
       const orders=await omie(ordersUrl,"ListarPedidos",{
