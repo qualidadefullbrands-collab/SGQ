@@ -15,6 +15,7 @@ test('phone automatically opens a dedicated photo-only screen without QR codes',
  assert.match(app,/<MobileFotos processes=\{processes\} inspections=\{inspections\}/)
  assert.doesNotMatch(mobile,/QrCode|qr_token|scan QR/i)
  assert.match(mobile,/Processos em andamento/)
+ assert.doesNotMatch(mobile,/COLETA DE EVIDÊNCIAS/i)
 })
 test('mobile lists only in-progress inspections associated with operational processes',()=>{
  assert.match(mobile,/i\.status!=='em_andamento'/)
