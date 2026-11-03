@@ -30,7 +30,8 @@ test('camera and gallery can capture multiple evidence photos with captions',()=
  assert.match(mobile,/photo\.legenda\.trim\(\)/)
  assert.match(mobile,/supabase\.storage\.from\('inspecao-fotos'\)\.upload/)
  assert.match(mobile,/\/fotos\/registrar/)
- assert.doesNotMatch(mobile,/upsert:true/)\n assert.match(mobile,/already exists\|duplicate\|resource already exists\|409/)
+ assert.doesNotMatch(mobile,/upsert:true/)
+ assert.match(mobile,/already exists\|duplicate\|resource already exists\|409/)
  assert.match(mobile,/createImageBitmap/)
 })
 test('mobile does not contain inspection completion or mutation of measurements',()=>{
