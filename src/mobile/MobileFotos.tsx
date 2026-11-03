@@ -117,8 +117,11 @@ export default function MobileFotos({processes,inspections,canWrite,onRefresh,on
     const file=await compressed(photo.file)
     // Stable storage path makes retrying a failed request safe.
     const path=inspectionId+'/gerais/'+photo.id+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
-    const up=await supabase.storage.from('inspecao-fotos').upload(path,file,{contentType:file.type||'image/jpeg',upsert:true})
-    if(up.error)throw new Error(up.error.message)
+    const up=await supabase.storage.from('inspecao-fotos').upload(path,file,{contentType:file.type||'image/jpeg'})
+    // The bucket deliberately has no UPDATE policy: on retry, an already-created object
+    // means we should proceed to the idempotent registration, not overwrite evidence.
+    if(up.error && !/already exists|duplicate|resource already exists|409/i.test(up.error.message))
+      throw new Error(up.error.message)
     const saved=await apiPost<{salvas:number}>('/api/inspecoes/'+encodeURIComponent(inspectionId)+'/fotos/registrar',{fotos:[{storagePath:path,legenda:photo.legenda.trim()}]})
     if(saved.error||!saved.data?.salvas)throw new Error(saved.error?.message||'Falha ao registrar foto.')
     successful.add(photo.id)
