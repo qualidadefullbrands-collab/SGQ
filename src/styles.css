@@ -2392,3 +2392,52 @@ body:has(.login-shell) {background:#f3f6fa!important;color:#20374a}
   .sgq-operational-shell .equipment-history .equipment-event-form > .span-2 {grid-column:auto}
   .sgq-operational-shell .equipment-history .equipment-event-form > button {width:100%;justify-content:center}
 }
+
+
+/* SGQ · dados gerais: lookup messages must never push the adjacent client field down. */
+.sgq-operational-shell .inspection-form .form-grid > label {
+  min-width:0;
+  align-content:start;
+  grid-auto-rows:max-content;
+}
+.sgq-operational-shell .inspection-form .form-grid > .sgq-fst-field {
+  min-width:0;
+  display:grid;
+  align-content:start;
+  grid-auto-rows:max-content;
+  gap:8px;
+}
+.sgq-operational-shell .sgq-fst-field > label {
+  display:block;
+  color:#344054;
+  font-size:inherit;
+  font-weight:700;
+}
+.sgq-operational-shell .sgq-fst-controls {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:stretch;
+  gap:8px;
+  min-width:0;
+}
+.sgq-operational-shell .sgq-fst-controls > .fst-input {
+  min-width:0;
+  grid-template-columns:auto minmax(0,1fr);
+}
+.sgq-operational-shell .sgq-fst-controls > .fst-input > input {
+  min-width:0;
+  width:100%;
+}
+.sgq-operational-shell .sgq-fst-retry {
+  white-space:nowrap;
+  min-height:48px;
+  padding:10px 13px;
+  border:1px solid #c8dae5;
+  background:#f1f7fb;
+  color:#22658a;
+  border-radius:10px;
+  font-weight:750;
+}
+@media(max-width:420px){
+  .sgq-operational-shell .sgq-fst-retry {padding:10px;gap:4px;font-size:12px}
+}
