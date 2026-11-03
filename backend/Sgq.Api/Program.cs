@@ -2205,23 +2205,75 @@ app.MapPost("/api/inspecoes/{id}/chat", async (string id,InspectionChatRequest i
     catch(Exception e){return Results.Json(Error("Falha ao processar mensagem da inspeção.",e.Message),statusCode:500);}
 });
 
+// Mobile photo mode: only the inspection identity and existing evidence.
+// Keep the full checklist, measurements, stock and document generation off this route.
+app.MapGet("/api/mobile/fotos/inspecoes/{id}", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var rows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,numero,status,excluido_em,grupos_inspecao(id,processo_id,processos(id,excluido_em))&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+        var (ins,found)=FirstRow(rows);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var record=ins!.Value;
+        var status=Field(record,"status");
+        if(status!="em_andamento")return Results.Json(Error("Somente inspeções em andamento podem receber fotos."),statusCode:409);
+        var group=record.GetProperty("grupos_inspecao");
+        if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process)
+           || process.ValueKind!=JsonValueKind.Object ||
+           (process.TryGetProperty("excluido_em",out var archived)&&archived.ValueKind!=JsonValueKind.Null))
+            return Results.Json(Error("Processo arquivado ou indisponível."),statusCode:409);
+
+        var photos=await RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
+            $"select=id,storage_path,legenda,criado_em&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+        return Results.Ok(new {data=new {
+            inspecao=new {id,numero=Field(record,"numero"),status},
+            photos=photos
+        },error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar fotos da inspeção.",e.Message),statusCode:500);}
+});
+
 app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInspectionPhotosRequest input,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
     {
         var token=Token(request);
         var client=factory.CreateClient("supabase");
+        var inspectionRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,status,grupos_inspecao(id,processos(id,excluido_em))&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+        var (ins,found)=FirstRow(inspectionRows);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var record=ins!.Value;
+        if(Field(record,"status")!="em_andamento")return Results.Json(Error("Inspeção não está em andamento."),statusCode:409);
+        var group=record.GetProperty("grupos_inspecao");
+        if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process) ||
+           process.ValueKind!=JsonValueKind.Object ||
+           (process.TryGetProperty("excluido_em",out var archived)&&archived.ValueKind!=JsonValueKind.Null))
+            return Results.Json(Error("Processo arquivado ou indisponível."),statusCode:409);
         var saved=0;
         foreach(var photo in input.Fotos ?? [])
         {
-            if(string.IsNullOrWhiteSpace(photo.StoragePath)||string.IsNullOrWhiteSpace(photo.Legenda)) continue;
-            await RestAsync(client,token,HttpMethod.Post,"inspecao_fotos","",
-                new {inspecao_id=id,storage_path=photo.StoragePath,legenda=photo.Legenda.Trim()},"return=minimal");
-            if(!string.IsNullOrWhiteSpace(photo.ProductId)&&!string.IsNullOrWhiteSpace(photo.ProductPhotoPath))
+            if(string.IsNullOrWhiteSpace(photo.StoragePath)||string.IsNullOrWhiteSpace(photo.Legenda))continue;
+            if(!photo.StoragePath.StartsWith(id+"/gerais/",StringComparison.Ordinal))
+                return Results.Json(Error("A foto não pertence a esta inspeção."),statusCode:400);
+            // A repeat request after mobile network failure must not create duplicate evidence.
+            var existing=await RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
+                $"select=id&inspecao_id=eq.{Uri.EscapeDataString(id)}&storage_path=eq.{Uri.EscapeDataString(photo.StoragePath)}&limit=1");
+            var (_,alreadySaved)=FirstRow(existing);
+            if(!alreadySaved)
             {
-                await RestAsync(client,token,HttpMethod.Patch,"produtos",
-                    $"id=eq.{Uri.EscapeDataString(photo.ProductId)}",
-                    new {foto_principal_path=photo.ProductPhotoPath,atualizado_em=DateTimeOffset.UtcNow},"return=minimal");
+                await RestAsync(client,token,HttpMethod.Post,"inspecao_fotos","",
+                    new {inspecao_id=id,storage_path=photo.StoragePath,legenda=photo.Legenda.Trim()},"return=minimal");
+                if(!string.IsNullOrWhiteSpace(photo.ProductId)&&!string.IsNullOrWhiteSpace(photo.ProductPhotoPath))
+                {
+                    await RestAsync(client,token,HttpMethod.Patch,"produtos",
+                        $"id=eq.{Uri.EscapeDataString(photo.ProductId)}",
+                        new {foto_principal_path=photo.ProductPhotoPath,atualizado_em=DateTimeOffset.UtcNow},"return=minimal");
+                }
             }
             saved++;
         }
