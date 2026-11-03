@@ -3244,12 +3244,22 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   }}/></label>
                   <label>Caixas inspecionadas<input type="number" step="1" value={row.caixasInspecionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasInspecionadas:e.target.value}:x)})}/></label>
                 </div>
+                <div className="field-label"><span>Distribuição para armazenagem · {row.sku || 'Componente '+(i+1)}</span></div>
                 <div className="distribution-grid compact">
-                  <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" value={row.caixasPadrao} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'caixasPadrao',e.target.value):x)})}/></label><label>Un/caixa<input type="number" value={row.unidadesPadrao} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'unidadesPadrao',e.target.value):x)})}/></label></div>
-                  <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" value={row.caixasFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'caixasFracionadas',e.target.value):x)})}/></label><label>Un/caixa<input type="number" value={row.unidadesFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'unidadesFracionadas',e.target.value):x)})}/></label></div>
-                  <div className="distribution-line"><strong>Laboratório</strong><label>Caixas<input type="number" value={row.caixasLaboratorio} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'caixasLaboratorio',e.target.value):x)})}/></label><label>Un/caixa<input type="number" value={row.unidadesLaboratorio} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'unidadesLaboratorio',e.target.value):x)})}/></label></div>
+                  <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasPadrao} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'caixasPadrao',e.target.value):x)})}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesPadrao||row.quantidadePorCaixa} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'unidadesPadrao',e.target.value):x)})}/></label></div>
+                  <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'caixasFracionadas',e.target.value):x)})}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'unidadesFracionadas',e.target.value):x)})}/></label></div>
                 </div>
-                {!!d.groups.length && <small className="field-hint">{d.expression} = {d.units.toLocaleString('pt-BR')} un</small>}
+                <div className="lab-withdrawal">
+                  <label>Retirada para laboratório (unidades)
+                    <input type="number" min="0" step="1" value={row.unidadesLaboratorio} onChange={e=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?setLaboratoryUnits(x,e.target.value):x)})}/>
+                  </label>
+                  <small>Não acrescenta caixas à armazenagem.</small>
+                </div>
+                {!!d.groups.length && <small className={'field-status '+((d.boxes!==Number(row.caixasRecebidas)||Math.abs(d.totalUnits-Number(row.quantidade))>0.0001)?'bad':'ok')}>
+                  Armazenagem {d.units.toLocaleString('pt-BR')} un ({d.boxes} caixa(s))
+                  {' + '}laboratório {d.labUnits.toLocaleString('pt-BR')} un
+                  {' = '}{d.totalUnits.toLocaleString('pt-BR')} un recebidas
+                </small>}
               </article>})}
             </div>
             <button className="secondary" type="button" onClick={()=>setEditingInspectionData({...editingInspectionData,itens:[...(editingInspectionData.itens ?? []),{...emptySku(),processoItemId:null}]})}><Plus size={16}/> Adicionar produto à inspeção</button>
