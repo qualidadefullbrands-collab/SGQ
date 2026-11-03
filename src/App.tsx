@@ -565,15 +565,6 @@ export default function App() {
   }, [skuRows])
 
   const isComponentSet = skuRows.length > 1
-  const totalBoxesReceived = useMemo(
-    () => skuRows.reduce((sum, r) => sum + (Number(r.caixasRecebidas) || 0), 0),
-    [skuRows],
-  )
-  const totalBoxesToInspect = useMemo(
-    () => skuRows.reduce((sum, r) => sum + (Number(r.caixasInspecionadas) || 0), 0),
-    [skuRows],
-  )
-
   const previewPlan = useMemo(
     () => samplingPlan(statisticalLot, inspection.inspectionLevel),
     [statisticalLot, inspection.inspectionLevel],
@@ -2435,13 +2426,28 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                         }}/></label>
                         <label>Caixas inspecionadas<input type="number" step="0.01" value={row.caixasInspecionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasInspecionadas:e.target.value}:r))}/><small className="field-hint">Sugerido pela tabela da IT; pode ser alterado.</small></label>
                         <div className="span-2 box-distribution-editor">
-                          <div className="field-label"><span>Distribuição das caixas</span></div>
+                          <div className="field-label"><span>Distribuição para armazenagem · {row.sku || (isComponentSet?'Componente '+(i+1):'Produto')}</span></div>
                           <div className="distribution-grid">
-                            <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasPadrao} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasPadrao',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesPadrao || row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...updateBoxDistributionField(r,'unidadesPadrao',e.target.value),quantidadePorCaixa:e.target.value}:r))}/></label></div>
+                            <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasPadrao} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasPadrao',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesPadrao || row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'unidadesPadrao',e.target.value):r))}/></label></div>
                             <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasFracionadas',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'unidadesFracionadas',e.target.value):r))}/></label></div>
-                            <div className="distribution-line"><strong>Retirada laboratório</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasLaboratorio} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasLaboratorio',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesLaboratorio} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'unidadesLaboratorio',e.target.value):r))}/></label></div>
                           </div>
-                          {(()=>{const d=boxDistributionTotals(row); if(!d.groups.length) return null; const mismatch=(d.boxes!==Number(row.caixasRecebidas) || Math.abs(d.units-Number(row.quantidade))>0.0001); return <small className={'field-status '+(mismatch?'bad':'ok')}>{d.expression} = {d.units.toLocaleString('pt-BR')} un · {d.boxes} caixa(s){mismatch?' — confira com os totais informados.':' — conferência fechada.'}</small>})()}
+                          <div className="lab-withdrawal">
+                            <label>Retirada para laboratório (unidades)
+                              <input type="number" min="0" step="1" value={row.unidadesLaboratorio} onChange={e=>setSkuRows(skuRows.map((r,j)=>j===i?setLaboratoryUnits(r,e.target.value):r))}/>
+                            </label>
+                            <small>Retirada em unidades, sem acrescentar caixas à armazenagem.</small>
+                          </div>
+                          {(()=>{
+                            const d=boxDistributionTotals(row)
+                            if(!d.groups.length) return null
+                            const mismatch=d.boxes!==Number(row.caixasRecebidas) || Math.abs(d.totalUnits-Number(row.quantidade))>0.0001
+                            return <small className={'field-status '+(mismatch?'bad':'ok')}>
+                              Armazenagem: {d.units.toLocaleString('pt-BR')} un ({d.boxes} caixa(s))
+                              {' + '}laboratório: {d.labUnits.toLocaleString('pt-BR')} un
+                              {' = '}{d.totalUnits.toLocaleString('pt-BR')} un recebidas
+                              {mismatch?' — confira as quantidades deste componente.':' — conferência fechada.'}
+                            </small>
+                          })()}
                         </div>
                         {isComponentSet && <label>Unidades por conjunto<input type="number" step="0.01" value={row.unidadesPorConjunto} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,unidadesPorConjunto:e.target.value}:r))}/></label>}
                       </div>
@@ -2475,7 +2481,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <div><small>Tipo</small><strong>{isComponentSet?'Conjunto / componentes':'Produto independente'}</strong></div>
               <div><small>Lote estatístico</small><strong>{statisticalLot?statisticalLot.toLocaleString('pt-BR'):'—'}</strong></div>
               <div><small>Plano</small><strong>{previewPlan.code?(previewPlan.code+' · '+previewPlan.sample+' un.'):'—'}</strong></div>
-              <div><small>Caixas</small><strong>{totalBoxesToInspect?(totalBoxesToInspect+' a inspecionar'):'—'}</strong></div>
+              <div><small>Distribuição de caixas</small><strong>Por componente / SKU</strong></div>
             </section>
 
             <div className="actions inspection-create-actions">
