@@ -3357,6 +3357,83 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
 
+
+      {omieOrderPickerOpen && omieOrders?.codigo===fstCode(inspection.codigo) && (
+        <div className="modal-backdrop sgq-omie-modal-layer">
+          <article className="sample-detail omie-review-modal omie-order-picker" role="dialog" aria-modal="true" aria-labelledby="sgq-omie-order-title">
+            <button className="close" type="button" aria-label="Fechar seleção de pedido" onClick={()=>setOmieOrderPickerOpen(false)}>×</button>
+            <span className="eyebrow">{formatFst(omieOrders.codigo)}</span>
+            <h2 id="sgq-omie-order-title">Selecionar pedido</h2>
+            <p>Este processo tem mais de um pedido vinculado. Selecione o PV para conferir seus componentes.</p>
+            <label className="omie-order-selector">Pedido de venda
+              <select aria-label="Selecionar pedido Omie" value={omieSelectedOrder} onChange={e=>setOmieSelectedOrder(e.target.value)}>
+                <option value="">Selecione um pedido do projeto</option>
+                {omieOrders.pedidos.map(p=><option key={p.codigoPedido} value={p.codigoPedido}>
+                  PV {p.numeroPedido} · {p.quantidadeItens} item(ns)
+                </option>)}
+              </select>
+            </label>
+            <div className="omie-review-actions">
+              <button type="button" className="secondary" onClick={()=>setOmieOrderPickerOpen(false)}>Fechar</button>
+              <button type="button" className="primary" disabled={!omieSelectedOrder||processLookupBusy}
+                onClick={()=>void lookupFstClient(inspection.codigo,Number(omieSelectedOrder))}>
+                Consultar SKUs
+              </button>
+            </div>
+          </article>
+        </div>
+      )}
+      {omieSkuReview && omieSkuReview.codigo===fstCode(inspection.codigo) && (
+        <div className="modal-backdrop sgq-omie-modal-layer">
+          <article className="sample-detail omie-review-modal" role="dialog" aria-modal="true"
+            aria-labelledby="sgq-omie-review-title" onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();closeOmieSkuReview()}}}>
+            <button className="close" type="button" aria-label="Atualizar e fechar tabela de SKUs" onClick={closeOmieSkuReview}>×</button>
+            <span className="eyebrow">{formatFst(omieSkuReview.codigo)} · PV {omieSkuReview.numeroPedido}</span>
+            <h2 id="sgq-omie-review-title">Conferir códigos e quantidades</h2>
+            <p>Corrija a quantidade recebida de cada componente, se necessário.</p>
+            <div className="omie-review-table-scroll">
+              <table className="omie-review-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Código / SKU</th>
+                    <th scope="col">Descrição</th>
+                    <th scope="col" className="omie-review-number">Qtd. pedido</th>
+                    <th scope="col" className="omie-review-number">Qtd. recebida</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {omieSkuReview.itens.map(item=><tr key={item.sku}>
+                    <td><strong>{item.sku}</strong></td>
+                    <td>{item.descricao}</td>
+                    <td className="omie-review-number">{item.quantidadePedido.toLocaleString('pt-BR',{maximumFractionDigits:3})}</td>
+                    <td className="omie-review-edit">
+                      <input type="number" min="0" step="any"
+                        aria-label={'Quantidade recebida '+item.sku}
+                        aria-invalid={item.quantidadeInformada.trim()===''||!Number.isFinite(Number(item.quantidadeInformada))||Number(item.quantidadeInformada)<0}
+                        value={item.quantidadeInformada}
+                        onChange={e=>updateOmieReviewQuantity(item.sku,e.target.value)}/>
+                      {skuRows.filter(row=>row.sku.trim().toUpperCase()===item.sku.trim().toUpperCase()).length>1 &&
+                        <small>Vários lotes: manteremos as quantidades existentes.</small>}
+                    </td>
+                  </tr>)}
+                </tbody>
+                <tfoot><tr>
+                  <th colSpan={2} scope="row">Total</th>
+                  <td className="omie-review-number">{omieSkuReview.itens.reduce((sum,item)=>sum+item.quantidadePedido,0).toLocaleString('pt-BR',{maximumFractionDigits:3})}</td>
+                  <td className="omie-review-number">{omieSkuReview.itens.reduce((sum,item)=>sum+(Number(item.quantidadeInformada)||0),0).toLocaleString('pt-BR',{maximumFractionDigits:3})}</td>
+                </tr></tfoot>
+              </table>
+            </div>
+            {omieSkuReviewError && <p className="omie-review-validation" role="alert">{omieSkuReviewError}</p>}
+            <div className="omie-review-actions">
+              <span className="omie-review-note">Ao fechar, os componentes e cálculos da inspeção serão atualizados.</span>
+              <button type="button" className="secondary" onClick={()=>{setOmieSkuReview(null);setOmieSkuReviewError('');setProcessLookupMessage('Revisão descartada. Os componentes permanecem inalterados.')}}>Descartar</button>
+              <button type="button" className="primary" onClick={closeOmieSkuReview}>Atualizar e fechar</button>
+            </div>
+          </article>
+        </div>
+      )}
+
       {!!pendingModal.length && (
         <div className="modal-backdrop" onClick={()=>setPendingModal([])}>
           <article className="sample-detail pending-detail" onClick={(e)=>e.stopPropagation()}>
