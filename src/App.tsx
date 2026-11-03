@@ -129,6 +129,8 @@ const emptySku = () => ({
 type OmieOrderItem={sku:string;descricao:string;quantidade:number}
 type OmieOrder={codigoPedido:number;numeroPedido:string;quantidadeItens:number}
 type OmieSkuImport={codigo:string;numeroPedido:string;itens:OmieOrderItem[]}
+type OmieSkuReviewLine={sku:string;descricao:string;quantidadePedido:number;quantidadeInformada:string}
+type OmieSkuReview={codigo:string;numeroPedido:string;itens:OmieSkuReviewLine[]}
 function skuRowHasData(row:ReturnType<typeof emptySku>){
   return Boolean(row.sku.trim()||row.nome.trim()||row.lote.trim()||row.material.trim()||
     row.capacidade.trim()||row.quantidade.trim()||row.quantidadePorCaixa.trim()||
@@ -150,6 +152,63 @@ function mergeOmieSkuRows(rows:ReturnType<typeof emptySku>[],items:OmieOrderItem
       omieStatus:'found',omieMessage:'PV '+pedido+' · confira a quantidade efetivamente recebida.'})
   }
   return [...populated,...added].length?[...populated,...added]:rows
+}
+// Review first; only apply the Omie quantities to the inspection after the popup closes.
+function prepareOmieSkuReview(suggestion:OmieSkuImport,rows:ReturnType<typeof emptySku>[]):OmieSkuReview {
+  const existing=new Map<string,ReturnType<typeof emptySku>[]>()
+  for(const row of rows){
+    const key=row.sku.trim().toUpperCase()
+    if(!key)continue
+    const same=existing.get(key)||[]
+    same.push(row)
+    existing.set(key,same)
+  }
+  return {codigo:suggestion.codigo,numeroPedido:suggestion.numeroPedido,
+    itens:suggestion.itens.map(item=>{
+      const same=existing.get(item.sku.trim().toUpperCase())||[]
+      return {
+        sku:item.sku,descricao:item.descricao,quantidadePedido:item.quantidade,
+        // For an existing single SKU, default to what the operator already typed.
+        quantidadeInformada:same.length===1&&same[0].quantidade.trim()!==''?
+          same[0].quantidade:String(item.quantidade)
+      }
+    })
+  }
+}
+function validOmieSkuReview(review:OmieSkuReview){
+  return review.itens.length>0 && review.itens.every(item=>{
+    const value=item.quantidadeInformada.trim()
+    return value!==''&&Number.isFinite(Number(value))&&Number(value)>=0
+  })
+}
+function applyOmieReviewedRows(rows:ReturnType<typeof emptySku>[],review:OmieSkuReview){
+  const result=rows.filter(skuRowHasData).map(row=>({...row}))
+  const matches=new Map<string,number[]>()
+  for(let i=0;i<result.length;i++){
+    const sku=result[i].sku.trim().toUpperCase()
+    if(!sku)continue
+    const indexes=matches.get(sku)||[]
+    indexes.push(i);matches.set(sku,indexes)
+  }
+  for(const item of review.itens){
+    const code=item.sku.trim().toUpperCase()
+    const indices=matches.get(code)||[]
+    // Never overwrite multiple lot rows with one order total (which would duplicate units).
+    if(indices.length>1)continue
+    const amount=item.quantidadeInformada.trim()
+    if(indices.length===1){
+      const i=indices[0],old=result[i]
+      result[i]={...old,quantidade:amount,nome:old.nome.trim()||item.descricao,
+        omieSourceFst:review.codigo,omieSourcePedido:review.numeroPedido}
+    }else{
+      const i=result.length
+      result.push({...emptySku(),sku:code,nome:item.descricao,quantidade:amount,
+        omieSourceFst:review.codigo,omieSourcePedido:review.numeroPedido,
+        omieStatus:'found',omieMessage:'PV '+review.numeroPedido+' · confirme o recebimento físico.'})
+      matches.set(code,[i])
+    }
+  }
+  return result.length?result:[emptySku()]
 }
 function fstCode(value: string | null | undefined) {
   const raw=String(value ?? '').trim().toUpperCase().replace(/[–—]/g,'-')
@@ -494,6 +553,9 @@ export default function App() {
   const skuRowsRef=useRef(skuRows)
   useEffect(()=>{skuRowsRef.current=skuRows},[skuRows])
   const [omieSkuImport,setOmieSkuImport]=useState<OmieSkuImport|null>(null)
+  const [omieSkuReview,setOmieSkuReview]=useState<OmieSkuReview|null>(null)
+  const [omieSkuReviewError,setOmieSkuReviewError]=useState('')
+  const [omieOrderPickerOpen,setOmieOrderPickerOpen]=useState(false)
   const [omieOrders,setOmieOrders]=useState<{codigo:string;pedidos:OmieOrder[]}|null>(null)
   const [omieSelectedOrder,setOmieSelectedOrder]=useState('')
   const productSearchTimers = useRef<Record<number,number>>({})
