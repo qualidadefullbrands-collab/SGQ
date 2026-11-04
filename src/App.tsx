@@ -3050,7 +3050,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
           <section id="sec-dados" className={'panel section-card internal-note-panel inspection-stage'+(activeStage==='dados'?'':' inspection-stage-hidden')}>
             <div className="section-title"><div><h2>Dados iniciais da inspeção</h2></div>
-              {canWrite && detail.status!=='concluida' && <button className="secondary small" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados e IT</button>}}
+              {canWrite && detail.status!=='concluida' && <button className="secondary small" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados e IT</button>}
             </div>
             <div className="inspection-data-summary">
               <div><small>Processo</small><strong>{formatFst(detail.grupos_inspecao?.processos?.codigo)}</strong></div>
