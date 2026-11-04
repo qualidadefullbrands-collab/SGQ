@@ -15,7 +15,9 @@ test('inspection screen uses actual status Kanban lanes, not the old process acc
   assert.ok(board.includes("label:'"+label+"'"))
  }
  assert.match(board,/others=visible\.filter/)
- assert.match(board,/column\.items\.map/)
+ assert.match(board,/column\.items\.slice\(/)
+ assert.match(board,/shownByLane/)
+ assert.match(board,/Ver mais/)
 })
 test('Kanban preserves inspection, process and record-management actions',()=>{
  for(const callback of ['onOpen','onCreate','onReuseProcess','onEditProcess','onDeleteProcess','onDeleteInspection'])
