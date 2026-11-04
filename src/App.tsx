@@ -3356,7 +3356,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {(detail.photos ?? []).map((p:any)=>(
                 <article className="photo-card saved" key={p.id}>
                   {p.signed_url ? <img src={p.signed_url} alt={p.legenda || 'Foto da inspeção'}/> : <div className="photo-placeholder"><Camera size={22}/></div>}
-                  {canWrite&&detail.status!=='concluida'&&(!p.legenda||editingPhotoCaptionId===p.id)?(
+                  {canWrite&&detail.status!=='cancelada'&&(!p.legenda||editingPhotoCaptionId===p.id)?(
                     <div className="sgq-saved-photo-caption">
                       <input type="text" maxLength={300} aria-label={'Legenda da foto '+p.id}
                         value={photoCaptionDrafts[p.id]??p.legenda??''}
@@ -3371,7 +3371,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   ):(
                     <div className="sgq-saved-photo-caption">
                       <strong>{p.legenda || 'Sem legenda'}</strong>
-                      {canWrite&&detail.status!=='concluida'&&<button type="button" className="secondary small"
+                      {canWrite&&detail.status!=='cancelada'&&<button type="button" className="secondary small"
                         onClick={()=>{setEditingPhotoCaptionId(p.id);setPhotoCaptionDrafts(previous=>({...previous,[p.id]:p.legenda||''}))}}>Editar</button>}
                     </div>
                   )}
