@@ -699,6 +699,73 @@ export default function App() {
     return () => { active = false; listener.subscription.unsubscribe() }
   }, [])
 
+
+  async function refreshOfflineCounts(uid:string){
+    try{
+      const operations=await offlineOperations(uid)
+      setOfflinePending(operations.filter(x=>x.state!=='conflict').length)
+      setOfflineConflicts(operations.filter(x=>x.state==='conflict').length)
+    }catch(e:any){setOfflineError('Armazenamento local: '+String(e?.message||'indisponível'))}
+  }
+  async function syncOfflineNow(uid:string){
+    if(!navigator.onLine||!uid)return
+    try{
+      const result=await replayOfflineOperations(uid)
+      setOfflinePending(result.pending)
+      setOfflineConflicts(result.conflicts)
+      if(result.synced){
+        setMessage(result.synced+' registro(s) sincronizado(s).')
+        void refreshLists()
+      }
+    }catch(e:any){setOfflineError('Sincronização: '+String(e?.message||'indisponível'))}
+  }
+  useEffect(()=>{
+    if(!userId){setOfflinePending(0);setOfflineConflicts(0);return}
+    let active=true
+    const check=()=>{
+      if(!active)return
+      setIsOnline(navigator.onLine)
+      if(navigator.onLine)void syncOfflineNow(userId)
+      else void refreshOfflineCounts(userId)
+    }
+    const onVisible=()=>{if(document.visibilityState==='visible')check()}
+    window.addEventListener('online',check)
+    window.addEventListener('offline',check)
+    document.addEventListener('visibilitychange',onVisible)
+    void refreshOfflineCounts(userId)
+    if(navigator.onLine)void syncOfflineNow(userId)
+    return ()=>{active=false;window.removeEventListener('online',check);window.removeEventListener('offline',check);document.removeEventListener('visibilitychange',onVisible)}
+  },[userId])
+  useEffect(()=>{
+    if(!userId||tab!=='nova'||editingInspectionId||editingProcessId){setOfflineDraftReady(false);return}
+    let active=true
+    setOfflineDraftReady(false)
+    void readOfflineDraft<any>(userId,'full:new').then(saved=>{
+      if(!active)return
+      if(saved?.inspection){
+        setInspection(saved.inspection)
+        if(Array.isArray(saved.skuRows))setSkuRows(saved.skuRows.map((row:any)=>({...emptySku(),...row,
+          fotoPreview:row.fotoFile?URL.createObjectURL(row.fotoFile):''})))
+        if(saved.requestId)createRequestId.current=saved.requestId
+      }
+    }).catch(e=>{if(active)setOfflineError('Falha ao restaurar rascunho: '+String(e?.message||''))})
+      .finally(()=>{if(active)setOfflineDraftReady(true)})
+    return()=>{active=false}
+  },[userId,tab,editingInspectionId,editingProcessId])
+  useEffect(()=>{
+    if(!userId||tab!=='nova'||!offlineDraftReady||editingInspectionId||editingProcessId)return
+    const timer=window.setTimeout(()=>{
+      const hasContent=!!inspection.codigo.trim()||!!inspection.cliente.trim()||
+        !!inspection.observacaoInterna.trim()||skuRows.some(skuRowHasData)
+      const operation=hasContent?saveOfflineDraft(userId,'full:new',{
+        inspection,skuRows,requestId:createRequestId.current
+      }):clearOfflineDraft(userId,'full:new')
+      void operation.then(()=>setOfflineDraftStatus(hasContent?'Salvo neste dispositivo':''))
+        .catch(e=>setOfflineError('Não foi possível salvar localmente: '+String(e?.message||'')))
+    },450)
+    return()=>window.clearTimeout(timer)
+  },[userId,tab,inspection,skuRows,offlineDraftReady,editingInspectionId,editingProcessId])
+
   useEffect(() => {
     if (!userId) {
       // Clear any prior session's cached records, including responses still in flight.
@@ -784,10 +851,13 @@ export default function App() {
       try{
         const res=await apiGet<any>('/api/app/catalogos')
         if(res.data){
+          void saveOfflineDraft(userId||'','app:catalogos',res.data).catch(()=>undefined)
           setItVersions((res.data.itVersions??[]) as ItVersion[])
           setGroups((res.data.groups??[]) as Group[])
         }else{
-          setError(res.error?.message||'Não foi possível carregar as instruções técnicas. Use Atualizar ou entre novamente.')
+          const cached=await readOfflineDraft<any>(userId||'','app:catalogos').catch(()=>null)
+          if(cached){setItVersions(cached.itVersions||[]);setGroups(cached.groups||[])}
+          else setError(res.error?.message||'Não foi possível carregar as instruções técnicas. Use Atualizar ou entre novamente.')
         }
       }catch{
         setError('Falha de conexão ao carregar as instruções técnicas.')
@@ -804,11 +874,14 @@ export default function App() {
       try{
         const res=await apiGet<any>('/api/app/estoque')
         if(res.data){
+          void saveOfflineDraft(userId||'','app:estoque',res.data).catch(()=>undefined)
           const rows=(res.data.samples??[]).map((x:any)=>({...x,saldo:Number(x.saldo??0)}))
           setSamples(rows)
           setCounts(old=>({...old,amostras:rows.length}))
         }else{
-          setError(res.error?.message||'Não foi possível atualizar o estoque. Tente novamente.')
+          const cached=await readOfflineDraft<any>(userId||'','app:estoque').catch(()=>null)
+          if(cached)setSamples((cached.samples||[]).map((x:any)=>({...x,saldo:Number(x.saldo??0)})))
+          else setError(res.error?.message||'Não foi possível atualizar o estoque. Tente novamente.')
         }
       }catch{
         setError('Falha de conexão ao atualizar o estoque.')
@@ -842,6 +915,15 @@ export default function App() {
       setError('')
       const loaded=await apiGet<any>('/api/app/bootstrap')
       if (loaded.error || !loaded.data) {
+        if(!navigator.onLine||connectionFailure(String(loaded.error?.message||''))){
+          const offline=await readOfflineDraft<any>(userId||'','app:bootstrap').catch(()=>null)
+          if(offline && sequence===loadSequence.current){
+            setProfile(offline.profile)
+            setProcesses(offline.processes||[])
+            setInspections(offline.inspections||[])
+            return
+          }
+        }
         setError(loaded.error?.message || 'Falha ao carregar o SGQ.')
         return
       }
@@ -852,6 +934,8 @@ export default function App() {
         return
       }
       setProfile(data.profile as Profile)
+      void saveOfflineDraft(userId||'','app:bootstrap',{profile:data.profile,processes:data.processes,inspections:data.inspections})
+        .catch(()=>undefined)
       setProcesses((data.processes ?? []) as ProcessRow[])
       setInspections((data.inspections ?? []) as InspectionRow[])
       setCounts(old=>({
@@ -2367,6 +2451,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </div>
       </div>}
       {message && <div className="alert success">{message}</div>}
+      {offlineError && <div className="alert error" role="alert">{offlineError}</div>}
 
       {tab==='insights' && <Suspense fallback={<div className="center-screen">Carregando Insights…</div>}>
         <InsightsPage onOpenInspection={id=>void openInspection(id)}/>
@@ -2494,6 +2579,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
+          {offlineDraftStatus && <span className="sgq-offline-indicator"><CloudUpload size={14}/>{offlineDraftStatus}</span>}
           <form onSubmit={(e)=>void createInspection(e,(e.nativeEvent as SubmitEvent).submitter?.getAttribute('value')==='iniciar')} className="inspection-form">
             <section className="panel section-card">
               <div className="section-title">
