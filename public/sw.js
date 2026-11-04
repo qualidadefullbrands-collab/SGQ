@@ -1,5 +1,5 @@
 // SGQ unified navigation: do not keep stale HTML or private API responses in offline cache.
-const CACHE='sgq-shell-v3-20261026';
+const CACHE='sgq-shell-v4-20261104-ai-caption';
 const APP_SHELL=['/','/index.html','/manifest.webmanifest','/sgq-icon.svg'];
 self.addEventListener('install',(event)=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(APP_SHELL)).catch(()=>undefined));
