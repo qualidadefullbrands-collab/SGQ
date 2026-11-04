@@ -1642,6 +1642,53 @@ app.MapPost("/api/inspecoes/{id}/iniciar", async (string id,HttpRequest request,
     catch(Exception e){return Results.Json(Error("Falha ao iniciar inspeção.",e.Message),statusCode:500);}
 });
 
+// Kanban reversal is intentionally limited to started inspections, never completed ones.
+// Keep collected evidence and checklist data intact: only the operational status changes.
+app.MapPost("/api/inspecoes/{id}/voltar-nao-iniciada", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("Inspeção inválida."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil,ativo&id=eq.{Uri.EscapeDataString(userId)}&ativo=is.true&limit=1");
+        var (profile,authorized)=FirstRow(profileRows);
+        if(!authorized||profile!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor" or "inspetor"))
+            return Results.Json(Error("Sem permissão para mover a inspeção."),statusCode:403);
+        var rows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,status,grupo_inspecao_id&excluido_em=is.null&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inspection,found)=FirstRow(rows);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        if(inspection!.Value.GetProperty("status").GetString()!="em_andamento")
+            return Results.Json(Error("Somente inspeções em andamento podem voltar a Não iniciadas."),statusCode:409);
+        var groupId=inspection.Value.TryGetProperty("grupo_inspecao_id",out var groupVal)&&groupVal.ValueKind==JsonValueKind.String
+            ?groupVal.GetString():null;
+        if(string.IsNullOrWhiteSpace(groupId))
+            return Results.Json(Error("Inspeção sem grupo de trabalho."),statusCode:409);
+
+        // Compare-and-swap guards against another operator concluding the inspection meanwhile.
+        var updated=await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+            $"id=eq.{Uri.EscapeDataString(id)}&status=eq.em_andamento&excluido_em=is.null",
+            new {status="aberta",iniciada_em=(DateTimeOffset?)null},"return=representation");
+        if(updated is not {ValueKind:JsonValueKind.Array}||updated.Value.GetArrayLength()==0)
+            return Results.Json(Error("O status mudou em outra sessão. Atualize o Kanban."),statusCode:409);
+
+        // Other inspections may share the group. Only reset the group when none
+        // is in progress or complete. Never touch observations, measurements, or photos.
+        var siblings=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}&id=neq.{Uri.EscapeDataString(id)}&status=in.(em_andamento,concluida)&excluido_em=is.null&limit=1");
+        if(siblings is {ValueKind:JsonValueKind.Array} && siblings.Value.GetArrayLength()==0)
+            await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",
+                $"id=eq.{Uri.EscapeDataString(groupId)}",
+                new {status="planejado"},"return=minimal");
+        return Results.Ok(new{data=new{ok=true,status="aberta"},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível mover a inspeção.",e.Message),statusCode:500);}
+});
+
 app.MapGet("/api/amostragem/plano", (long lote, string? nivel) =>
 {
     var plan = SamplingPlan(lote, string.IsNullOrWhiteSpace(nivel) ? "I" : nivel);
