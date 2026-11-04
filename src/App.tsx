@@ -508,6 +508,9 @@ export default function App() {
   const [aiConclusionBusy,setAiConclusionBusy]=useState(false)
   const [aiConclusionError,setAiConclusionError]=useState('')
   const [sharepointBusy,setSharepointBusy]=useState(false)
+  const [wordDownloading,setWordDownloading]=useState(false)
+  const [kanbanMovingId,setKanbanMovingId]=useState<string|null>(null)
+  const kanbanMoveLock=useRef<string|null>(null)
   const [processLookupBusy,setProcessLookupBusy]=useState(false)
   const [processLookupMessage,setProcessLookupMessage]=useState('')
   const [editingInspectionId,setEditingInspectionId]=useState<string|null>(null)
@@ -1960,6 +1963,32 @@ export default function App() {
       setInspectionBusy(false)
     }
   }
+  async function moveInspectionOnBoard(id:string,target:'aberta'|'em_andamento'){
+    if(!canWrite||kanbanMoveLock.current)return
+    const current=inspections.find(i=>i.id===id)
+    if(!current || !['aberta','em_andamento'].includes(current.status) || current.status===target)return
+    kanbanMoveLock.current=id
+    setKanbanMovingId(id)
+    setError('')
+    try{
+      const endpoint=target==='em_andamento'?'iniciar':'voltar-nao-iniciada'
+      const moved=await apiPost<any>('/api/inspecoes/'+encodeURIComponent(id)+'/'+endpoint,{})
+      if(moved.error){
+        setPopupMessage(moved.error.message||'Não foi possível mover a inspeção.')
+        return
+      }
+      setInspections(rows=>rows.map(i=>i.id===id?{...i,status:target}:i))
+      setDetail((prev:any)=>prev?.id===id?{...prev,status:target}:prev)
+      setMessage(target==='em_andamento'?'Inspeção iniciada.':'Inspeção movida para Não iniciadas.')
+      void refreshLists()
+    }catch{
+      setPopupMessage('Não foi possível alterar o status. Verifique a conexão.')
+    }finally{
+      kanbanMoveLock.current=null
+      setKanbanMovingId(null)
+    }
+  }
+
   async function startSavedInspection(targetStage:typeof activeStage='amostragem') {
     if(!selectedInspectionId || detail?.status!=='aberta') return
     if(!detail.it_versao_id){setPopupMessage('Selecione uma IT nos dados da inspeção antes de continuar.');setActiveStage('dados');return}
@@ -2588,49 +2617,50 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   }
 
   async function downloadInspectionWord() {
-    if (!detail || !selectedInspectionId) return
+    if(!detail||!selectedInspectionId||wordDownloading)return
     setError('')
-    if (!detail.it_versao_id) {
-      setMessage('')
-      return setError('Esta inspeção não possui IT vinculada. Para gerar o Word oficial, vincule uma IT com modelo Word.')
+    if(!detail.it_versao_id){
+      return setError('Esta inspeção não possui IT vinculada. Vincule uma IT para gerar o Word oficial.')
     }
-    setMessage('Gerando Word…')
-    const session=await supabase.auth.getSession()
-    const token=session.data.session?.access_token
-    if (!token) return setError('Sua sessão expirou. Entre novamente no SGQ.')
-
-    let response:Response
-    try {
-      response=await fetch(`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo`,{
-        method:'POST',
-        headers:{Authorization:`Bearer ${token}`},
+    setWordDownloading(true)
+    try{
+      const session=await supabase.auth.getSession()
+      const token=session.data.session?.access_token
+      if(!token){setError('Sua sessão expirou. Entre novamente no SGQ.');return}
+      const response=await fetch(`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo`,{
+        method:'POST',headers:{Authorization:`Bearer ${token}`},
       })
-    } catch {
-      setMessage('')
-      return setError('O serviço de geração do Word não respondeu. Tente novamente em alguns segundos.')
+      if(!response.ok){
+        let reason='Não foi possível gerar o Word pelo modelo oficial da IT.'
+        try{
+          const body=await response.json()
+          reason=typeof body?.detail==='string'?body.detail:
+            body?.error?.message||body?.message||reason
+        }catch{}
+        setError(reason)
+        return
+      }
+      const blob=await response.blob()
+      if(!blob.size){setError('O documento Word retornou vazio.');return}
+      const disposition=response.headers.get('content-disposition')||''
+      const encoded=disposition.match(/filename\*=UTF-8''([^;]+)/i)
+      const simple=disposition.match(/filename="?([^";]+)"?/i)
+      const candidate=encoded?.[1]||simple?.[1]||`${detail.numero}.docx`
+      let filename=candidate
+      try{filename=decodeURIComponent(candidate)}catch{}
+      const href=URL.createObjectURL(blob)
+      const link=document.createElement('a')
+      link.href=href;link.download=filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(()=>URL.revokeObjectURL(href),15000)
+      setMessage('Word gerado para download.')
+    }catch{
+      setError('O serviço de geração do Word não respondeu. Tente novamente.')
+    }finally{
+      setWordDownloading(false)
     }
-    if (!response.ok) {
-      let msg='Não foi possível gerar o Word pelo modelo oficial da IT.'
-      try {
-        const body=await response.json()
-        msg=body?.detail || body?.error?.message || body?.message || msg
-      } catch {}
-      setMessage('')
-      return setError(msg)
-    }
-
-    const blob=await response.blob()
-    const disposition=response.headers.get('content-disposition') || ''
-    const utf=disposition.match(/filename\*=UTF-8''([^;]+)/i)
-    const basic=disposition.match(/filename="?([^";]+)"?/i)
-    const filename=decodeURIComponent(utf?.[1] || basic?.[1] || `${detail.numero}.docx`)
-    const href=URL.createObjectURL(blob)
-    const a=document.createElement('a')
-    a.href=href
-    a.download=filename
-    a.click()
-    setTimeout(()=>URL.revokeObjectURL(href),1500)
-    setMessage('Word preenchido no modelo oficial da IT e armazenado no SGQ.')
   }
 
   if (!sessionReady) return <div className="center-screen">Carregando SGQ…</div>
@@ -2727,6 +2757,14 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       </header>
 
       {error && <div className="alert error">{error}</div>}
+      {wordDownloading&&<div className="sgq-dialog-backdrop sgq-word-loading" role="dialog"
+        aria-modal="true" aria-label="Gerando Word" aria-live="polite">
+        <div className="sgq-dialog sgq-word-loading-content">
+          <div className="sgq-word-spinner" aria-hidden="true"/>
+          <h2>Gerando Word…</h2>
+          <p>Preparando arquivo para download</p>
+        </div>
+      </div>}
       {popupMessage && <div className="sgq-dialog-backdrop" role="presentation" onClick={()=>setPopupMessage('')}>
         <div className="sgq-dialog" role="alertdialog" aria-modal="true" aria-label="Atenção" onClick={e=>e.stopPropagation()}>
           <div className="sgq-dialog-symbol"><ShieldCheck size={24}/></div><h2>Verifique as informações</h2>
@@ -2772,34 +2810,24 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {inspections.filter(i=>i.status==='concluida').slice(0,25).map(i=><div className="queue-row" key={i.id}><div><strong>{inspectionDisplay(i)}</strong><span>{statusLabel(i.resultado)} · {formatDateBR(i.criado_em)}</span></div><button className="secondary small" onClick={()=>openInspection(i.id)}>Abrir relatório</button></div>)}
             {!inspections.some(i=>i.status==='concluida')&&<p>Nenhuma inspeção concluída.</p>}
           </section>}
-          {dashboardView==='inspecoes' && <>
-          <section className="panel queue">
-            <div className="section-title"><h2>Inspeções não iniciadas</h2><button className="secondary" onClick={()=>setTab('inspecoes')}>Ver todas</button></div>
-            {inspections.filter(i=>i.status==='aberta').slice(0,8).map(i=>(
-              <div className="queue-row" key={i.id}>
-                <div><strong>{inspectionDisplay(i)}</strong><span>{i.grupos_inspecao?.nome || 'Inspeção em preenchimento'} · Não iniciada</span></div>
-                <button className="secondary small" onClick={()=>openInspection(i.id)}><Edit3 size={15}/> Abrir inspeção</button>
-              </div>
-            ))}
-            {!inspections.some(i=>i.status==='aberta') && <div className="empty">Nenhuma inspeção não iniciada.</div>}
-          </section>
-          <section className="panel queue">
-            <div className="section-title">
-              <h2>Inspeções em andamento</h2>
-              <button className="secondary" onClick={()=>setTab('inspecoes')}>Ver todas</button>
-            </div>
-            {inspections.filter((i)=>i.status==='em_andamento').slice(0,8).map((i)=>(
-              <div className="queue-row" key={i.id}>
-                <div>
-                  <strong>{inspectionDisplay(i)}</strong>
-                  <span>{i.grupos_inspecao?.nome} · Recebimento {formatDateBR(i.grupos_inspecao?.processos?.chegada_cd || i.grupos_inspecao?.processos?.data_processo)} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0} unidades</span>
-                </div>
-                <button className="primary small" onClick={()=>openInspection(i.id)}><Play size={15}/> Continuar</button>
-              </div>
-            ))}
-            {!inspections.some((i)=>i.status==='em_andamento') && <div className="empty">Nenhuma inspeção em andamento.</div>}
-          </section>
-          </>}
+          <InspectionsKanban
+            mode="panel"
+            inspections={inspections}
+            processes={processes}
+            canDelete={!!canDelete}
+            canMove={!!canWrite}
+            movingInspectionId={kanbanMovingId}
+            onMove={(id,target)=>void moveInspectionOnBoard(id,target)}
+            deletingProcessId={deletingProcessId}
+            formatFst={formatFst}
+            onViewAll={()=>setTab('inspecoes')}
+            onOpen={id=>void openInspection(id)}
+            onCreate={()=>{resetNewInspection();setTab('nova')}}
+            onReuseProcess={id=>{const p=processes.find(x=>x.id===id);if(p)reuseProcess(p)}}
+            onEditProcess={id=>{const p=processes.find(x=>x.id===id);if(p)editProcessFull(p)}}
+            onDeleteProcess={id=>{const p=processes.find(x=>x.id===id);if(p)void deleteProcess(p)}}
+            onDeleteInspection={id=>{const i=inspections.find(x=>x.id===id);if(i)void deleteInspection(i)}}
+          />
         </section>
       )}
 
@@ -2808,6 +2836,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         processes={processes}
         canDelete={!!canDelete}
         deletingProcessId={deletingProcessId}
+        canMove={!!canWrite}
+        movingInspectionId={kanbanMovingId}
+        onMove={(id,target)=>void moveInspectionOnBoard(id,target)}
         formatFst={formatFst}
         onOpen={id=>void openInspection(id)}
         onCreate={()=>{resetNewInspection();setTab('nova')}}
@@ -3020,7 +3051,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <span className="pill">{statusLabel(detail.status)}</span>
               {detail.status!=='concluida' && canWrite && <button className="secondary" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados</button>}
 
-              {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
+              {detail.status==='concluida' && <button className="secondary" disabled={wordDownloading} onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
               {detail.status==='concluida' && <button className="secondary" type="button" disabled={sharepointBusy} onClick={()=>void sendWordToPowerAutomate()}><FileText size={16}/>{sharepointBusy?'Enviando…':'Enviar ao SharePoint'}</button>}
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
@@ -3448,7 +3479,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {!Object.values(retentionRows).some((x)=>x.retain) && <label>Motivo para não reter<textarea rows={3} value={retentionReason} onChange={(e)=>setRetentionReason(e.target.value)}/></label>}
               <div className="actions">
                 <button className="primary" onClick={saveRetention}><Warehouse size={16}/> Enviar retenção ao estoque</button>
-                <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Gerar Word</button>
+                <button className="secondary" disabled={wordDownloading} onClick={downloadInspectionWord}><FileDown size={16}/> Gerar Word</button>
               </div>
             </section>
           )}
