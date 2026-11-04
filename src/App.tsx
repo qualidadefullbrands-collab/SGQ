@@ -505,6 +505,7 @@ export default function App() {
   const [dashboardView,setDashboardView]=useState<'processos'|'inspecoes'|'estoque'|'concluidas'>('inspecoes')
   const [popupMessage,setPopupMessage]=useState('')
   const [aiConclusionBusy,setAiConclusionBusy]=useState(false)
+  const [aiConclusionError,setAiConclusionError]=useState('')
   const [sharepointBusy,setSharepointBusy]=useState(false)
   const [processLookupBusy,setProcessLookupBusy]=useState(false)
   const [processLookupMessage,setProcessLookupMessage]=useState('')
@@ -558,7 +559,7 @@ export default function App() {
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
   const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string;productId:string;isProductId:boolean}>>([])
   const [photoCaptionDrafts,setPhotoCaptionDrafts]=useState<Record<string,string>>({})
-  const [editingPhotoCaptionId,setEditingPhotoCaptionId]=useState<string|null>(null)
+  const [lastSavedPhotoCaptionId,setLastSavedPhotoCaptionId]=useState<string|null>(null)
   const [savingPhotoCaptionId,setSavingPhotoCaptionId]=useState<string|null>(null)
   const [pendingModal, setPendingModal] = useState<string[]>([])
   const [sampleNcDraft, setSampleNcDraft] = useState('0')
@@ -1505,6 +1506,7 @@ export default function App() {
     const caption=String(photoCaptionDrafts[photoId]??currentCaption??'').trim()
     if(caption.length>300){setError('A legenda deve ter no máximo 300 caracteres.');return}
     setSavingPhotoCaptionId(photoId)
+    setLastSavedPhotoCaptionId(null)
     setError('')
     try{
       const saved=await apiPut<any>(
@@ -1519,7 +1521,7 @@ export default function App() {
         delete copy[photoId]
         return copy
       })
-      setEditingPhotoCaptionId(null)
+      setLastSavedPhotoCaptionId(photoId)
       setMessage('Legenda salva.')
     }catch(e:any){
       setError('Não foi possível salvar a legenda: '+String(e?.message||'erro de conexão'))
@@ -2213,6 +2215,7 @@ export default function App() {
   async function suggestAIConclusion(){
     if(!detail||aiConclusionBusy)return
     setAiConclusionBusy(true)
+    setAiConclusionError('')
     setError('')
     try{
       const context={
@@ -2228,11 +2231,34 @@ export default function App() {
         textoAtual:finalObservation,
       }
       const {data,error:aiError}=await authClient.functions.invoke('sgq-conclusao',{body:context})
-      if(aiError||data?.error||!data?.text){setPopupMessage('Não foi possível gerar a conclusão agora. Digite o texto manualmente.');return}
-      setFinalObservation(String(data.text))
+      let response:any=data
+      if(aiError){
+        const upstream=(aiError as any).context
+        if(typeof upstream?.json==='function'){
+          const payload=await upstream.json().catch(()=>null)
+          if(payload)response=payload
+        }
+      }
+      if(aiError||response?.error||typeof response?.text!=='string'||!response.text.trim()){
+        const type=String(response?.error||'')
+        const known:Record<string,string>={
+          ai_not_configured:'A integração de IA não está configurada. Verifique a chave Gemini.',
+          ai_provider_auth:'A chave da IA foi recusada pelo provedor. Confira a configuração.',
+          ai_provider_quota:'A cota da IA foi atingida. Tente novamente após a liberação do limite.',
+          ai_model_unavailable:'O modelo de IA configurado está indisponível. Verifique a configuração.',
+          ai_provider_unavailable:'O serviço de IA está temporariamente indisponível. Tente novamente.',
+          ai_empty_response:'A IA não retornou uma conclusão utilizável. Tente novamente.',
+          ai_invalid_request:'A solicitação à IA foi recusada. Confira a configuração do modelo.',
+        }
+        setAiConclusionError(known[type]||'Não foi possível gerar a sugestão. Tente novamente ou confira a integração de IA.')
+        return
+      }
+      setFinalObservation(response.text.trim())
+      setAiConclusionError('')
       setMessage('Sugestão gerada. Revise e edite antes de finalizar.')
-    }catch{setPopupMessage('Falha ao consultar a IA. Escreva a conclusão manualmente.')}
-    finally{setAiConclusionBusy(false)}
+    }catch(e:any){
+      setAiConclusionError('Falha de comunicação com a IA. Tente novamente.')
+    }finally{setAiConclusionBusy(false)}
   }
 
   async function sendWordToPowerAutomate(){
@@ -3368,25 +3394,29 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {(detail.photos ?? []).map((p:any)=>(
                 <article className="photo-card saved" key={p.id}>
                   {p.signed_url ? <img src={p.signed_url} alt={p.legenda || 'Foto da inspeção'}/> : <div className="photo-placeholder"><Camera size={22}/></div>}
-                  {canWrite&&detail.status!=='cancelada'&&(!p.legenda||editingPhotoCaptionId===p.id)?(
-                    <div className="sgq-saved-photo-caption">
-                      <input type="text" maxLength={300} aria-label={'Legenda da foto '+p.id}
-                        value={photoCaptionDrafts[p.id]??p.legenda??''}
-                        onChange={e=>setPhotoCaptionDrafts(previous=>({...previous,[p.id]:e.target.value}))}
-                        placeholder="Adicionar legenda"/>
-                      <button type="button" className="secondary small"
-                        disabled={!!savingPhotoCaptionId}
-                        onClick={()=>void savePhotoCaption(p.id,p.legenda||'')}>
-                        {savingPhotoCaptionId===p.id?'Salvando…':'Salvar'}
-                      </button>
-                    </div>
-                  ):(
-                    <div className="sgq-saved-photo-caption">
-                      <strong>{p.legenda || 'Sem legenda'}</strong>
-                      {canWrite&&detail.status!=='cancelada'&&<button type="button" className="secondary small"
-                        onClick={()=>{setEditingPhotoCaptionId(p.id);setPhotoCaptionDrafts(previous=>({...previous,[p.id]:p.legenda||''}))}}>Editar</button>}
-                    </div>
-                  )}
+                  <div className="sgq-saved-photo-caption">
+                    {canWrite&&detail.status!=='cancelada'?(
+                      <>
+                        <label htmlFor={'sgq-caption-'+p.id}>Editar legenda</label>
+                        <input id={'sgq-caption-'+p.id} type="text" maxLength={300}
+                          aria-label={'Editar legenda da foto '+p.id}
+                          value={photoCaptionDrafts[p.id]??p.legenda??''}
+                          onChange={e=>{
+                            setLastSavedPhotoCaptionId(null)
+                            setPhotoCaptionDrafts(previous=>({...previous,[p.id]:e.target.value}))
+                          }}
+                          placeholder="Informe a legenda desta foto"/>
+                        <button type="button" className="primary small sgq-caption-save"
+                          disabled={!!savingPhotoCaptionId}
+                          onClick={()=>void savePhotoCaption(p.id,p.legenda||'')}>
+                          {savingPhotoCaptionId===p.id?'Salvando…':'Salvar legenda'}
+                        </button>
+                        {lastSavedPhotoCaptionId===p.id&&<small role="status" className="sgq-caption-saved">Legenda salva</small>}
+                      </>
+                    ):(
+                      <span>{p.legenda||'Sem legenda'}</span>
+                    )}
+                  </div>
                   {p.nc_id && <span className="nc-photo-tag">Foto de NC</span>}
                 </article>
               ))}
@@ -3406,6 +3436,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <label>Observação / conclusão</label>
                 <button type="button" className="secondary small" onClick={()=>void suggestAIConclusion()} disabled={aiConclusionBusy}><Sparkles size={16}/>{aiConclusionBusy?'Gerando…':'Gerar sugestão com IA'}</button>
               </div>
+              {aiConclusionError&&<p className="sgq-ai-conclusion-error" role="alert">{aiConclusionError}</p>}
               <textarea value={finalObservation} onChange={(e)=>setFinalObservation(e.target.value)} rows={5} placeholder="Registre a conclusão da inspeção."/>
               <div className="result-actions">
                 <button className="success-button" onClick={()=>finishInspection('aprovado')}>Aprovar inspeção</button>
