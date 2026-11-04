@@ -1122,11 +1122,14 @@ export default function App() {
 
   async function editInspectionFull(id:string){
     setError('')
-    const res=await apiGet<any>(`/api/inspecoes/${id}/detalhe`)
-    if(res.error||!res.data?.inspecao){setPopupMessage(res.error?.message||'Falha ao abrir inspeção.');return}
-    editingBaseline.current=offlineInspectionVersion(res.data)
-    void saveOfflineDraft(userId||'','full:detail:'+id,res.data).catch(()=>undefined)
-    const data={...res.data.inspecao,items:res.data.items??[]}
+    const res=await apiGet<any>('/api/inspecoes/'+id+'/detalhe')
+    let source=res.data
+    if(res.error||!source?.inspecao){
+      source=await readOfflineDraft<any>(userId||'','full:detail:'+id).catch(()=>null)
+      if(!source?.inspecao){setPopupMessage(res.error?.message||'Inspeção indisponível offline.');return}
+    }else void saveOfflineDraft(userId||'','full:detail:'+id,source).catch(()=>undefined)
+    editingBaseline.current=offlineInspectionVersion(source)
+    const data={...source.inspecao,items:source.items??[]}
     const process=data.grupos_inspecao?.processos??{}
     const items=(data.items??[]).map((link:any)=>{
       const x=link.processo_itens
@@ -1487,14 +1490,13 @@ export default function App() {
     setError('')
     if(selectedInspectionId!==id) setActiveStage('dados')
     setSelectedInspectionId(id)
-    const loaded=await apiGet<any>(`/api/inspecoes/${id}/detalhe`)
-    if (loaded.error || !loaded.data?.inspecao) {
-      return setError(loaded.error?.message ?? 'Inspeção não encontrada.')
-    }
-
-    const data=loaded.data
+    const loaded=await apiGet<any>('/api/inspecoes/'+id+'/detalhe')
+    let data=loaded.data
+    if (loaded.error || !data?.inspecao) {
+      data=await readOfflineDraft<any>(userId||'','full:detail:'+id).catch(()=>null)
+      if(!data?.inspecao)return setError(loaded.error?.message ?? 'Inspeção não disponível offline.')
+    }else void saveOfflineDraft(userId||'','full:detail:'+id,data).catch(()=>undefined)
     editingBaseline.current=offlineInspectionVersion(data)
-    void saveOfflineDraft(userId||'','full:detail:'+id,data).catch(()=>undefined)
     const photoUrls=data.photoUrls ?? {}
     const photosWithUrls=(data.photos ?? []).map((p:any)=>({
       ...p,
