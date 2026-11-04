@@ -187,7 +187,7 @@ async def self_test():
                     box_tables+=1
                     box_marks+=selected(table)
             sample_shapes=[p for p in word.inline_shapes if
-                abs(p.width-Inches(1.95))<100 and abs(p.height-Inches(1.95*750/1050))<100]
+                Inches(1.90)<=p.width<=Inches(2.20) and p.height>Inches(0.5)]
             centered_captions=sum(1 for c in cells for p in c.paragraphs
                 if "Legenda de teste" in p.text and p.alignment==WD_ALIGN_PARAGRAPH.CENTER)
             template_tests[path.stem]={
@@ -289,7 +289,7 @@ async def generate_document(execution_id:str,authorization:str|None=Header(defau
 
 
 @app.get("/generate-inspection/{inspection_id}")
-async def generate_inspection_document(inspection_id:str,authorization:str|None=Header(default=None)):
+async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=None,authorization:str|None=Header(default=None)):
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401,detail="Authorization Bearer obrigatório.")
     token=authorization.split(" ",1)[1].strip()
@@ -382,8 +382,8 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
             try:
                 data=await storage_download(client,token,"inspecao-fotos",path)
                 photos.append({"bytes":data,"caption":p.get("legenda") or ""})
-            except HTTPException:
-                pass
+            except HTTPException as exc:
+                raise HTTPException(status_code=503,detail="Não foi possível incluir todas as fotos da inspeção. Confira os arquivos e tente novamente.") from exc
         if not photos and product_photo_refs:
             jobs=[storage_download(client,token,"produto-fotos",path) for path,_ in product_photo_refs]
             downloaded=await __import__("asyncio").gather(*jobs,return_exceptions=True)
@@ -408,7 +408,14 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
         }
         docx=generate_inspection(template_bytes,payload)
         first_product=(items[0].get("produto") or {}) if items else {}
-        filename=inspection_file_name(process.get("codigo"),first_product.get("sku"),first_product.get("nome"))
+        distinct_skus={str((item.get("produto") or {}).get("sku") or item.get("codigo_cliente") or "").strip()
+                       for item in items}
+        collection_name=(nome_conjunto or "").strip() if len(distinct_skus)>1 else None
+        if collection_name and len(collection_name)>100:
+            raise HTTPException(status_code=422,detail="O nome do conjunto deve ter até 100 caracteres.")
+        filename=inspection_file_name(process.get("codigo"),first_product.get("sku"),
+                                      first_product.get("nome"),collection_name=collection_name or (
+                                          "Componentes" if len(distinct_skus)>1 else None))
         # Download only: document is assembled from the official IT and returned
         # directly. No Storage object key, upload or laudos DB write is required.
         safe_name=urllib.parse.quote(filename,safe="")
