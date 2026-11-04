@@ -30,3 +30,15 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: dotnet build backend/Sgq.Api/Sgq.Api.csproj --configuration Release
+
+  word:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Word generator dependencies
+        run: pip install -r server/requirements.txt
+      - name: Validate the eight official IT templates and inspection formatting
+        run: python -m unittest discover -s server/tests -v
