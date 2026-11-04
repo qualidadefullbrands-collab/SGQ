@@ -22,7 +22,8 @@ test('mobile lists open and started inspections associated with operational proc
  assert.match(mobile,/const valid=new Set\(processes\.map\(p=>p\.id\)\)/)
  assert.match(mobile,/active:processes\.filter\(p=>map\.has\(p\.id\)\)/)
  assert.match(mobile,/selectProcess\(p\.id\)/)
- assert.match(mobile,/list\.length===1/)
+ assert.doesNotMatch(mobile,/list\.length===1/)
+ assert.match(mobile,/sgq-photo-not-started/)
 })
 test('camera and gallery can capture multiple evidence photos with captions',()=>{
  assert.match(mobile,/capture="environment"/)
