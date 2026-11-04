@@ -1,0 +1,55 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
+const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8')
+const app=read('src/App.tsx')
+const board=read('src/components/InspectionsKanban.tsx')
+const css=read('src/components/InspectionsKanban.css')
+
+test('inspection screen uses actual status Kanban lanes, not the old process accordions',()=>{
+ const section=app.split("{tab==='inspecoes' &&")[1]?.split("{tab==='nova' &&")[0]??''
+ assert.match(section,/<InspectionsKanban/)
+ assert.doesNotMatch(section,/className="process-list"|className="process-card"/)
+ for(const [status,label] of [['aberta','Não iniciadas'],['em_andamento','Em andamento'],['concluida','Concluídas'],['cancelada','Canceladas']]){
+  assert.ok(board.includes("status:'"+status+"'"))
+  assert.ok(board.includes("label:'"+label+"'"))
+ }
+ assert.match(board,/others=visible\.filter/)
+ assert.match(board,/column\.items\.slice\(/)
+ assert.match(board,/shownByLane/)
+ assert.match(board,/Ver mais/)
+})
+test('Kanban preserves inspection, process and record-management actions',()=>{
+ for(const callback of ['onOpen','onCreate','onReuseProcess','onEditProcess','onDeleteProcess','onDeleteInspection'])
+  assert.ok(board.includes(callback),callback+' missing')
+ assert.match(board,/onOpen\(item\.id\)/)
+ assert.match(board,/onReuseProcess\(process\.id\)/)
+ assert.match(board,/onEditProcess\(process\.id\)/)
+ assert.match(board,/onDeleteInspection\(inspection\.id\)/)
+ assert.match(board,/onDeleteProcess\(process\.id\)/)
+ assert.match(board,/canDelete&&/)
+ assert.match(app,/onDeleteInspection=\{id=>\{const item=inspections\.find/)
+ assert.match(app,/onDeleteProcess=\{id=>\{const process=processes\.find/)
+})
+test('search covers FST client and invoice, and no processes are hidden without inspection',()=>{
+ assert.match(board,/const \[query,setQuery\]=useState\(''\)/)
+ assert.match(board,/type="search"/)
+ assert.match(board,/normalized\(\[/)
+ assert.match(board,/process\?\.codigo/)
+ assert.match(board,/process\?\.cliente/)
+ assert.match(board,/process\?\.nota_fiscal/)
+ assert.match(board,/activeProcessIds/)
+ assert.match(board,/Processos sem inspeção/)
+ assert.match(board,/Nenhum resultado para/)
+})
+test('Kanban has purposeful tone-based color system and usable responsive layout',()=>{
+ for(const tone of ['queued','active','done','cancelled'])assert.match(css,new RegExp('tone-'+tone))
+ assert.match(css,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/)
+ assert.match(css,/max-width:1250px/)
+ assert.match(css,/max-width:720px/)
+ assert.match(css,/max-width:410px/)
+ assert.match(css,/prefers-reduced-motion/)
+ assert.match(board,/role="progressbar"/)
+ assert.match(board,/aria-label=\{'Ações da inspeção '/)
+ assert.doesNotMatch(board,/draggable|onDragStart|setStatus/)
+})

@@ -5,6 +5,7 @@ import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from './lib/offline'
 import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSync'
 import SkuQuantityGrid from './components/SkuQuantityGrid'
+import InspectionsKanban from './components/InspectionsKanban'
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
 const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
@@ -645,19 +646,6 @@ export default function App() {
   const canWrite = profile && profile.perfil !== 'consulta'
   const canManageIts = profile && ['administrador', 'gestor'].includes(profile.perfil)
   const canDelete = profile && ['administrador', 'gestor'].includes(profile.perfil)
-
-  // Avoid filtering the whole inspection array once for every process card.
-  const inspectionsByProcess=useMemo(()=>{
-    const grouped=new Map<string,InspectionRow[]>()
-    for(const item of inspections){
-      const processId=item.grupos_inspecao?.processo_id
-      if(!processId)continue
-      const items=grouped.get(processId)??[]
-      items.push(item)
-      grouped.set(processId,items)
-    }
-    return grouped
-  },[inspections])
 
   const statisticalLot = useMemo(() => {
     const valid = skuRows
@@ -2815,53 +2803,19 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </section>
       )}
 
-      {tab==='inspecoes' && (
-        <section className="workspace">
-          <div className="page-title">
-            <div><span className="eyebrow">PROCESSOS</span><h1>Inspeções</h1></div>
-            <button className="primary" onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={17}/> Nova inspeção</button>
-          </div>
-
-          <div className="process-list">
-            {processes.map((p)=>{
-              const related=inspectionsByProcess.get(p.id)??[]
-              return (
-                <article className="process-card" key={p.id}>
-                  <div className="process-head">
-                    <div>
-                      <span className="eyebrow">{formatFst(p.codigo)}</span>
-                      <h2>{p.cliente || 'Sem cliente'}</h2>
-                      <p>NF {p.nota_fiscal || '—'} · chegada {formatDateBR(p.chegada_cd)} · {p.origem || 'origem não informada'}</p>
-                    </div>
-                    <div className="row-actions">
-                      <button className="secondary" onClick={()=>reuseProcess(p)}><Copy size={15}/> Nova inspeção neste processo</button>
-                      <button className="secondary icon-only" title="Editar processo" onClick={()=>editProcessFull(p)}><Edit3 size={16}/></button>
-                      {canDelete && <button className="danger icon-only" type="button" title={deletingProcessId===p.id?'Excluindo processo…':'Excluir processo'} aria-label={deletingProcessId===p.id?'Excluindo processo':'Excluir processo'} disabled={deletingProcessId!==null} onClick={()=>deleteProcess(p)}><Trash2 size={16}/></button>}
-                    </div>
-                  </div>
-                  <div className="inspection-sublist">
-                    {related.map((i)=>(
-                      <div className="inspection-row sgq-inspection-card" key={i.id}>
-                        <div>
-                          <strong>{inspectionDisplay(i)}</strong>
-                          <span>{statusLabel(i.status)} · {i.grupos_inspecao?.nome} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0}</span>
-                        </div>
-                        <div className="row-actions">
-                          {i.resultado && i.resultado!=='pendente' && <span className={'result-badge '+i.resultado}>{statusLabel(i.resultado)}</span>}
-                          <button className="primary small" onClick={()=>openInspection(i.id)}>{i.status==='concluida'?'Abrir':i.status==='aberta'?'Editar / iniciar':'Continuar'}</button>
-                          {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection(i)}><Trash2 size={15}/></button>}
-                        </div>
-                      </div>
-                    ))}
-                    {!related.length && <span className="muted">Nenhuma inspeção neste processo.</span>}
-                  </div>
-                </article>
-              )
-            })}
-            {!processes.length && <div className="empty">Nenhum processo ativo no momento. Se necessário, inicie uma nova inspeção.</div>}
-          </div>
-        </section>
-      )}
+      {tab==='inspecoes' && <InspectionsKanban
+        inspections={inspections}
+        processes={processes}
+        canDelete={!!canDelete}
+        deletingProcessId={deletingProcessId}
+        formatFst={formatFst}
+        onOpen={id=>void openInspection(id)}
+        onCreate={()=>{resetNewInspection();setTab('nova')}}
+        onReuseProcess={id=>{const process=processes.find(p=>p.id===id);if(process)reuseProcess(process)}}
+        onEditProcess={id=>{const process=processes.find(p=>p.id===id);if(process)editProcessFull(process)}}
+        onDeleteProcess={id=>{const process=processes.find(p=>p.id===id);if(process)void deleteProcess(process)}}
+        onDeleteInspection={id=>{const item=inspections.find(i=>i.id===id);if(item)void deleteInspection(item)}}
+      />}
 
       {tab==='nova' && (
         <section className="workspace">
