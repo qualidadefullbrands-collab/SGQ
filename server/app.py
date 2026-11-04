@@ -415,55 +415,18 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
         docx=generate_inspection(template_bytes,payload)
         first_product=(items[0].get("produto") or {}) if items else {}
         filename=inspection_file_name(process.get("codigo"),first_product.get("sku"),first_product.get("nome"))
-        # Versioned key forces an old cached Word to be regenerated with the new
-        # formatting; percent-encoding preserves the exact download filename.
-        storage_filename=urllib.parse.quote(filename,safe="")
-        storage_path=f"{inspection_id}/laudo-v2/{storage_filename}"
-        await storage_upload(
-            client,token,"laudos",storage_path,docx,
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
-        print(f"[generate-inspection] inspection={inspection_id} it={it_code} storage={storage_path} bytes={len(docx)}")
+        # Download only: document is assembled from the official IT and returned
+        # directly. No Storage object key, upload or laudos DB write is required.
+        safe_name=urllib.parse.quote(filename,safe="")
+        print(f"[generate-inspection] inspection={inspection_id} it={it_code} generated_bytes={len(docx)}")
 
-        now=datetime.now(timezone.utc).isoformat()
-        existing=await table_rows(client,token,"laudos",{"inspecao_id":f"eq.{inspection_id}","select":"id","limit":"1"})
-        report_payload={
-            "inspecao_id":inspection_id,
-            "numero":inspection.get("numero"),
-            "storage_path":storage_path,
-            "gerado_em":now,
-        }
-        if existing:
-            r=await client.patch(
-                f"{SUPABASE_URL}/rest/v1/laudos",
-                headers={**rest_headers(token),"Prefer":"return=minimal"},
-                params={"id":f"eq.{existing[0]['id']}"},
-                json=report_payload,
-            )
-        else:
-            r=await client.post(
-                f"{SUPABASE_URL}/rest/v1/laudos",
-                headers={**rest_headers(token),"Prefer":"return=minimal"},
-                json=report_payload,
-            )
-        if r.status_code>=300:
-            raise HTTPException(status_code=502,detail=f"Falha ao registrar laudo: {r.text[:240]}")
-
-        await client.patch(
-            f"{SUPABASE_URL}/rest/v1/inspecoes",
-            headers={**rest_headers(token),"Prefer":"return=minimal"},
-            params={"id":f"eq.{inspection_id}"},
-            json={"documento_gerado_em":now},
-        )
-
-        safe_name=urllib.parse.quote(filename)
         return Response(
             content=docx,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={
                 "Content-Disposition":f"attachment; filename*=UTF-8''{safe_name}",
-                "X-SGQ-Storage-Path":storage_path,
                 "X-SGQ-File-Name":safe_name,
+                "Cache-Control":"no-store",
             },
         )
 
