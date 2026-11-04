@@ -243,7 +243,7 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
       <button className="sgq-mobile-save" type="button" onClick={()=>void save()} disabled={busy||!canWrite}><Upload size={19}/>{busy?'Salvando lote…':'Salvar '+pending.length+' foto(s)'}</button>
      </div>}}
      <div className="sgq-mobile-saved"><div className="sgq-mobile-section-head"><strong>Fotos salvas</strong><button type="button" disabled={busy||loading} onClick={()=>void load(inspectionId)}><RefreshCw size={16}/> Atualizar</button></div>
-      {context.photos.length?<div className="sgq-mobile-saved-grid">{context.photos.map(p=><figure key={p.id}>{p.signed_url?<img src={p.signed_url} alt={p.legenda}/>:<div className="sgq-mobile-placeholder"><Camera size={20}/></div>}<figcaption>{p.legenda||'Sem legenda'}</figcaption></figure>)}</div>:<p>Nenhuma foto enviada ainda.</p>}
+      {context.photos.length?<div className="sgq-mobile-saved-grid">{context.photos.map(p=><figure key={p.id}>{p.signed_url?<img src={p.signed_url} alt={p.legenda}/>:<div className="sgq-mobile-placeholder"><Camera size={20}/></div>}{p.legenda&&<figcaption>{p.legenda}</figcaption>}</figure>)}</div>:<p>Nenhuma foto enviada ainda.</p>}
      </div>
     </section>}
     <p className="sgq-mobile-description">As evidências ficam na inspeção original. A conclusão será feita no computador.</p>
