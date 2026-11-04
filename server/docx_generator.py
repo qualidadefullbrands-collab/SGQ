@@ -11,6 +11,7 @@ from docx.shared import RGBColor
 from docx.oxml import OxmlElement
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
+import unicodedata
 
 def fmt_date(value: str | None) -> str:
     if not value: return ""
@@ -327,7 +328,8 @@ def emphasize_sampling_tables(doc,inspection):
     evaluate=inspection.get("caixas_avaliar")
     for table in doc.tables:
         lines=[" | ".join(_norm(c.text) for c in row.cells) for row in table.rows]
-        scope=" ".join(lines[:min(len(lines),5)])
+        scope=unicodedata.normalize("NFKD"," ".join(lines[:min(len(lines),5)]))
+        scope="".join(ch for ch in scope if not unicodedata.combining(ch))
         is_lot=("tamanho do lote" in scope or "tamanho lote" in scope) and (
             "codigo" in scope or "amostr" in scope or "inspec" in scope)
         is_boxes=("caixas recebidas" in scope or "caixas a avaliar" in scope or
