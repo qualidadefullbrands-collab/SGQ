@@ -390,6 +390,9 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
         "quantidade por caixa": whole_number(first_item.get("quantidade_por_caixa")),
         "nº de caixas recebidas": whole_number(first_item.get("caixas_recebidas")),
         "n° de caixas recebidas": whole_number(first_item.get("caixas_recebidas")),
+        "caixas recebidas": whole_number(first_item.get("caixas_recebidas")),
+        "nº caixas recebidas": whole_number(first_item.get("caixas_recebidas")),
+        "total de caixas recebidas": whole_number(first_item.get("caixas_recebidas")),
         "chegada no cd": fmt_date(process.get("chegada_cd")),
         "data da inspeção": fmt_date(inspection.get("data_inspecao")),
     }
@@ -408,13 +411,18 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                 for cell in cells:
                     if "Nível" in cell.text or "Especial" in cell.text:
                         inspection_cell(cell,_fill_choice_text(cell.text,{"I":"Nível I","II":"Nível II","III":"Nível III","S1":"Especial S1","S2":"Especial S2","S3":"Especial S3","S4":"Especial S4"}.get(level,level)),8)
-            if len(cells)>=2 and _norm(cells[0].text)=="quantidade amostrada":
+            if len(cells)>=2 and _norm(cells[0].text) in ("quantidade amostrada","quantidade avaliada","qtd avaliada","qnt avaliada","quantidade inspecionada"):
                 sampled=inspection.get("total_inspecionado")
                 if sampled is None:
                     sampled=inspection.get("tamanho_amostra")
                 inspection_cell(cells[1],sampled,8,center=True,whole=True)
-            if len(cells)>=4 and _norm(cells[2].text)=="caixas avaliadas":
-                inspection_cell(cells[3],inspection.get("caixas_avaliar"),8,center=True,whole=True)
+            for idx,cell in enumerate(cells[:-1]):
+                if _norm(cell.text).rstrip(" :") in (
+                    "caixas avaliadas","caixas a avaliar","caixas para avaliar",
+                    "caixas a inspecionar","nº caixas avaliadas"):
+                    # Do not overwrite a reference table's adjacent header cell.
+                    if _norm(cells[idx+1].text) in ("","-","–"):
+                        inspection_cell(cells[idx+1],inspection.get("caixas_avaliar"),8,center=True,whole=True)
 
     by_check={str(x.get("checklist_id")):x for x in check_results}
     by_order={str(x.get("ordem")):x for x in checks}
@@ -428,9 +436,9 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                 if not check: continue
                 result=by_check.get(str(check.get("id")),{}).get("resultado")
                 if len(row.cells)>=6:
-                    inspection_cell(row.cells[3],"X" if result=="conforme" else EMPTY,9,center=True)
-                    inspection_cell(row.cells[4],"X" if result=="nao_conforme" else EMPTY,9,center=True)
-                    inspection_cell(row.cells[5],"X" if result=="nao_aplicavel" else EMPTY,9,center=True)
+                    for column,selected in ((3,"conforme"),(4,"nao_conforme"),(5,"nao_aplicavel")):
+                        if result==selected: inspection_cell(row.cells[column],"X",9,center=True)
+                        else: set_cell(row.cells[column],"",9,center=True)
 
     config_key={(str(x.get("processo_item_id")),str(x.get("parametro_id"))):x for x in dim_configs}
     result_key={}
