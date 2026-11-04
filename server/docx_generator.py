@@ -61,7 +61,7 @@ def add_row(table,values,size=7.5):
 def photo_bytes(source):
     return source if isinstance(source,(bytes,bytearray)) else None
 
-def add_photo(cell,data:bytes,caption:str,width=1.75,fixed_frame=False):
+def add_photo(cell,data:bytes,caption:str,width=1.75,fixed_frame=False,max_height=None):
     im=ImageOps.exif_transpose(Image.open(BytesIO(data))).convert("RGB")
     if fixed_frame:
         # Fixed canvas prevents photos of different aspect ratios getting distorted,
@@ -76,8 +76,13 @@ def add_photo(cell,data:bytes,caption:str,width=1.75,fixed_frame=False):
         p._element.getparent().remove(p._element)
     p=cell.add_paragraph(); p.alignment=WD_ALIGN_PARAGRAPH.CENTER
     if fixed_frame: p.add_run().add_picture(out,width=Inches(width),height=Inches(width*750/1050))
-    else: p.add_run().add_picture(out,width=Inches(width))
-    cap=cell.add_paragraph(); cap.alignment=WD_ALIGN_PARAGRAPH.CENTER if fixed_frame else WD_ALIGN_PARAGRAPH.LEFT
+    else:
+        # Fit large portrait/landscape images within the available row height,
+        # without cropping, stretching or surrounding them with a white frame.
+        display_width=min(width,max_height*im.width/im.height) if max_height else width
+        p.add_run().add_picture(out,width=Inches(display_width))
+    p.paragraph_format.keep_with_next=True
+    cap=cell.add_paragraph(); cap.alignment=WD_ALIGN_PARAGRAPH.CENTER if (fixed_frame or max_height) else WD_ALIGN_PARAGRAPH.LEFT
     r=cap.add_run(filled(caption) if fixed_frame else str(caption or "")); set_font(r,7,bold=fixed_frame)
     if fixed_frame: r.font.color.rgb=NAVY
 
@@ -335,59 +340,51 @@ def _range_matches(celltext,value):
     return False
 
 def emphasize_sampling_tables(doc,inspection):
-    """Mark the statistical-lot row/code and selected box-sampling row in official IT tables.
-
-    Only tables containing appropriate sampling/box headers qualify.  Never highlight
-    arbitrary numeric measurements or an unrelated row just because a number matches.
-    """
+    """Highlight the selected range, respecting vertical versus horizontal tables."""
     lot=inspection.get("tamanho_lote")
     code=str(inspection.get("codigo_amostragem") or "").strip().upper()
     boxes=inspection.get("caixas_recebidas")
     if boxes is None: boxes=inspection.get("total_caixas_recebidas")
-    evaluate=inspection.get("caixas_avaliar")
     for table in doc.tables:
         lines=[" | ".join(_norm(c.text) for c in row.cells) for row in table.rows]
         scope=unicodedata.normalize("NFKD"," ".join(lines[:min(len(lines),5)]))
         scope="".join(ch for ch in scope if not unicodedata.combining(ch))
         is_lot=("tamanho do lote" in scope or "tamanho lote" in scope) and (
             "codigo" in scope or "amostr" in scope or "inspec" in scope)
-        is_boxes=("caixas recebidas" in scope or "caixas a avaliar" in scope or
-                  "caixas para avaliar" in scope or "caixas avaliadas" in scope or
-                  "caixas a inspecionar" in scope)
+        is_boxes=("caixas recebidas" in scope and
+                  ("caixas a avaliar" in scope or "caixas para avaliar" in scope or
+                   "caixas avaliadas" in scope or "caixas a inspecionar" in scope))
         if is_lot and lot is not None:
             for row in table.rows:
-                texts=[c.text for c in row.cells]
-                if not any(_range_matches(t,lot) for t in texts): continue
-                # Highlight the selected statistical range and the applied code
-                # in the same row/level when the code is present.
+                if not any(_range_matches(c.text,lot) for c in row.cells): continue
                 for cell in row.cells: mark_cell(cell)
                 if code and len(code)<=3:
                     for cell in row.cells:
                         if re.fullmatch(re.escape(code),cell.text.strip(),re.I):
                             mark_cell(cell,"BED9EF")
                 break
-        if is_boxes and boxes is not None:
-            for row in table.rows:
-                cells=row.cells
-                if not cells: continue
-                if not any(_range_matches(c.text,boxes) for c in cells): continue
-                for cell in cells: mark_cell(cell)
-                if evaluate is not None:
-                    for cell in cells:
-                        if _contains_number(cell.text,evaluate):
-                            mark_cell(cell,"BED9EF")
-                break
-            # Some official templates use a two-column box summary instead of
-            # ranges.  Emphasize its actual received/evaluated numbers.
-            for row in table.rows:
-                cells=row.cells
-                for idx,cell in enumerate(cells[:-1]):
-                    label=_norm(cell.text)
-                    if ("caixas recebidas" in label or "caixas a avaliar" in label or
-                        "caixas avaliadas" in label or "caixas para avaliar" in label):
-                        target=boxes if "recebidas" in label else evaluate
-                        if target is not None and _contains_number(cells[idx+1].text,target):
-                            mark_cell(cells[idx+1],"BED9EF")
+        if not is_boxes or boxes is None: continue
+        # Official horizontal 2-row matrix: header = received-box ranges,
+        # second row = required sample. Mark ONLY the matching vertical column.
+        if len(table.rows)==2 and len(table.columns)>2 and (
+            "caixas recebidas" in _norm(table.cell(0,0).text) and
+            "caixas a avaliar" in _norm(table.cell(1,0).text)):
+            for col in range(1,len(table.columns)):
+                header=table.cell(0,col).text.strip()
+                if _range_matches(header,boxes) or (
+                    re.fullmatch(r"\\d+",header) and _contains_number(header,boxes)):
+                    mark_cell(table.cell(0,col),"BED9EF")
+                    mark_cell(table.cell(1,col),"BED9EF")
+                    break
+            continue
+        # Vertical reference matrix: one range per row, two columns.
+        if len(table.columns)==2 and _norm(table.cell(0,0).text).startswith("caixas recebidas"):
+            for row in table.rows[1:]:
+                if _range_matches(row.cells[0].text,boxes):
+                    for cell in row.cells: mark_cell(cell)
+                    break
+        # Summary fields (e.g. 'Caixas avaliadas: 10') are intentionally neutral.
+
 
 def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
     doc=Document(BytesIO(template_bytes))
@@ -404,12 +401,40 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
 
     first_item=items[0] if items else {}
     product=first_item.get("produto") or {}
-    all_skus=list(dict.fromkeys(str((item.get("produto") or {}).get("sku") or "").strip()
-        for item in items if str((item.get("produto") or {}).get("sku") or "").strip()))
+    all_skus=list(dict.fromkeys(str((item.get("produto") or {}).get("sku") or item.get("codigo_cliente") or "").strip()
+        for item in items if str((item.get("produto") or {}).get("sku") or item.get("codigo_cliente") or "").strip()))
+    grouped={}
+    for item in items:
+        sku=str((item.get("produto") or {}).get("sku") or item.get("codigo_cliente") or "SEM-SKU").strip()
+        grouped.setdefault(sku,[]).append(item)
+    multi_sku=len(grouped)>1
+
+    def sku_values(field,mode="sum"):
+        if not multi_sku:
+            return whole_number(first_item.get(field))
+        lines=[]
+        for sku,records in grouped.items():
+            values=[item[field] for item in records if item.get(field) is not None
+                    and str(item[field]).strip()!=""]
+            if mode=="distinct":
+                result=" / ".join(dict.fromkeys(whole_number(v) for v in values)) or EMPTY
+            else:
+                numbers=[]
+                for value in values:
+                    try: numbers.append(Decimal(str(value).replace(",", ".")))
+                    except InvalidOperation: pass
+                result=whole_number(sum(numbers)) if numbers else EMPTY
+            lines.append(f"{sku} — {result}")
+        return "\\n".join(lines)
+
+    def sku_descriptions():
+        if not multi_sku: return product.get("nome") or ""
+        return "\\n".join(f"{sku} — {(records[0].get('produto') or {}).get('nome') or EMPTY}"
+                         for sku,records in grouped.items())
     total_boxes=inspection.get("caixas_recebidas")
     if total_boxes is None: total_boxes=first_item.get("caixas_recebidas")
     identification={
-        "produto / descrição": product.get("nome") or "",
+        "produto / descrição": sku_descriptions(),
         # In SGQ the customer's product code is the registered SKU.
         "código do cliente": "\n".join(all_skus),
         "cliente": process.get("cliente") or "",
@@ -420,21 +445,25 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
         "capacidade": first_item.get("capacidade") or "",
         "origem": process.get("origem") or "",
         "transporte": process.get("transporte") or "",
-        "quantidade recebida": whole_number(first_item.get("quantidade")),
-        "quantidade por caixa": whole_number(first_item.get("quantidade_por_caixa")),
-        "nº de caixas recebidas": whole_number(total_boxes),
-        "n° de caixas recebidas": whole_number(total_boxes),
-        "caixas recebidas": whole_number(total_boxes),
-        "nº caixas recebidas": whole_number(total_boxes),
-        "total de caixas recebidas": whole_number(total_boxes),
+        "quantidade recebida": sku_values("quantidade"),
+        "quantidade por caixa": sku_values("quantidade_por_caixa","distinct"),
+        "nº de caixas recebidas": sku_values("caixas_recebidas") if multi_sku else whole_number(total_boxes),
+        "n° de caixas recebidas": sku_values("caixas_recebidas") if multi_sku else whole_number(total_boxes),
+        "caixas recebidas": sku_values("caixas_recebidas") if multi_sku else whole_number(total_boxes),
+        "nº caixas recebidas": sku_values("caixas_recebidas") if multi_sku else whole_number(total_boxes),
+        "total de caixas recebidas": sku_values("caixas_recebidas") if multi_sku else whole_number(total_boxes),
         "chegada no cd": fmt_date(process.get("chegada_cd")),
         "data da inspeção": fmt_date(inspection.get("data_inspecao")),
     }
 
     for table in doc.tables:
+        # Never replace the first range ('1') in the preprinted boxes matrix.
+        horizontal_boxes=(len(table.rows)==2 and len(table.columns)>2 and
+            "caixas recebidas" in _norm(table.cell(0,0).text) and
+            "caixas a avaliar" in _norm(table.cell(1,0).text))
         for row in table.rows:
             cells=row.cells
-            if len(cells)>=2:
+            if len(cells)>=2 and not horizontal_boxes:
                 for idx in range(0,len(cells)-1):
                     label=_norm(cells[idx].text).rstrip(" :")
                     if label in identification:
@@ -543,25 +572,40 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
     emphasize_sampling_tables(doc,inspection)
 
     photo_table=None
-    for idx,table in enumerate(doc.tables):
+    for table in doc.tables:
         if any("FOTO" in (c.text or "").upper() for row in table.rows for c in row.cells):
-            if len(table.rows)>=2 and len(table.columns)>=2:
-                photo_table=table
-    if photo_table and photos:
-        cells=[cell for row in photo_table.rows for cell in row.cells]
-        for idx,item in enumerate(photos[:len(cells)]):
+            if len(table.rows)>=2 and len(table.columns)>=2: photo_table=table
+    if photos:
+        if photo_table is None:
+            doc.add_paragraph("REGISTRO FOTOGRÁFICO")
+            photo_table=doc.add_table(rows=0,cols=3)
+        elif len(photo_table.columns)!=3:
+            # Do not squeeze a third photograph into an official two-column cell.
+            three=doc.add_table(rows=0,cols=3)
+            photo_table._tbl.addnext(three._tbl)
+            photo_table=three
+        needed=(len(photos)+2)//3
+        while len(photo_table.rows)<needed: photo_table.add_row()
+        for idx,item in enumerate(photos):
             data=photo_bytes(item.get("bytes"))
-            if data:
-                add_photo(cells[idx],data,item.get("caption") or "",width=1.95,fixed_frame=True)
+            if not data: raise ValueError(f"Foto {idx+1} não disponível para compor o laudo.")
+            cell=photo_table.cell(idx//3,idx%3)
+            add_photo(cell,data,item.get("caption") or f"Foto {idx+1}",
+                      width=2.17,max_height=2.5)
+        for idx in range(len(photos),len(photo_table.rows)*3):
+            set_cell(photo_table.cell(idx//3,idx%3),"")
+        for row in photo_table.rows:
+            trPr=row._tr.get_or_add_trPr()
+            if trPr.find(qn("w:cantSplit")) is None: trPr.append(OxmlElement("w:cantSplit"))
 
     out=BytesIO(); doc.save(out); return out.getvalue()
 
-def inspection_file_name(process_code:str|None,sku:str|None,product_name:str|None=None)->str:
+def inspection_file_name(process_code:str|None,sku:str|None,product_name:str|None=None,collection_name:str|None=None)->str:
     process=fst_code(process_code) if process_code else "FST-SEM-NUMERO"
     sku=str(sku or "SEM-SKU").strip()
     product=str(product_name or "PRODUTO").strip()
     # The visible Word filename is separate from the safe storage object key.
-    raw=f"{process} . {sku} {product}"
+    raw=f"{process} . Conjunto {collection_name.strip()}" if collection_name and collection_name.strip() else f"{process} . {sku} {product}"
     clean=re.sub(r'[\\/:*?"<>|]+'," ",raw)
     clean=re.sub(r"\s+"," ",clean).strip(" .")
     return f"{clean[:170].rstrip(' .')}.docx"
