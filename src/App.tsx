@@ -2807,6 +2807,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         inspections={inspections}
         processes={processes}
         canDelete={!!canDelete}
+        deletingProcessId={deletingProcessId}
         formatFst={formatFst}
         onOpen={id=>void openInspection(id)}
         onCreate={()=>{resetNewInspection();setTab('nova')}}
