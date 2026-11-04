@@ -18,7 +18,7 @@ function runtime(initial){
  }
  const connectionFailure=message=>/failed to fetch|network/i.test(message)
  const transpiled=ts.transpileModule(sync.replace(/^import .*\n/gm,''),{
-  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}
  }).outputText.replace(/^export /gm,'')
  const navigator={get onLine(){return online}}
  const {replayOfflineOperations}=new Function('apiGet','apiPost','apiPut','supabase','clearOfflineOperation','markOfflineConflict','offlineOperations','connectionFailure','navigator',
