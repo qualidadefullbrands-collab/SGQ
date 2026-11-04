@@ -126,6 +126,16 @@ async def health():
 async def self_test():
     bundled=sorted(TEMPLATE_DIR.glob("IT*.docx")) if TEMPLATE_DIR.exists() else []
     template_tests={}
+    from PIL import Image
+    from io import BytesIO
+    from docx.shared import Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    sample_photos=[]
+    for width,height in ((1200,500),(500,1200)):
+        img=Image.new("RGB",(width,height),(80,110,140))
+        buf=BytesIO()
+        img.save(buf,format="PNG")
+        sample_photos.append({"bytes":buf.getvalue(),"caption":f"Legenda de teste {len(sample_photos)+1}"})
     minimal={
         "inspection":{"numero":"SELF-TEST","status":"concluida","resultado":"aprovado",
             "nivel_inspecao":"II","tamanho_lote":1025,"tamanho_amostra":32,
@@ -142,7 +152,7 @@ async def self_test():
         "dim_results":[],
         "tests":[],
         "test_results":[],
-        "photos":[],
+        "photos":sample_photos,
         "inspector_name":"SGQ",
     }
     for path in bundled:
@@ -176,11 +186,17 @@ async def self_test():
                     "avaliar" in content or "avaliadas" in content or "avaliad" in content):
                     box_tables+=1
                     box_marks+=selected(table)
+            sample_shapes=[p for p in word.inline_shapes if
+                p.width==Inches(1.75) and p.height==Inches(1.25)]
+            centered_captions=sum(1 for c in cells for p in c.paragraphs
+                if "Legenda de teste" in p.text and p.alignment==WD_ALIGN_PARAGRAPH.CENTER)
             template_tests[path.stem]={
                 "ok":True,"bytes":len(generated),"fst":("FST26169-A" in rendered_text),
                 "sku":("SKU1234" in rendered_text),"navy_bold":strong_navy,
                 "selected_sampling_cells":markers,
-                "lot_marks":sampling_marks,"box_marks":box_marks,"box_tables":box_tables
+                "lot_marks":sampling_marks,"box_marks":box_marks,"box_tables":box_tables,
+                "photos_uniformes":len(sample_shapes)>=2,
+                "legendas_centralizadas":centered_captions>=2
             }
         except Exception as exc:
             template_tests[path.stem]={"ok":False,"error":str(exc)}
