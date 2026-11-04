@@ -20,7 +20,7 @@ let openPromise:Promise<IDBDatabase>|null=null
 function database():Promise<IDBDatabase>{
   if(!('indexedDB' in window))return Promise.reject(new Error('Este navegador não permite salvamento offline.'))
   if(openPromise)return openPromise
-  openPromise=new Promise((resolve,reject)=>{
+  openPromise=new Promise<IDBDatabase>((resolve,reject)=>{
     const req=indexedDB.open(DATABASE,VERSION)
     req.onupgradeneeded=()=>{
       const db=req.result
@@ -31,7 +31,7 @@ function database():Promise<IDBDatabase>{
     req.onerror=()=>reject(req.error??new Error('Não foi possível abrir o armazenamento local.'))
     req.onblocked=()=>reject(new Error('Feche outra aba do SGQ para atualizar o armazenamento local.'))
   }).catch(error=>{openPromise=null;throw error})
-  return openPromise
+  return openPromise!
 }
 function requestValue<T>(request:IDBRequest<T>):Promise<T>{
   return new Promise((resolve,reject)=>{
