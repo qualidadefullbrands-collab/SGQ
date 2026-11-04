@@ -57,7 +57,7 @@ test('Order quantity is reference, editable receipt total is applied on modal cl
  assert.match(app,/value=\{row\.quantidade\} onChange=/)
 })
 test('Changing the FST invalidates stale lookups and removes only old Omie-imported rows',()=>{
- assert.match(app,/fstLookupRequest\.current\+\+;setProcessLookupBusy\(false\)/)
+ assert.match(app,/fstLookupRequest\.current\+\+;fstNfeRequest\.current\+\+;fstLookupInFlight\.current=null;setProcessLookupBusy\(false\)/)
  assert.match(app,/setOmieSkuImport\(null\);setOmieSkuReview\(null\);setOmieSkuReviewError\(''\);setOmieOrderPickerOpen\(false\);setOmieOrders\(null\);setOmieSelectedOrder\(''\)/)
  assert.match(app,/rows\.filter\(row=>!row\.omieSourceFst\|\|row\.omieSourceFst===fstCode\(inputValue\)\)/)
  assert.match(lookup,/if\(requestId!==fstLookupRequest\.current\)return/)

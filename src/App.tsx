@@ -545,6 +545,11 @@ export default function App() {
   const [omieOrderPickerOpen,setOmieOrderPickerOpen]=useState(false)
   const [omieOrders,setOmieOrders]=useState<{codigo:string;pedidos:OmieOrder[]}|null>(null)
   const [omieSelectedOrder,setOmieSelectedOrder]=useState('')
+  // Omie rejects repeated reads of the same record for 60 seconds.
+  const fstLookupInFlight=useRef<string|null>(null)
+  const fstResponseCache=useRef(new Map<string,{at:number;data:any}>())
+  const fstNfeRequest=useRef(0)
+  const fstNfeAttempt=useRef(new Map<string,number>())
   const productSearchTimers = useRef<Record<number,number>>({})
   const loadAppRequest = useRef<Promise<void> | null>(null)
   const catalogsRequest=useRef<Promise<void>|null>(null)
@@ -1170,7 +1175,7 @@ export default function App() {
     try{
       const {data,error}=await authClient.functions.invoke('sgq-omie-fst',
         {body:{codigo:code,modo:'nfe'}})
-      if(error||lookupId!==fstLookupRequest.current)return
+      if(error||lookupId!==fstNfeRequest.current)return
       const numero=String(data?.numeroNota||'').trim()
       if(data?.status!=='matched'||!numero)return
       setInspection(current=>{
@@ -1186,12 +1191,21 @@ export default function App() {
   async function lookupFstClient(value:string,codigoPedido?:number){
     const code=fstCode(value)
     if(!code){setProcessLookupMessage('');return}
+    const lookupKey=code+':'+(codigoPedido??0)
+    // Blur, button clicks and modal focus may happen in quick succession.
+    // Never restart a request or discard a quantity review already on screen.
+    if(fstLookupInFlight.current===lookupKey)return
+    if(!codigoPedido && (omieSkuReview?.codigo===code ||
+      (omieOrderPickerOpen && omieOrders?.codigo===code)))return
+    fstLookupInFlight.current=lookupKey
     const requestId=++fstLookupRequest.current
     setProcessLookupMessage('')
-    setOmieSkuImport(null)
-    setOmieSkuReview(null)
+    if(!codigoPedido){
+      setOmieSkuImport(null)
+      setOmieSkuReview(null)
+      setOmieOrderPickerOpen(false)
+    }
     setOmieSkuReviewError('')
-    setOmieOrderPickerOpen(false)
     setProcessLookupBusy(true)
     const existing=processes.find(p=>fstCode(p.codigo)===code)
     if(existing){
@@ -1202,19 +1216,34 @@ export default function App() {
       }:old)
     }
     try{
-      const {data,error}=await authClient.functions.invoke('sgq-omie-fst',
-        {body:{codigo:code,...(codigoPedido?{codigoPedido}:{})}})
+      const saved=fstResponseCache.current.get(lookupKey)
+      const response=saved && Date.now()-saved.at<65000
+        ? {data:saved.data,error:null}
+        : await authClient.functions.invoke('sgq-omie-fst',
+          {body:{codigo:code,...(codigoPedido?{codigoPedido}:{})}})
+      const {data,error}=response
       if(requestId!==fstLookupRequest.current)return
       if(error||data?.error){
-        setProcessLookupMessage('Não foi possível consultar os itens no Omie. Tente novamente.')
+        // A failed follow-up must not close the order picker or an existing review.
+        setProcessLookupMessage('Falha na consulta ao Omie. Tente novamente.')
         return
+      }
+      if(data?.found)fstResponseCache.current.set(lookupKey,{at:Date.now(),data})
+      if(fstResponseCache.current.size>30){
+        const oldest=fstResponseCache.current.keys().next().value
+        if(oldest)fstResponseCache.current.delete(oldest)
       }
       if(!data?.found){
         setProcessLookupMessage(existing?'':'Processo não localizado no Omie.')
         return
       }
-      if(Number.isFinite(Number(data.projectId))&&Number(data.projectId)>0)
-        void lookupFstNfe(code,requestId)
+      if(!codigoPedido && Number.isFinite(Number(data.projectId))&&Number(data.projectId)>0){
+        const lastAttempt=fstNfeAttempt.current.get(code)??0
+        if(Date.now()-lastAttempt>120000){
+          fstNfeAttempt.current.set(code,Date.now())
+          void lookupFstNfe(code,++fstNfeRequest.current)
+        }
+      }
       if(data.cliente)setInspection(old=>fstCode(old.codigo)===code?{...old,cliente:old.cliente||String(data.cliente)}:old)
       const orders:OmieOrder[]=Array.isArray(data.pedidos)?data.pedidos.filter((o:any)=>
         Number.isInteger(Number(o.codigoPedido))&&Number(o.codigoPedido)>0).map((o:any)=>({
@@ -1245,6 +1274,7 @@ export default function App() {
     }catch{
       if(requestId===fstLookupRequest.current)setProcessLookupMessage('Consulta ao Omie indisponível. Tente novamente.')
     }finally{
+      if(fstLookupInFlight.current===lookupKey)fstLookupInFlight.current=null
       if(requestId===fstLookupRequest.current)setProcessLookupBusy(false)
     }
   }
@@ -2428,7 +2458,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <div className="sgq-fst-field">
                   <label htmlFor="sgq-fst-input">Processo</label>
                   <div className="sgq-fst-controls">
-                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection(current=>{const prev=autoNfeRef.current;const clear=prev&&fstCode(inputValue)!==prev.fst&&current.notaFiscal===prev.numero;if(clear)autoNfeRef.current=null;return {...current,codigo:inputValue,notaFiscal:clear?'':current.notaFiscal}})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
+                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;fstNfeRequest.current++;fstLookupInFlight.current=null;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection(current=>{const prev=autoNfeRef.current;const clear=prev&&fstCode(inputValue)!==prev.fst&&current.notaFiscal===prev.numero;if(clear)autoNfeRef.current=null;return {...current,codigo:inputValue,notaFiscal:clear?'':current.notaFiscal}})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
                     <button type="button" className="secondary sgq-fst-retry" disabled={processLookupBusy||!fstCode(inspection.codigo)}
                       onMouseDown={e=>e.preventDefault()} onClick={()=>void lookupFstClient(inspection.codigo)} title="Buscar cliente e SKUs no Omie">
                       <Search size={16}/> Consultar
@@ -3417,6 +3447,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 </option>)}
               </select>
             </label>
+            {processLookupMessage && !processLookupBusy && <p className="omie-review-validation" role="alert">{processLookupMessage}</p>}
             <div className="omie-review-actions">
               <button type="button" className="secondary" onClick={()=>setOmieOrderPickerOpen(false)}>Fechar</button>
               <button type="button" className="primary" disabled={!omieSelectedOrder||processLookupBusy}

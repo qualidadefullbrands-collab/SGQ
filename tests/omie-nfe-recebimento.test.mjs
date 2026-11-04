@@ -57,17 +57,49 @@ test('NF search is independently asynchronous and protects manually typed number
  assert.ok(start>0&&end>start)
  const fn=app.slice(start,end)
  assert.match(fn,/body:\{codigo:code,modo:'nfe'\}/)
- assert.match(fn,/if\(error\|\|lookupId!==fstLookupRequest\.current\)return/)
+ assert.match(fn,/if\(error\|\|lookupId!==fstNfeRequest\.current\)return/)
  assert.match(fn,/data\?\.status!=='matched'/)
  assert.match(fn,/fstCode\(current\.codigo\)!==code \|\| current\.notaFiscal\.trim\(\)/)
- assert.match(app,/void lookupFstNfe\(code,requestId\)/)
+ assert.match(app,/void lookupFstNfe\(code,\+\+fstNfeRequest\.current\)/)
  assert.match(app,/autoNfeRef\.current=null;setInspection\(\{\.\.\.inspection,notaFiscal:e\.target\.value\}\)/)
  assert.match(app,/notaFiscal:clear\?'':current\.notaFiscal/)
 })
+
+test('NF lookup is independent from selecting a second Omie order',()=>{
+ assert.match(app,/if\(!codigoPedido && Number\.isFinite\(Number\(data\.projectId\)\)/)
+ assert.match(app,/void lookupFstNfe\(code,\+\+fstNfeRequest\.current\)/)
+ assert.match(app,/fstNfeAttempt\.current\.get\(code\)/)
+ assert.match(edge,/const receiptInFlight=new Map<number,Promise<any>>\(\)/)
+ assert.match(edge,/if\(running\)return running/)
+})
+
 test('redundant review message and internal observation placeholder are absent',()=>{
  assert.doesNotMatch(app,/código\(s\) revisados do PV/)
  assert.doesNotMatch(app,/Quantidades atualizadas no formulário; clique em Salvar/)
  assert.doesNotMatch(app,/Ex\.: 60 un retiradas no laboratório para retenção; caixa fracionada com 16 un/)
  assert.match(app,/setSkuRows\(rows=>applyOmieReviewedRows\(rows,review\)\)/)
  assert.match(app,/setProcessLookupMessage\(''\)/)
+})
+
+test('Omie success is shared in flight and served from cache for duplicate calls',async()=>{
+ const start=edge.indexOf('const omieReadCache=')
+ const end=edge.indexOf('// Preserve the suffix:',start)
+ assert.ok(start>0&&end>start)
+ const code=ts.transpileModule(edge.slice(start,end),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
+ let calls=0
+ const fakeFetch=async()=>{
+   calls++
+   await Promise.resolve()
+   return {ok:true,json:async()=>({found:true,callCount:calls})}
+ }
+ const omie=new Function('fetch',code+'\nreturn omie')(fakeFetch)
+ const args=['https://app.omie.com.br/api/v1/geral/projetos/','ListarProjetos',{nome_projeto:'FST26169-A'},'key','secret']
+ const [first,second]=await Promise.all([omie(...args),omie(...args)])
+ assert.equal(calls,1)
+ assert.deepEqual(first,second)
+ const third=await omie(...args)
+ assert.equal(calls,1)
+ assert.deepEqual(third,first)
+ await omie(args[0],args[1],{nome_projeto:'FST26169-B'},args[3],args[4])
+ assert.equal(calls,2)
 })

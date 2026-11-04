@@ -10,23 +10,49 @@ async function secret(name:string){
   const {data}=await admin.rpc("edge_get_integration_secret",{p_name:name});
   return data?String(data).trim():"";
 }
+// Omie blocks repeated lookups of the same identifier within 60 seconds.
+// Deduplicate in-flight reads and reuse successful responses briefly.
+const omieReadCache=new Map<string,{expiresAt:number;value:any}>();
+const omieReadInFlight=new Map<string,Promise<any>>();
 async function omie(url:string,call:string,parameter:unknown,appKey:string,appSecret:string){
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),14000);
+  const cacheKey=appKey+"|"+url+"|"+call+"|"+JSON.stringify(parameter);
+  const cached=omieReadCache.get(cacheKey);
+  if(cached?.expiresAt && cached.expiresAt>Date.now())return cached.value;
+  if(cached)omieReadCache.delete(cacheKey);
+  const running=omieReadInFlight.get(cacheKey);
+  if(running)return running;
+  const job=(async()=>{
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),14000);
+    try{
+      const r=await fetch(url,{
+        method:"POST",signal:controller.signal,
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({call,app_key:appKey,app_secret:appSecret,param:[parameter]})
+      });
+      const body=await r.json().catch(()=>({}));
+      if(!r.ok||body?.faultstring||body?.faultcode){
+        console.warn("Omie lookup failure",call,"status",r.status,"fault",String(body?.faultcode||""));
+        return null;
+      }
+      return body;
+    }catch(e){console.error("Omie request failed",call,String(e));return null}
+    finally{clearTimeout(timer)}
+  })();
+  omieReadInFlight.set(cacheKey,job);
   try{
-    const r=await fetch(url,{
-      method:"POST",signal:controller.signal,
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({call,app_key:appKey,app_secret:appSecret,param:[parameter]})
-    });
-    const body=await r.json().catch(()=>({}));
-    if(!r.ok||body?.faultstring||body?.faultcode){
-      console.warn("Omie lookup failure",call,"status",r.status,"fault",String(body?.faultcode||""));
-      return null;
+    const value=await job;
+    if(value){
+      if(omieReadCache.size>=250){
+        const oldest=omieReadCache.keys().next().value;
+        if(oldest)omieReadCache.delete(oldest);
+      }
+      omieReadCache.set(cacheKey,{expiresAt:Date.now()+65000,value});
     }
-    return body;
-  }catch(e){console.error("Omie request failed",call,String(e));return null}
-  finally{clearTimeout(timer)}
+    return value;
+  }finally{
+    if(omieReadInFlight.get(cacheKey)===job)omieReadInFlight.delete(cacheKey);
+  }
 }
 // Preserve the suffix: FST26169-A and FST26169-B are distinct projects.
 function canonical(value:unknown){
@@ -61,7 +87,16 @@ function receiptsForProject(rows:any[],projectId:number){
   }
   return [...byKey.values()];
 }
+const receiptInFlight=new Map<number,Promise<any>>();
 async function lookupIncomingNfe(projectId:number,appKey:string,appSecret:string){
+  const running=receiptInFlight.get(projectId);
+  if(running)return running;
+  const job=lookupIncomingNfePages(projectId,appKey,appSecret);
+  receiptInFlight.set(projectId,job);
+  try{return await job}
+  finally{if(receiptInFlight.get(projectId)===job)receiptInFlight.delete(projectId)}
+}
+async function lookupIncomingNfePages(projectId:number,appKey:string,appSecret:string){
   const previous=receiptCache.get(projectId);
   if(previous && Date.now()-previous.timestamp<120000)return previous.result;
   // Two-year horizon, evaluated independently from the SKU lookup so this

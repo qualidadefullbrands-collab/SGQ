@@ -114,3 +114,16 @@ test('responsive table uses explicit SKU and receipt columns',()=>{
  assert.match(css,/\.omie-review-table/)
  assert.match(css,/@media\(max-width:600px\)/)
 })
+
+test('repeat lookup does not destroy an open popup, and failed order detail keeps picker open',()=>{
+ const lookup=app.slice(app.indexOf('async function lookupFstClient('),app.indexOf('async function saveProcessEdit('))
+ assert.match(lookup,/if\(fstLookupInFlight\.current===lookupKey\)return/)
+ assert.match(lookup,/omieSkuReview\?\.codigo===code/)
+ assert.match(lookup,/omieOrderPickerOpen && omieOrders\?\.codigo===code/)
+ assert.match(lookup,/if\(!codigoPedido\)\{[\s\S]*?setOmieOrderPickerOpen\(false\)/)
+ assert.match(lookup,/fstResponseCache\.current\.get\(lookupKey\)/)
+ assert.match(lookup,/Date\.now\(\)-saved\.at<65000/)
+ assert.match(lookup,/if\(requestId!==fstLookupRequest\.current\)return/)
+ assert.match(lookup,/if\(fstLookupInFlight\.current===lookupKey\)fstLookupInFlight\.current=null/)
+ assert.match(app,/processLookupMessage && !processLookupBusy && <p className="omie-review-validation"/)
+})
