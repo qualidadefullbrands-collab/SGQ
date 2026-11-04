@@ -2348,6 +2348,13 @@ app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInsp
             }
             saved++;
         }
+        if(saved>0)
+        {
+            // Newly uploaded evidence must appear in the next generated Word.
+            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+                $"id=eq.{Uri.EscapeDataString(id)}",
+                new {documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
+        }
         return Results.Ok(new {data=new {salvas=saved},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
