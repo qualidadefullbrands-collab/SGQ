@@ -2326,7 +2326,9 @@ app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInsp
         var saved=0;
         foreach(var photo in input.Fotos ?? [])
         {
-            if(string.IsNullOrWhiteSpace(photo.StoragePath)||string.IsNullOrWhiteSpace(photo.Legenda))continue;
+            if(string.IsNullOrWhiteSpace(photo.StoragePath))continue;
+            if(photo.Legenda?.Trim().Length>300)
+                return Results.Json(Error("Legenda com mais de 300 caracteres."),statusCode:400);
             if(!photo.StoragePath.StartsWith(id+"/gerais/",StringComparison.Ordinal))
                 return Results.Json(Error("A foto não pertence a esta inspeção."),statusCode:400);
             // A repeat request after mobile network failure must not create duplicate evidence.
@@ -2336,7 +2338,7 @@ app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInsp
             if(!alreadySaved)
             {
                 await RestAsync(client,token,HttpMethod.Post,"inspecao_fotos","",
-                    new {inspecao_id=id,storage_path=photo.StoragePath,legenda=photo.Legenda.Trim()},"return=minimal");
+                    new {inspecao_id=id,storage_path=photo.StoragePath,legenda=string.IsNullOrWhiteSpace(photo.Legenda)?null:photo.Legenda.Trim()},"return=minimal");
                 if(!string.IsNullOrWhiteSpace(photo.ProductId)&&!string.IsNullOrWhiteSpace(photo.ProductPhotoPath))
                 {
                     await RestAsync(client,token,HttpMethod.Patch,"produtos",
@@ -2346,10 +2348,58 @@ app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInsp
             }
             saved++;
         }
+        if(saved>0)
+        {
+            // Newly uploaded evidence must appear in the next generated Word.
+            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+                $"id=eq.{Uri.EscapeDataString(id)}",
+                new {documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
+        }
         return Results.Ok(new {data=new {salvas=saved},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao registrar fotos da inspeção.",e.Message),statusCode:500);}
+});
+
+// The mobile camera intentionally saves evidence without a caption.
+// Inspectors can complete or revise each caption on the desktop before finalizing.
+app.MapPut("/api/inspecoes/{id}/fotos/{photoId}/legenda", async (
+    string id,string photoId,PhotoCaptionRequest input,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _)||!Guid.TryParse(photoId,out _))
+            return Results.Json(Error("Identificador de foto inválido."),statusCode:400);
+        var caption=input.Legenda?.Trim();
+        if(caption?.Length>300)
+            return Results.Json(Error("Legenda com mais de 300 caracteres."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,status,grupos_inspecao(processos(excluido_em))&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+        var (inspection,found)=FirstRow(insRows);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        if(inspection!.Value.GetProperty("status").GetString() is not ("aberta" or "em_andamento"))
+            return Results.Json(Error("Esta inspeção não permite editar fotos."),statusCode:409);
+        var group=inspection.Value.GetProperty("grupos_inspecao");
+        if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process)
+            || process.ValueKind!=JsonValueKind.Object
+            || (process.TryGetProperty("excluido_em",out var archived)&&archived.ValueKind!=JsonValueKind.Null))
+            return Results.Json(Error("Processo arquivado ou indisponível."),statusCode:409);
+        var query=$"inspecao_id=eq.{Uri.EscapeDataString(id)}&id=eq.{Uri.EscapeDataString(photoId)}";
+        var current=await RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
+            "select=id&"+query+"&limit=1");
+        var (_,existing)=FirstRow(current);
+        if(!existing)return Results.Json(Error("Foto não encontrada nesta inspeção."),statusCode:404);
+        await RestAsync(client,token,HttpMethod.Patch,"inspecao_fotos",query,
+            new {legenda=string.IsNullOrWhiteSpace(caption)?null:caption},"return=minimal");
+        // A caption changes the Word evidence; do not reuse a cached report.
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+            $"id=eq.{Uri.EscapeDataString(id)}",
+            new {documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
+        return Results.Ok(new{data=new{id=photoId,legenda=caption??""},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível atualizar a legenda da foto.",e.Message),statusCode:500);}
 });
 
 app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IHttpClientFactory factory)=>
@@ -3063,9 +3113,14 @@ public sealed class RegisterInspectionPhotosRequest
 public sealed class RegisterInspectionPhotoItem
 {
     public string StoragePath { get; set; } = "";
-    public string Legenda { get; set; } = "";
+    public string? Legenda { get; set; }
     public string? ProductId { get; set; }
     public string? ProductPhotoPath { get; set; }
+}
+
+public sealed class PhotoCaptionRequest
+{
+    public string? Legenda { get; set; }
 }
 
 public sealed class RetentionRequest

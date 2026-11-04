@@ -25,7 +25,7 @@ test('mobile lists open and started inspections associated with operational proc
  assert.doesNotMatch(mobile,/list\.length===1/)
  assert.match(mobile,/sgq-photo-not-started/)
 })
-test('camera and gallery can capture multiple evidence photos with captions',()=>{
+test('camera and gallery can save large mobile photo batches without mandatory captions',()=>{
  assert.match(mobile,/capture="environment"/)
  assert.match(mobile,/accept="image\/\*"/)
  assert.match(mobile,/multiple onChange=/)
@@ -70,4 +70,30 @@ test('photo cards visibly identify started versus not started inspections',()=>{
  assert.match(mobile,/Não iniciada/)
  assert.match(css,/\.sgq-mobile-process\.sgq-photo-started/)
  assert.match(css,/\.sgq-mobile-process\.sgq-photo-not-started/)
+})
+
+test('mobile batch queue is bounded, concurrent and caption-free',()=>{
+ assert.match(mobile,/pending\.length\+arr\.length>60/)
+ assert.match(mobile,/Math\.min\(3,batch\.length\)/)
+ assert.match(mobile,/sgq-mobile-batch-grid/)
+ assert.match(mobile,/Selecionar várias/)
+ assert.match(mobile,/compressed\(photo\.file\)/)
+ assert.match(mobile,/queuePhotoOffline\(photo,inspectionId\)/)
+ assert.doesNotMatch(mobile,/Informe a legenda de cada foto/)
+ assert.doesNotMatch(mobile,/<textarea/)
+})
+test('server accepts captionless photos and supports safe later desktop editing',()=>{
+ const upload=api.slice(api.indexOf('app.MapPost("/api/inspecoes/{id}/fotos/registrar"'),
+   api.indexOf('app.MapPut("/api/inspecoes/{id}/fotos/{photoId}/legenda"'))
+ assert.match(upload,/if\(string\.IsNullOrWhiteSpace\(photo\.StoragePath\)\)continue/)
+ assert.doesNotMatch(upload,/string\.IsNullOrWhiteSpace\(photo\.Legenda\)\)continue/)
+ assert.match(upload,/legenda=string\.IsNullOrWhiteSpace\(photo\.Legenda\)\?null:photo\.Legenda\.Trim\(\)/)
+ assert.match(api,/app\.MapPut\("\/api\/inspecoes\/\{id\}\/fotos\/\{photoId\}\/legenda"/)
+ assert.match(api,/PhotoCaptionRequest/)
+ assert.match(api,/photoId/)
+ assert.match(app,/async function savePhotoCaption\(photoId:string,currentCaption:string\)/)
+ assert.match(app,/Adicionar legenda/)
+ assert.match(app,/setEditingPhotoCaptionId\(p\.id\)/)
+ assert.match(app,/activeStage==='fotos'/)
+ assert.match(api,/documento_gerado_em=\(DateTimeOffset\?\)null/)
 })
