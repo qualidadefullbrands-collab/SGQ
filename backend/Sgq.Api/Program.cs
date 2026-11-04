@@ -2517,7 +2517,9 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
             if(cachedFound)
             {
                 var path=cached!.Value.TryGetProperty("storage_path",out var sp)&&sp.ValueKind==JsonValueKind.String?sp.GetString():null;
-                if(!string.IsNullOrWhiteSpace(path))
+                // Only the new formatted reports are safe to serve from cache.
+                // Older cached DOCX files have decimal quantities and old names.
+                if(!string.IsNullOrWhiteSpace(path) && path.Contains("/laudo-v2/",StringComparison.Ordinal))
                 {
                     using var cachedMsg=new HttpRequestMessage(HttpMethod.Get,$"{supabaseUrl}/storage/v1/object/authenticated/laudos/{EncodedPath(path!)}");
                     ApplyAuth(cachedMsg,token);
@@ -2526,7 +2528,8 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
                     {
                         if(prepare) return Results.Ok(new {data=new {prepared=true,cached=true},error=(object?)null});
                         var cachedBytes=await cachedRes.Content.ReadAsByteArrayAsync();
-                        var cachedName=Path.GetFileName(path) ?? $"Inspecao-{id}.docx";
+                        var cachedName=Uri.UnescapeDataString(Path.GetFileName(path));
+                        if(string.IsNullOrWhiteSpace(cachedName))cachedName=$"Inspecao-{id}.docx";
                         return Results.File(cachedBytes,"application/vnd.openxmlformats-officedocument.wordprocessingml.document",cachedName);
                     }
                 }
@@ -2605,12 +2608,14 @@ app.MapPost("/api/inspecoes/{id}/enviar-automate", async (string id,HttpRequest 
         if(!docFound) return Results.Json(Error("Gere o Word no SGQ antes do envio."),statusCode:404);
         var path=doc!.Value.GetProperty("storage_path").GetString();
         if(string.IsNullOrWhiteSpace(path)) return Results.Json(Error("Word não está armazenado."),statusCode:404);
+        if(!path.Contains("/laudo-v2/",StringComparison.Ordinal))
+            return Results.Json(Error("O Word está no formato antigo. Gere novamente o laudo antes de enviar."),statusCode:409);
         var project=ins.Value.GetProperty("grupos_inspecao").GetProperty("processos");
         string? Field(JsonElement row,string key)=>row.TryGetProperty(key,out var v) && v.ValueKind==JsonValueKind.String?v.GetString():null;
         var fst=Field(project,"codigo")??"SEM-FST";
-        var customer=Field(project,"cliente")??"Cliente";
-        static string SafeName(string value)=>System.Text.RegularExpressions.Regex.Replace(value,@"[^\p{L}\p{N}\s._-]","").Trim();
-        var fileName=$"{SafeName(fst)} - {SafeName(customer)} - Relatorio de Inspecao.docx";
+        var fileName=Uri.UnescapeDataString(Path.GetFileName(path));
+        if(string.IsNullOrWhiteSpace(fileName) || !fileName.EndsWith(".docx",StringComparison.OrdinalIgnoreCase))
+            return Results.Json(Error("Nome do laudo inválido."),statusCode:422);
         using var fileReq=new HttpRequestMessage(HttpMethod.Get,$"{supabaseUrl}/storage/v1/object/authenticated/laudos/{EncodedPath(path)}");
         ApplyAuth(fileReq,token);
         using var fileRes=await client.SendAsync(fileReq);
