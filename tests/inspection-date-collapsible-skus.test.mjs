@@ -60,7 +60,7 @@ test('cards can collapse without clearing inputs, including Omie-imported SKU qu
  assert.match(css,/prefers-reduced-motion:reduce/)
 })
 test('existing inspection edit is one SKU grid, not separate expanded cards',()=>{
- const modal=section('className="inspection-edit-modal"','{editingProcess && (')
+ const modal=section('<article className="sample-detail inspection-edit-modal"','{editingProcess && (')
  assert.match(modal,/<SkuQuantityGrid rows=\{editingInspectionData\.itens\?\?\[\]\}/)
  assert.doesNotMatch(modal,/expandedEditSkuIndex|sgq-sku-toggle/)
  assert.match(app,/import SkuQuantityGrid from '\.\/components\/SkuQuantityGrid'/)
