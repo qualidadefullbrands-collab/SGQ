@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Boxes, Camera, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Edit3, RefreshCw, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, X } from 'lucide-react'
+import { Boxes, Camera, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Edit3, RefreshCw, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, BarChart3, CloudOff, CloudUpload, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/supabase'
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
+import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from './lib/offline'
+import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSync'
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
 const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
@@ -9,6 +11,7 @@ const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
 const RECOVERY_REDIRECT_URL = 'https://app-sgq.onrender.com/?auth=recovery'
 const ItEditorDemo=lazy(()=>import('./its/ItEditorDemo'))
 const MobileFotos=lazy(()=>import('./mobile/MobileFotos'))
+const InsightsPage=lazy(()=>import('./insights/InsightsPage'))
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
 type ItVersion = {
@@ -99,6 +102,10 @@ type Sample = {
 const emptySku = () => ({
   sku: '',
   nome: '',
+  codigoCliente: '',
+  quantidadePv: '',
+  numeroPedidoPv: '',
+  fstPv: '',
   lote: '',
   material: '',
   capacidade: '',
@@ -132,7 +139,7 @@ type OmieSkuImport={codigo:string;numeroPedido:string;itens:OmieOrderItem[]}
 type OmieSkuReviewLine={sku:string;descricao:string;quantidadePedido:number;quantidadeInformada:string}
 type OmieSkuReview={codigo:string;numeroPedido:string;itens:OmieSkuReviewLine[]}
 function skuRowHasData(row:ReturnType<typeof emptySku>){
-  return Boolean(row.sku.trim()||row.nome.trim()||row.lote.trim()||row.material.trim()||
+  return Boolean(row.sku.trim()||row.nome.trim()||row.codigoCliente.trim()||row.lote.trim()||row.material.trim()||
     row.capacidade.trim()||row.quantidade.trim()||row.quantidadePorCaixa.trim()||
     row.caixasRecebidas.trim()||row.caixasInspecionadas.trim()||row.caixasPadrao.trim()||
     row.caixasFracionadas.trim()||row.caixasLaboratorio.trim()||row.unidadesLaboratorio.trim()||
@@ -179,15 +186,24 @@ function applyOmieReviewedRows(rows:ReturnType<typeof emptySku>[],review:OmieSku
     const code=item.sku.trim().toUpperCase()
     const indices=matches.get(code)||[]
     // Never overwrite multiple lot rows with one order total (which would duplicate units).
-    if(indices.length>1)continue
+    if(indices.length>1){
+      // Lot quantities must not change, but the original PV snapshot belongs
+      // to the SKU as a whole and is retained on one of its lot records.
+      const first=result[indices[0]]
+      result[indices[0]]={...first,quantidadePv:String(item.quantidadePedido),
+        numeroPedidoPv:review.numeroPedido,fstPv:review.codigo}
+      continue
+    }
     const amount=item.quantidadeInformada.trim()
     if(indices.length===1){
       const i=indices[0],old=result[i]
       result[i]={...old,quantidade:amount,nome:old.nome.trim()||item.descricao,
+        quantidadePv:String(item.quantidadePedido),numeroPedidoPv:review.numeroPedido,fstPv:review.codigo,
         omieSourceFst:review.codigo,omieSourcePedido:review.numeroPedido}
     }else{
       const i=result.length
       result.push({...emptySku(),sku:code,nome:item.descricao,quantidade:amount,
+        quantidadePv:String(item.quantidadePedido),numeroPedidoPv:review.numeroPedido,fstPv:review.codigo,
         omieSourceFst:review.codigo,omieSourcePedido:review.numeroPedido,
         omieStatus:'found',omieMessage:'PV '+review.numeroPedido+' · confirme o recebimento físico.'})
       matches.set(code,[i])
@@ -463,7 +479,7 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile'>(()=>window.matchMedia('(max-width: 768px)').matches || new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'painel')
+  const [tab, setTab] = useState<'painel' | 'insights' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile'>(()=>window.matchMedia('(max-width: 768px)').matches || new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'painel')
   const [itDemoOpen,setItDemoOpen]=useState(false)
   const [dashboardView,setDashboardView]=useState<'processos'|'inspecoes'|'estoque'|'concluidas'>('inspecoes')
   const [popupMessage,setPopupMessage]=useState('')
@@ -497,6 +513,13 @@ export default function App() {
   const [counts, setCounts] = useState({ processos: 0, inspecoes: 0, amostras: 0, laudos: 0 })
   const [processes, setProcesses] = useState<ProcessRow[]>([])
   const [inspections, setInspections] = useState<InspectionRow[]>([])
+  const [isOnline,setIsOnline]=useState(navigator.onLine)
+  const [offlinePending,setOfflinePending]=useState(0)
+  const [offlineConflicts,setOfflineConflicts]=useState(0)
+  const [offlineDraftReady,setOfflineDraftReady]=useState(false)
+  const [offlineDraftStatus,setOfflineDraftStatus]=useState('')
+  const [offlineError,setOfflineError]=useState('')
+  const editingBaseline=useRef<string|null>(null)
   const [editingProcess, setEditingProcess] = useState<ProcessRow | null>(null)
   const [deletingProcessId,setDeletingProcessId]=useState<string|null>(null)
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null)
@@ -676,6 +699,73 @@ export default function App() {
     return () => { active = false; listener.subscription.unsubscribe() }
   }, [])
 
+
+  async function refreshOfflineCounts(uid:string){
+    try{
+      const operations=await offlineOperations(uid)
+      setOfflinePending(operations.filter(x=>x.state!=='conflict').length)
+      setOfflineConflicts(operations.filter(x=>x.state==='conflict').length)
+    }catch(e:any){setOfflineError('Armazenamento local: '+String(e?.message||'indisponível'))}
+  }
+  async function syncOfflineNow(uid:string){
+    if(!navigator.onLine||!uid)return
+    try{
+      const result=await replayOfflineOperations(uid)
+      setOfflinePending(result.pending)
+      setOfflineConflicts(result.conflicts)
+      if(result.synced){
+        setMessage(result.synced+' registro(s) sincronizado(s).')
+        void refreshLists()
+      }
+    }catch(e:any){setOfflineError('Sincronização: '+String(e?.message||'indisponível'))}
+  }
+  useEffect(()=>{
+    if(!userId){setOfflinePending(0);setOfflineConflicts(0);return}
+    let active=true
+    const check=()=>{
+      if(!active)return
+      setIsOnline(navigator.onLine)
+      if(navigator.onLine)void syncOfflineNow(userId)
+      else void refreshOfflineCounts(userId)
+    }
+    const onVisible=()=>{if(document.visibilityState==='visible')check()}
+    window.addEventListener('online',check)
+    window.addEventListener('offline',check)
+    document.addEventListener('visibilitychange',onVisible)
+    void refreshOfflineCounts(userId)
+    if(navigator.onLine)void syncOfflineNow(userId)
+    return ()=>{active=false;window.removeEventListener('online',check);window.removeEventListener('offline',check);document.removeEventListener('visibilitychange',onVisible)}
+  },[userId])
+  useEffect(()=>{
+    if(!userId||tab!=='nova'||editingInspectionId||editingProcessId){setOfflineDraftReady(false);return}
+    let active=true
+    setOfflineDraftReady(false)
+    void readOfflineDraft<any>(userId,'full:new').then(saved=>{
+      if(!active)return
+      if(saved?.inspection){
+        setInspection(saved.inspection)
+        if(Array.isArray(saved.skuRows))setSkuRows(saved.skuRows.map((row:any)=>({...emptySku(),...row,
+          fotoPreview:row.fotoFile?URL.createObjectURL(row.fotoFile):''})))
+        if(saved.requestId)createRequestId.current=saved.requestId
+      }
+    }).catch(e=>{if(active)setOfflineError('Falha ao restaurar rascunho: '+String(e?.message||''))})
+      .finally(()=>{if(active)setOfflineDraftReady(true)})
+    return()=>{active=false}
+  },[userId,tab,editingInspectionId,editingProcessId])
+  useEffect(()=>{
+    if(!userId||tab!=='nova'||!offlineDraftReady||editingInspectionId||editingProcessId)return
+    const timer=window.setTimeout(()=>{
+      const hasContent=!!inspection.codigo.trim()||!!inspection.cliente.trim()||
+        !!inspection.observacaoInterna.trim()||skuRows.some(skuRowHasData)
+      const operation=hasContent?saveOfflineDraft(userId,'full:new',{
+        inspection,skuRows,requestId:createRequestId.current
+      }):clearOfflineDraft(userId,'full:new')
+      void operation.then(()=>setOfflineDraftStatus(hasContent?'Salvo neste dispositivo':''))
+        .catch(e=>setOfflineError('Não foi possível salvar localmente: '+String(e?.message||'')))
+    },450)
+    return()=>window.clearTimeout(timer)
+  },[userId,tab,inspection,skuRows,offlineDraftReady,editingInspectionId,editingProcessId])
+
   useEffect(() => {
     if (!userId) {
       // Clear any prior session's cached records, including responses still in flight.
@@ -761,10 +851,13 @@ export default function App() {
       try{
         const res=await apiGet<any>('/api/app/catalogos')
         if(res.data){
+          void saveOfflineDraft(userId||'','app:catalogos',res.data).catch(()=>undefined)
           setItVersions((res.data.itVersions??[]) as ItVersion[])
           setGroups((res.data.groups??[]) as Group[])
         }else{
-          setError(res.error?.message||'Não foi possível carregar as instruções técnicas. Use Atualizar ou entre novamente.')
+          const cached=await readOfflineDraft<any>(userId||'','app:catalogos').catch(()=>null)
+          if(cached){setItVersions(cached.itVersions||[]);setGroups(cached.groups||[])}
+          else setError(res.error?.message||'Não foi possível carregar as instruções técnicas. Use Atualizar ou entre novamente.')
         }
       }catch{
         setError('Falha de conexão ao carregar as instruções técnicas.')
@@ -781,11 +874,14 @@ export default function App() {
       try{
         const res=await apiGet<any>('/api/app/estoque')
         if(res.data){
+          void saveOfflineDraft(userId||'','app:estoque',res.data).catch(()=>undefined)
           const rows=(res.data.samples??[]).map((x:any)=>({...x,saldo:Number(x.saldo??0)}))
           setSamples(rows)
           setCounts(old=>({...old,amostras:rows.length}))
         }else{
-          setError(res.error?.message||'Não foi possível atualizar o estoque. Tente novamente.')
+          const cached=await readOfflineDraft<any>(userId||'','app:estoque').catch(()=>null)
+          if(cached)setSamples((cached.samples||[]).map((x:any)=>({...x,saldo:Number(x.saldo??0)})))
+          else setError(res.error?.message||'Não foi possível atualizar o estoque. Tente novamente.')
         }
       }catch{
         setError('Falha de conexão ao atualizar o estoque.')
@@ -819,6 +915,15 @@ export default function App() {
       setError('')
       const loaded=await apiGet<any>('/api/app/bootstrap')
       if (loaded.error || !loaded.data) {
+        if(!navigator.onLine||connectionFailure(String(loaded.error?.message||''))){
+          const offline=await readOfflineDraft<any>(userId||'','app:bootstrap').catch(()=>null)
+          if(offline && sequence===loadSequence.current){
+            setProfile(offline.profile)
+            setProcesses(offline.processes||[])
+            setInspections(offline.inspections||[])
+            return
+          }
+        }
         setError(loaded.error?.message || 'Falha ao carregar o SGQ.')
         return
       }
@@ -829,6 +934,8 @@ export default function App() {
         return
       }
       setProfile(data.profile as Profile)
+      void saveOfflineDraft(userId||'','app:bootstrap',{profile:data.profile,processes:data.processes,inspections:data.inspections})
+        .catch(()=>undefined)
       setProcesses((data.processes ?? []) as ProcessRow[])
       setInspections((data.inspections ?? []) as InspectionRow[])
       setCounts(old=>({
@@ -1015,14 +1122,20 @@ export default function App() {
 
   async function editInspectionFull(id:string){
     setError('')
-    const res=await apiGet<any>(`/api/inspecoes/${id}/detalhe`)
-    if(res.error||!res.data?.inspecao){setPopupMessage(res.error?.message||'Falha ao abrir inspeção.');return}
-    const data={...res.data.inspecao,items:res.data.items??[]}
+    const res=await apiGet<any>('/api/inspecoes/'+id+'/detalhe')
+    let source=res.data
+    if(res.error||!source?.inspecao){
+      source=await readOfflineDraft<any>(userId||'','full:detail:'+id).catch(()=>null)
+      if(!source?.inspecao){setPopupMessage(res.error?.message||'Inspeção indisponível offline.');return}
+    }else void saveOfflineDraft(userId||'','full:detail:'+id,source).catch(()=>undefined)
+    editingBaseline.current=offlineInspectionVersion(source)
+    const data={...source.inspecao,items:source.items??[]}
     const process=data.grupos_inspecao?.processos??{}
     const items=(data.items??[]).map((link:any)=>{
       const x=link.processo_itens
       return applyBoxGroupsToSku({...emptySku(),processoItemId:x.id,sku:x.produtos?.sku??'',
-        nome:x.produtos?.nome??'',lote:x.lote??'',material:x.material??'',capacidade:x.capacidade??'',
+        nome:x.produtos?.nome??'',codigoCliente:x.codigo_cliente??'',quantidadePv:x.quantidade_pv==null?'':String(x.quantidade_pv),
+        numeroPedidoPv:x.pv_numero??'',fstPv:x.pv_fst??'',lote:x.lote??'',material:x.material??'',capacidade:x.capacidade??'',
         quantidade:String(x.quantidade??''),quantidadePorCaixa:String(x.quantidade_por_caixa??''),
         caixasRecebidas:String(x.caixas_recebidas??''),caixasInspecionadas:String(x.caixas_inspecionadas??''),
         unidadesPorConjunto:String(link.unidades_por_conjunto??1)},x.distribuicao_caixas)
@@ -1377,12 +1490,13 @@ export default function App() {
     setError('')
     if(selectedInspectionId!==id) setActiveStage('dados')
     setSelectedInspectionId(id)
-    const loaded=await apiGet<any>(`/api/inspecoes/${id}/detalhe`)
-    if (loaded.error || !loaded.data?.inspecao) {
-      return setError(loaded.error?.message ?? 'Inspeção não encontrada.')
-    }
-
-    const data=loaded.data
+    const loaded=await apiGet<any>('/api/inspecoes/'+id+'/detalhe')
+    let data=loaded.data
+    if (loaded.error || !data?.inspecao) {
+      data=await readOfflineDraft<any>(userId||'','full:detail:'+id).catch(()=>null)
+      if(!data?.inspecao)return setError(loaded.error?.message ?? 'Inspeção não disponível offline.')
+    }else void saveOfflineDraft(userId||'','full:detail:'+id,data).catch(()=>undefined)
+    editingBaseline.current=offlineInspectionVersion(data)
     const photoUrls=data.photoUrls ?? {}
     const photosWithUrls=(data.photos ?? []).map((p:any)=>({
       ...p,
@@ -1429,7 +1543,9 @@ export default function App() {
     const process=detail.grupos_inspecao?.processos ?? {}
     const rows=(detail.items ?? []).map((link:any)=>{
       const item=link.processo_itens
-      const base={...emptySku(),processoItemId:item.id,sku:item.produtos?.sku ?? '',nome:item.produtos?.nome ?? '',lote:item.lote ?? '',material:item.material ?? '',capacidade:item.capacidade ?? '',quantidade:String(item.quantidade ?? ''),quantidadePorCaixa:String(item.quantidade_por_caixa ?? ''),caixasRecebidas:String(item.caixas_recebidas ?? ''),caixasInspecionadas:String(item.caixas_inspecionadas ?? ''),unidadesPorConjunto:String(link.unidades_por_conjunto ?? 1)}
+      const base={...emptySku(),processoItemId:item.id,sku:item.produtos?.sku ?? '',nome:item.produtos?.nome ?? '',
+        codigoCliente:item.codigo_cliente??'',quantidadePv:item.quantidade_pv==null?'':String(item.quantidade_pv),
+        numeroPedidoPv:item.pv_numero??'',fstPv:item.pv_fst??'',lote:item.lote ?? '',material:item.material ?? '',capacidade:item.capacidade ?? '',quantidade:String(item.quantidade ?? ''),quantidadePorCaixa:String(item.quantidade_por_caixa ?? ''),caixasRecebidas:String(item.caixas_recebidas ?? ''),caixasInspecionadas:String(item.caixas_inspecionadas ?? ''),unidadesPorConjunto:String(link.unidades_por_conjunto ?? 1)}
       return applyBoxGroupsToSku(base,item.distribuicao_caixas)
     })
     setExpandedEditSkuIndex(rows.length>1?null:0)
@@ -1443,19 +1559,35 @@ export default function App() {
   async function saveEditingInspectionData() {
     if (!editingInspectionData || !selectedInspectionId) return
     const itens=(editingInspectionData.itens ?? []).map((row:any)=>({
-      processoItemId:row.processoItemId,sku:String(row.sku ?? '').trim(),nome:String(row.nome ?? '').trim(),lote:String(row.lote ?? '').trim() || null,
+      processoItemId:row.processoItemId,sku:String(row.sku ?? '').trim(),nome:String(row.nome ?? '').trim(),
+      codigoCliente:String(row.codigoCliente??'').trim()||null,
+      quantidadePv:row.quantidadePv===''||row.quantidadePv==null?null:Number(row.quantidadePv),
+      numeroPedidoPv:String(row.numeroPedidoPv??'').trim()||null,fstPv:String(row.fstPv??'').trim()||null,
+      lote:String(row.lote ?? '').trim() || null,
       material:String(row.material ?? '').trim() || null,capacidade:String(row.capacidade ?? '').trim() || null,quantidade:Number(row.quantidade)||0,
       quantidadePorCaixa:Number(row.quantidadePorCaixa)||null,caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
       unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,distribuicaoCaixas:boxGroupsFromRow(row),
     }))
-    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/dados`,{
+    const editPayload={
       codigo:String(editingInspectionData.codigo ?? '').trim(),cliente:String(editingInspectionData.cliente ?? '').trim() || null,
       notaFiscal:String(editingInspectionData.notaFiscal ?? '').trim() || null,origem:String(editingInspectionData.origem ?? '').trim() || null,
       transporte:String(editingInspectionData.transporte ?? '').trim() || null,chegadaCd:editingInspectionData.chegadaCd || null,
       dataInspecao:editingInspectionData.dataInspecao || null,inspectionLevel:editingInspectionData.inspectionLevel || 'I',
       observacaoInterna:String(editingInspectionData.observacaoInterna ?? '').trim() || null,itVersionId:editingInspectionData.itVersionId || null,itens,
-    })
-    if (saved.error) return setError(saved.error.message)
+    }
+    if(!navigator.onLine){
+      try{await queueInspectionUpdate(selectedInspectionId,editPayload);setEditingInspectionData(null)}
+      catch(e:any){setError(String(e?.message||''))}
+      return
+    }
+    const saved=await apiPut<any>('/api/inspecoes/'+selectedInspectionId+'/dados',editPayload)
+    if(saved.error){
+      if(connectionFailure(saved.error.message)){
+        try{await queueInspectionUpdate(selectedInspectionId,editPayload);setEditingInspectionData(null)}
+        catch(e:any){setError(String(e?.message||''))}
+      }else setError(saved.error.message)
+      return
+    }
     setEditingInspectionData(null)
     const p=saved.data?.plano
     setMessage(`Dados atualizados. Plano recalculado: ${p?.codigo ?? '—'} · ${p?.amostra ?? 0} un. · Ac/Re ${p?.ac ?? '—'}/${p?.re ?? '—'}.`)
@@ -1490,6 +1622,51 @@ export default function App() {
     return()=>window.clearTimeout(timer)
   },[aiItFingerprint,itVersions,userId,inspection.itVersionId])
 
+  async function queueInspectionCreate(iniciar:boolean){
+    if(!userId)throw new Error('Usuário não identificado.')
+    const rows=skuRows.filter(row=>skuRowHasData(row))
+    const itens=rows.map(row=>{
+      const dist=boxDistributionTotals(row)
+      return {
+        sku:row.sku.trim(),nome:row.nome.trim(),codigoCliente:row.codigoCliente.trim()||null,
+        quantidadePv:row.quantidadePv.trim()===''?null:Number(row.quantidadePv),
+        numeroPedidoPv:row.numeroPedidoPv||null,fstPv:row.fstPv||null,
+        lote:row.lote.trim()||null,material:row.material.trim()||null,capacidade:row.capacidade.trim()||null,
+        quantidade:Number(row.quantidade)||0,quantidadePorCaixa:Number(row.quantidadePorCaixa)||null,
+        caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
+        unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,
+        distribuicaoCaixas:dist.groups.length?dist.groups:null,
+        fotoPrincipalPath:row.fotoPrincipalPath||null,
+      }
+    })
+    const photos=rows.map((row,index)=>row.fotoFile?{index,file:row.fotoFile}:null).filter(Boolean)
+    const payload={
+      codigo:inspection.codigo.trim(),requestId:createRequestId.current,
+      cliente:inspection.cliente.trim()||null,notaFiscal:inspection.notaFiscal.trim()||null,
+      origem:inspection.origem.trim()||null,transporte:inspection.transporte.trim()||null,
+      chegadaCd:inspection.chegadaCd||null,dataInspecao:inspection.dataInspecao||null,
+      itVersionId:inspection.itVersionId||null,iniciar,inspectionLevel:inspection.inspectionLevel,
+      observacaoInterna:inspection.observacaoInterna.trim()||null,itens,
+    }
+    await enqueueOfflineOperation({
+      id:userId+':inspection-create:'+createRequestId.current,userId,
+      kind:'inspection-create',path:'/api/inspecoes/criar',body:{payload,photos},createdAt:Date.now()
+    })
+    await clearOfflineDraft(userId,'full:new')
+    await refreshOfflineCounts(userId)
+    setOfflineDraftStatus('')
+    setMessage('Inspeção salva no dispositivo. Sincronização automática quando houver internet.')
+    resetNewInspection()
+    setTab('painel')
+  }
+  async function queueInspectionUpdate(id:string,payload:any){
+    if(!userId||!editingBaseline.current)throw new Error('Não há versão original verificada para sincronizar esta inspeção.')
+    await enqueueOfflineOperation({id:userId+':inspection-update:'+id,userId,
+      kind:'inspection-update',path:'/api/inspecoes/'+encodeURIComponent(id)+'/dados',body:payload,
+      expected:editingBaseline.current,createdAt:Date.now()})
+    await refreshOfflineCounts(userId)
+    setMessage('Alterações salvas neste dispositivo; sincronização pendente.')
+  }
   async function createInspection(e: React.FormEvent, iniciar:boolean) {
     e.preventDefault()
     if(!canWrite||!userId||inspectionBusy||submitLock.current)return
@@ -1509,18 +1686,33 @@ export default function App() {
         const id=editingInspectionId!
         const itens=skuRows.map(row=>({
           processoItemId:(row as any).processoItemId??null,sku:row.sku.trim(),nome:row.nome.trim(),
+          codigoCliente:row.codigoCliente.trim()||null,
+          quantidadePv:row.quantidadePv.trim()===''?null:Number(row.quantidadePv),
+          numeroPedidoPv:row.numeroPedidoPv||null,fstPv:row.fstPv||null,
           lote:row.lote.trim()||null,material:row.material.trim()||null,capacidade:row.capacidade.trim()||null,
           quantidade:Number(row.quantidade)||0,quantidadePorCaixa:Number(row.quantidadePorCaixa)||null,
           caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
           unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,distribuicaoCaixas:boxGroupsFromRow(row)
         }))
-        const saved=await apiPut<any>(`/api/inspecoes/${id}/dados`,{
+        const editPayload={
           codigo:inspection.codigo,cliente:inspection.cliente,notaFiscal:inspection.notaFiscal,
           origem:inspection.origem,transporte:inspection.transporte,chegadaCd:inspection.chegadaCd||null,
           dataInspecao:inspection.dataInspecao||null,inspectionLevel:inspection.inspectionLevel,
           itVersionId:inspection.itVersionId||null,observacaoInterna:inspection.observacaoInterna,itens
-        })
-        if(saved.error){setPopupMessage(saved.error.message);return}
+        }
+        if(!navigator.onLine){
+          try{await queueInspectionUpdate(id,editPayload);resetNewInspection();setTab('painel')}
+          catch(e:any){setPopupMessage(String(e?.message||''))}
+          return
+        }
+        const saved=await apiPut<any>('/api/inspecoes/'+id+'/dados',editPayload)
+        if(saved.error){
+          if(connectionFailure(saved.error.message)){
+            try{await queueInspectionUpdate(id,editPayload);resetNewInspection();setTab('painel')}
+            catch(e:any){setPopupMessage(String(e?.message||''))}
+          }else setPopupMessage(saved.error.message)
+          return
+        }
         resetNewInspection();setTab('painel');setMessage('Inspeção salva.');void refreshLists();return
       }finally{setInspectionBusy(false)}
     }
@@ -1529,6 +1721,11 @@ export default function App() {
 
     if (iniciar && !inspection.itVersionId) {setPopupMessage('Selecione a IT para iniciar a inspeção.');return}
     setInspectionBusy(true)
+    if(!navigator.onLine){
+      try{await queueInspectionCreate(iniciar)}
+      catch(e:any){setError('Não foi possível salvar offline: '+String(e?.message||''))}
+      return
+    }
 
     const itens:any[]=[]
     for (const row of skuRows) {
@@ -1548,13 +1745,23 @@ export default function App() {
         const folder=row.sku.trim() || 'temporario'
         const photoPath=`${folder}/${Date.now()}-${safe}`
         const upload=await supabase.storage.from('produto-fotos').upload(photoPath,row.fotoFile,{contentType:row.fotoFile.type||undefined})
-        if (upload.error){setInspectionBusy(false);return setError('Falha ao salvar foto principal do produto: '+upload.error.message)}
+        if (upload.error){
+          setInspectionBusy(false)
+          if(connectionFailure(upload.error.message)||!navigator.onLine){
+            try{await queueInspectionCreate(iniciar)}catch(e:any){setError(String(e?.message||''))}
+            return
+          }
+          return setError('Falha ao salvar foto principal do produto: '+upload.error.message)
+        }
         fotoPrincipalPath=photoPath
       }
 
       itens.push({
         sku:row.sku.trim(),
         nome:row.nome.trim(),
+        codigoCliente:row.codigoCliente.trim()||null,
+        quantidadePv:row.quantidadePv.trim()===''?null:Number(row.quantidadePv),
+        numeroPedidoPv:row.numeroPedidoPv||null,fstPv:row.fstPv||null,
         lote:row.lote.trim() || null,
         material:row.material.trim() || null,
         capacidade:row.capacidade.trim() || null,
@@ -1586,6 +1793,10 @@ export default function App() {
 
     if (created.error || !created.data?.id) {
       setInspectionBusy(false)
+      if(created.error && (connectionFailure(created.error.message)||!navigator.onLine)){
+        try{await queueInspectionCreate(iniciar)}catch(e:any){setError(String(e?.message||''))}
+        return
+      }
       return setError(created.error?.message || 'Falha ao criar inspeção.')
     }
 
@@ -1613,6 +1824,7 @@ export default function App() {
     }
     setInspections(old=>[provisional,...old.filter(x=>x.id!==provisional.id)])
     setMessage(iniciar?'Inspeção iniciada.':'Inspeção salva.')
+    if(userId)await clearOfflineDraft(userId,'full:new')
     resetNewInspection()
     loadSequence.current++
     if(iniciar){await openInspection(created.data.id);setActiveStage('amostragem')}
@@ -1661,6 +1873,16 @@ export default function App() {
     })
   }
 
+
+  async function queueInspectionField(kind:'inspection-checklist'|'inspection-note',path:string,body:any,expected:string){
+    if(!userId)throw new Error('Sessão local indisponível.')
+    const id=userId+':'+kind+':'+path
+    const old=(await offlineOperations(userId)).find(x=>x.id===id)
+    await enqueueOfflineOperation({id,userId,kind,path,body,
+      expected:old?.expected??expected,createdAt:old?.createdAt??Date.now()})
+    await refreshOfflineCounts(userId)
+  }
+
   async function saveChecklist(checkId: string, result: string, quantityNc?:number) {
     if (!selectedInspectionId || !detail) return
     const item=detail.checklist?.find((x:any)=>x.id===checkId)
@@ -1683,11 +1905,21 @@ export default function App() {
       const others=(d.checklistResults ?? []).filter((x:any)=>x.checklist_id!==checkId)
       return {...d,checklistResults:[...others,optimistic]}
     })
-    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/checklist/${checkId}`,{
-      resultado:result,
-      quantidadeNc:ncQty,
-    })
+    const checklistPath='/api/inspecoes/'+selectedInspectionId+'/checklist/'+checkId
+    const checklistBody={resultado:result,quantidadeNc:ncQty}
+    const checklistExpected=JSON.stringify(previous?{resultado:previous.resultado,quantidade_nc:Number(previous.quantidade_nc||0)}:null)
+    if(!navigator.onLine){
+      try{await queueInspectionField('inspection-checklist',checklistPath,checklistBody,checklistExpected)}
+      catch(e:any){setError('Falha ao salvar offline: '+String(e?.message||''))}
+      return
+    }
+    const saved=await apiPut<any>(checklistPath,checklistBody)
     if (saved.error) {
+      if(connectionFailure(saved.error.message)){
+        try{await queueInspectionField('inspection-checklist',checklistPath,checklistBody,checklistExpected)}
+        catch(e:any){setError('Falha ao salvar offline: '+String(e?.message||''))}
+        return
+      }
       setDetail((d:any)=>{
         const others=(d.checklistResults ?? []).filter((x:any)=>x.checklist_id!==checkId)
         return {...d,checklistResults:previous?[...others,previous]:others}
@@ -1734,11 +1966,29 @@ export default function App() {
 
   async function saveInternalObservation() {
     if (!selectedInspectionId || !canWrite) return
-    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/observacao-interna`,{
-      texto:internalObservation.trim() || null,
-    })
-    if (saved.error) return setError(saved.error.message)
-    setDetail((d:any)=>d?{...d,observacao_interna:internalObservation.trim() || null}:d)
+    const path='/api/inspecoes/'+selectedInspectionId+'/observacao-interna'
+    const body={texto:internalObservation.trim()||null}
+    const expected=JSON.stringify(String(detail?.observacao_interna||''))
+    if(!navigator.onLine){
+      try{
+        await queueInspectionField('inspection-note',path,body,expected)
+        setDetail((d:any)=>d?{...d,observacao_interna:body.texto}:d)
+        setMessage('Observação salva neste dispositivo.')
+      }catch(e:any){setError(String(e?.message||''))}
+      return
+    }
+    const saved=await apiPut<any>(path,body)
+    if(saved.error){
+      if(connectionFailure(saved.error.message)){
+        try{
+          await queueInspectionField('inspection-note',path,body,expected)
+          setDetail((d:any)=>d?{...d,observacao_interna:body.texto}:d)
+          setMessage('Observação salva neste dispositivo.')
+        }catch(e:any){setError(String(e?.message||''))}
+      }else setError(saved.error.message)
+      return
+    }
+    setDetail((d:any)=>d?{...d,observacao_interna:body.texto}:d)
     setMessage('Observação salva.')
   }
 
@@ -2274,7 +2524,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   if (!profile) return <div className="center-screen">{error || 'Carregando perfil…'}</div>
 
   if(tab==='fotos-mobile')return <Suspense fallback={<div className="center-screen">Carregando Modo Fotos…</div>}>
-    <MobileFotos processes={processes} inspections={inspections} canWrite={!!canWrite}
+    <MobileFotos processes={processes} inspections={inspections} canWrite={!!canWrite} userId={userId||''}
       onRefresh={refreshLists}
       onExit={()=>{setTab('painel');void loadCatalogs();void loadStock();void refreshEquipments()}}/>
   </Suspense>
@@ -2290,6 +2540,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <div className="sgq-side-brand"><ShieldCheck size={23}/><div><b>SGQ</b><small>Qualidade · Operações</small></div></div>
         <div className="sgq-side-caption">OPERAÇÃO</div>
         <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={18}/> Painel</button>
+        <button className={tab==='insights'?'selected':''} onClick={()=>setTab('insights')}><BarChart3 size={18}/> Insights</button>
         <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>setTab('inspecoes')}><ClipboardCheck size={18}/> Inspeções</button>
         <button className="" onClick={()=>setTab('fotos-mobile')}><Camera size={18}/> Modo Fotos</button>
         <button className={tab==='nova'?'selected':''} onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
@@ -2306,13 +2557,18 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <span>SGQ</span>
           <span className="sgq-topbar-separator" aria-hidden="true">/</span>
           <strong>{({
-            painel:'Painel',inspecoes:'Inspeções',nova:'Nova inspeção',
+            painel:'Painel',insights:'Insights',inspecoes:'Inspeções',nova:'Nova inspeção',
             execucao:'Execução da inspeção',estoque:'Estoque',
             auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos',
           } as Record<typeof tab,string>)[tab]}</strong>
         </div>
         <div className="userbox">
           <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
+          <button type="button" className="sgq-offline-indicator" data-pending={offlinePending>0||offlineConflicts>0} title={offlineError||'Sincronização do dispositivo'}
+            onClick={()=>{if(isOnline&&userId)void syncOfflineNow(userId);else setPopupMessage(offlineConflicts?'Existem registros com conflito. Seus dados permanecem salvos neste dispositivo.':'Os registros pendentes estão salvos neste dispositivo.')}}>
+            {isOnline?<CloudUpload size={15}/>:<CloudOff size={15}/>}
+            {offlineConflicts?'Revisar '+offlineConflicts:offlinePending?offlinePending+' pendente(s)':!isOnline?'Salvo offline':'Sincronizado'}
+          </button>
           <button type="button" aria-label="Sair do SGQ" title="Sair" onClick={()=>void supabase.auth.signOut()}><LogOut size={18}/></button>
         </div>
       </header>
@@ -2325,11 +2581,16 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </div>
       </div>}
       {message && <div className="alert success">{message}</div>}
+      {offlineError && <div className="alert error" role="alert">{offlineError}</div>}
+
+      {tab==='insights' && <Suspense fallback={<div className="center-screen">Carregando Insights…</div>}>
+        <InsightsPage onOpenInspection={id=>void openInspection(id)}/>
+      </Suspense>}
 
       {tab==='auditorias' && (
         <section className="workspace audit-workspace" aria-label="Inspeções Armazém">
           <Suspense fallback={<div className="audit-center">Carregando inspeções do armazém…</div>}>
-            <AuditoriasPage profileName={profile.nome} canDelete={!!canDelete} canManageTemplates={!!canManageIts}/>
+            <AuditoriasPage userId={userId||''} profileName={profile.nome} canDelete={!!canDelete} canManageTemplates={!!canManageIts}/>
           </Suspense>
         </section>
       )}
@@ -2415,7 +2676,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   </div>
                   <div className="inspection-sublist">
                     {related.map((i)=>(
-                      <div className="inspection-row" key={i.id}>
+                      <div className="inspection-row sgq-inspection-card" key={i.id}>
                         <div>
                           <strong>{inspectionDisplay(i)}</strong>
                           <span>{statusLabel(i.status)} · {i.grupos_inspecao?.nome} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0}</span>
@@ -2448,6 +2709,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
+          {offlineDraftStatus && <span className="sgq-offline-indicator"><CloudUpload size={14}/>{offlineDraftStatus}</span>}
           <form onSubmit={(e)=>void createInspection(e,(e.nativeEvent as SubmitEvent).submitter?.getAttribute('value')==='iniciar')} className="inspection-form">
             <section className="panel section-card">
               <div className="section-title">
@@ -2545,9 +2807,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                           {row.omieStatus==='not_configured' && <small className="field-status warn">{row.omieMessage || 'Integração OMIE não configurada'}</small>}
                           {row.omieStatus==='error' && <small className="field-status bad">{row.omieMessage || 'Falha ao consultar o OMIE'}</small>}
                         </label>
+                        <label>Código do cliente<input value={row.codigoCliente} onChange={e=>setSkuRows(rows=>rows.map((r,j)=>j===i?{...r,codigoCliente:e.target.value}:r))} placeholder="Código informado pelo cliente"/></label>
                         <label>Lote<input value={row.lote} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,lote:e.target.value}:r))}/></label>
                         <label>Material<input value={row.material} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,material:e.target.value}:r))}/></label>
                         <label>Capacidade<input value={row.capacidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,capacidade:e.target.value}:r))}/></label>
+                        {row.numeroPedidoPv && <label>Quantidade original PV {row.numeroPedidoPv}<input type="number" value={row.quantidadePv} readOnly aria-label="Quantidade original do PV Omie"/></label>}
                         <label>Quantidade total recebida<input type="number" step="0.01" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/>
                           {row.omieSourcePedido && <small className="field-hint">Referência: quantidade do PV {row.omieSourcePedido}. Confirme o recebimento físico.</small>}
                         </label>
@@ -3379,6 +3643,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <div className="form-grid">
                   <label>Código<input value={row.sku} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,sku:e.target.value}:x)})}/></label>
                   <label>Descrição<input value={row.nome} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,nome:e.target.value}:x)})}/></label>
+                  <label>Código do cliente<input value={row.codigoCliente||''} onChange={e=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,codigoCliente:e.target.value}:x)})}/></label>
+                  {row.numeroPedidoPv && <label>Quantidade original PV {row.numeroPedidoPv}<input type="number" readOnly value={row.quantidadePv||''}/></label>}
                   <label>Lote<input value={row.lote} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,lote:e.target.value}:x)})}/></label>
                   <label>Quantidade recebida<input type="number" step="0.01" value={row.quantidade} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,quantidade:e.target.value}:x)})}/></label>
                   <label>Caixas recebidas<input type="number" step="1" value={row.caixasRecebidas} onChange={(e)=>{

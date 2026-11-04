@@ -1,6 +1,7 @@
 import {useEffect,useMemo,useRef,useState} from 'react'
 import {ArrowLeft,Camera,CheckCircle2,ImagePlus,RefreshCw,ShieldCheck,Upload,X} from 'lucide-react'
 import {apiGet,apiPost,supabase} from '../lib/supabase'
+import {readOfflineDraft,saveOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,connectionFailure} from '../lib/offline'
 import './MobileFotos.css'
 
 type Process={id:string;codigo:string;cliente:string|null}
@@ -26,8 +27,8 @@ async function compressed(file:File):Promise<File>{
   }finally{bitmap.close()}
  }catch{return file}
 }
-export default function MobileFotos({processes,inspections,canWrite,onRefresh,onExit}:{
- processes:Process[];inspections:Inspection[];canWrite:boolean;onRefresh:()=>Promise<void>;onExit:()=>void
+export default function MobileFotos({processes,inspections,canWrite,userId,onRefresh,onExit}:{
+ processes:Process[];inspections:Inspection[];canWrite:boolean;userId:string;onRefresh:()=>Promise<void>;onExit:()=>void
 }){
  const [processId,setProcessId]=useState<string|null>(null)
  const [inspectionId,setInspectionId]=useState<string|null>(null)
@@ -39,14 +40,47 @@ export default function MobileFotos({processes,inspections,canWrite,onRefresh,on
  const [error,setError]=useState('')
  const [message,setMessage]=useState('')
  const busyRef=useRef(false),sequence=useRef(0),pendingRef=useRef<Pending[]>([])
+ const [photoDraftLoaded,setPhotoDraftLoaded]=useState(false)
  useEffect(()=>{pendingRef.current=pending},[pending])
  useEffect(()=>()=>{sequence.current++;pendingRef.current.forEach(p=>URL.revokeObjectURL(p.preview))},[])
+ useEffect(()=>{
+  if(!userId||!inspectionId){setPhotoDraftLoaded(false);return}
+  let active=true
+  setPhotoDraftLoaded(false)
+  void readOfflineDraft<Array<{id:string;file:File;legenda:string}>>(userId,'mobile:photos:'+inspectionId)
+    .then(rows=>{
+      if(!active)return
+      if(rows?.length)setPending(rows.map(x=>({...x,preview:URL.createObjectURL(x.file)})))
+    }).finally(()=>{if(active)setPhotoDraftLoaded(true)})
+    .catch(e=>{if(active)setError('Falha ao recuperar fotos locais: '+String(e?.message||''))})
+  return()=>{active=false}
+ },[userId,inspectionId])
+ useEffect(()=>{
+  if(!userId||!inspectionId||!photoDraftLoaded)return
+  const timer=window.setTimeout(()=>{
+    const work=pending.length?saveOfflineDraft(userId,'mobile:photos:'+inspectionId,
+      pending.map(p=>({id:p.id,file:p.file,legenda:p.legenda}))):clearOfflineDraft(userId,'mobile:photos:'+inspectionId)
+    void work.catch(e=>setError('Armazenamento offline indisponível: '+String(e?.message||'')))
+  },350)
+  return()=>window.clearTimeout(timer)
+ },[userId,inspectionId,pending,photoDraftLoaded])
+ async function queuePhotoOffline(photo:Pending,selectedInspectionId:string){
+  if(!userId)throw new Error('Usuário não identificado para fotos offline.')
+  const path=selectedInspectionId+'/gerais/'+photo.id+'-'+photo.file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
+  await enqueueOfflineOperation({
+    id:userId+':inspection-photo:'+selectedInspectionId+':'+photo.id,userId,
+    kind:'inspection-photo',path:'/api/inspecoes/'+selectedInspectionId+'/fotos/registrar',
+    body:{inspectionId:selectedInspectionId,path,file:photo.file,legend:photo.legenda.trim()},
+    createdAt:Date.now()
+  })
+ }
+
  const {active,linked}=useMemo(()=>{
   const valid=new Set(processes.map(p=>p.id))
   const map=new Map<string,Inspection[]>()
   for(const i of inspections){
    const id=i.grupos_inspecao?.processo_id
-   if(i.status!=='em_andamento'||!id||!valid.has(id))continue
+   if(!['aberta','em_andamento'].includes(i.status)||!id||!valid.has(id))continue
    const list=map.get(id)||[];list.push(i);map.set(id,list)
   }
   return {active:processes.filter(p=>map.has(p.id)),linked:map}
@@ -57,6 +91,7 @@ export default function MobileFotos({processes,inspections,canWrite,onRefresh,on
   if(busyRef.current)return false
   if(pending.length&&!window.confirm('Descartar fotos ainda não enviadas?'))return false
   pending.forEach(p=>URL.revokeObjectURL(p.preview));setPending([])
+  if(userId&&inspectionId)void clearOfflineDraft(userId,'mobile:photos:'+inspectionId).catch(()=>undefined)
   return true
  }
  function back(){
@@ -81,8 +116,14 @@ export default function MobileFotos({processes,inspections,canWrite,onRefresh,on
     apiGet<{photoUrls:Record<string,string|null>}>('/api/inspecoes/'+encodeURIComponent(id)+'/fotos/links'),
    ])
    if(request!==sequence.current)return
-   if(details.error||!details.data){setContext(null);setError(details.error?.message||'Falha ao carregar fotos.');return}
-   if(details.data.inspecao.status!=='em_andamento'){setContext(null);setError('Esta inspeção não está mais em andamento.');void onRefresh();return}
+   if(details.error||!details.data){
+     const cached=await readOfflineDraft<PhotoContext>(userId,'mobile:context:'+id).catch(()=>null)
+     if(!cached){setContext(null);setError(details.error?.message||'Falha ao carregar fotos.');return}
+     if(request===sequence.current)setContext(cached)
+     return
+   }
+   void saveOfflineDraft(userId,'mobile:context:'+id,details.data).catch(()=>undefined)
+   if(!['aberta','em_andamento'].includes(details.data.inspecao.status)){setContext(null);setError('Esta inspeção não está disponível para fotos.');void onRefresh();return}
    setContext({...details.data,photos:(details.data.photos||[]).map(p=>({...p,signed_url:urls.data?.photoUrls?.[p.storage_path]||null}))})
   }catch{if(request===sequence.current)setError('Falha de conexão ao carregar fotos.')}
   finally{if(request===sequence.current)setLoading(false)}
@@ -90,8 +131,7 @@ export default function MobileFotos({processes,inspections,canWrite,onRefresh,on
  function selectProcess(id:string){
   if(!clearDraft())return
   setProcessId(id);setInspectionId(null);setContext(null);setError('');setMessage('')
-  const list=linked.get(id)||[]
-  if(list.length===1){setInspectionId(list[0].id);void load(list[0].id)}
+  // Always show the inspection cards so the started/unstarted color is visible.
  }
  function selectInspection(id:string){
   if(!clearDraft())return
@@ -110,6 +150,18 @@ export default function MobileFotos({processes,inspections,canWrite,onRefresh,on
  async function save(){
   if(!canWrite||!inspectionId||!context||busyRef.current||!pending.length)return
   if(pending.some(p=>!p.legenda.trim())){setError('Informe a legenda de cada foto.');return}
+  if(!navigator.onLine){
+    busyRef.current=true;setBusy(true);setError('')
+    try{
+      for(const photo of pending)await queuePhotoOffline(photo,inspectionId)
+      pending.forEach(p=>URL.revokeObjectURL(p.preview))
+      setPending([])
+      await clearOfflineDraft(userId,'mobile:photos:'+inspectionId)
+      setMessage('Fotos salvas neste dispositivo. Serão sincronizadas automaticamente.')
+    }catch(e:any){setError('Não foi possível salvar fotos offline: '+String(e?.message||''))}
+    finally{busyRef.current=false;setBusy(false)}
+    return
+  }
   busyRef.current=true;setBusy(true);setError('');setMessage('')
   const successful=new Set<string>();let failures=0
   for(const photo of pending){
@@ -126,6 +178,10 @@ export default function MobileFotos({processes,inspections,canWrite,onRefresh,on
     if(saved.error||!saved.data?.salvas)throw new Error(saved.error?.message||'Falha ao registrar foto.')
     successful.add(photo.id)
    }catch(e:any){
+    if(!navigator.onLine||connectionFailure(String(e?.message||''))){
+      try{await queuePhotoOffline(photo,inspectionId);successful.add(photo.id);continue}
+      catch(offlineError:any){setError('Falha ao guardar foto: '+String(offlineError?.message||''))}
+    }
     failures++
     setPending(list=>list.map(p=>p.id===photo.id?{...p,error:e?.message||'Erro ao salvar foto'}:p))
    }
@@ -142,21 +198,21 @@ export default function MobileFotos({processes,inspections,canWrite,onRefresh,on
   <div className="sgq-mobile-body">
    <div className="sgq-mobile-title">
     {(processId||inspectionId)&&<button className="sgq-mobile-back" type="button" disabled={busy} onClick={back} aria-label="Voltar"><ArrowLeft size={21}/></button>}
-    <div><h1>{inspectionId?'Fotos da inspeção':processId?'Inspeções do processo':'Processos em andamento'}</h1></div>
+    <div><h1>{inspectionId?'Fotos da inspeção':processId?'Inspeções do processo':'Processos com inspeções'}</h1></div>
     {!processId&&<button className="sgq-mobile-refresh" type="button" disabled={refreshing} onClick={()=>void refreshList()} aria-label="Atualizar processos"><RefreshCw size={19}/></button>}
    </div>
    {error&&<div role="alert" className="sgq-mobile-notice error">{error}</div>}
    {message&&<div role="status" className="sgq-mobile-notice success"><CheckCircle2 size={18}/>{message}</div>}
    {!processId&&<><p className="sgq-mobile-description">Escolha um processo para registrar fotos e legendas.</p>
     {active.map(p=><button type="button" className="sgq-mobile-process" key={p.id} onClick={()=>selectProcess(p.id)}>
-     <span className="sgq-mobile-process-header"><strong>{fst(p.codigo)}</strong><small>{(linked.get(p.id)||[]).length} em andamento</small></span>
+     <span className="sgq-mobile-process-header"><strong>{fst(p.codigo)}</strong><small>{(linked.get(p.id)||[]).length} inspeção(ões)</small></span>
      <span>{p.cliente||'Cliente não informado'}</span><b><Camera size={17}/> Adicionar fotos</b>
     </button>)}
-    {!active.length&&<div className="sgq-mobile-empty"><Camera size={27}/><strong>Nenhum processo em andamento</strong><span>Atualize após iniciar uma inspeção no computador.</span></div>}
+    {!active.length&&<div className="sgq-mobile-empty"><Camera size={27}/><strong>Nenhuma inspeção disponível</strong><span>Crie uma inspeção para registrar fotos.</span></div>}
    </>}
    {processId&&!inspectionId&&<><p className="sgq-mobile-description">{fst(selected?.codigo||'')} · {selected?.cliente||'Cliente não informado'}</p>
-    {childInspections.map(i=><button type="button" className="sgq-mobile-process" key={i.id} onClick={()=>selectInspection(i.id)}>
-     <strong>{i.grupos_inspecao?.nome||'Inspeção'}</strong><span>{i.numero||'Inspeção em andamento'}</span><b><Camera size={17}/> Fotografar</b>
+    {childInspections.map(i=><button type="button" className={'sgq-mobile-process '+(i.status==='em_andamento'?'sgq-photo-started':'sgq-photo-not-started')} key={i.id} onClick={()=>selectInspection(i.id)}>
+     <strong>{i.grupos_inspecao?.nome||'Inspeção'}</strong><span>{i.numero||'Inspeção'} · {i.status==='em_andamento'?'Iniciada':'Não iniciada'}</span><b><Camera size={17}/> Fotografar</b>
     </button>)}
    </>}
    {inspectionId&&<><p className="sgq-mobile-description">{fst(selected?.codigo||'')} · {selected?.cliente||'Cliente não informado'}</p>

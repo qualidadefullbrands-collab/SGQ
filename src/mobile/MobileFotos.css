@@ -53,3 +53,8 @@
 .sgq-mobile-saved-grid figcaption{padding:9px;line-height:1.35;font-size:12px;overflow-wrap:anywhere}
 @media(min-width:620px){.sgq-mobile-saved-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:360px){.sgq-mobile-body{padding:17px 11px 45px}.sgq-mobile-panel{padding:12px}.sgq-mobile-draft{grid-template-columns:70px minmax(0,1fr) 28px;gap:7px}.sgq-mobile-draft>img{width:70px;height:85px}}
+
+/* Status of an inspection in mobile camera mode: differentiated without extra text blocks. */
+.sgq-mobile-process.sgq-photo-started{border:2px solid #39837c!important;background:#e5f3f0!important}
+.sgq-mobile-process.sgq-photo-not-started{border:2px solid #ba944d!important;background:#fff6e6!important}
+.sgq-mobile-process.sgq-photo-started strong,.sgq-mobile-process.sgq-photo-not-started strong{color:#243a47}

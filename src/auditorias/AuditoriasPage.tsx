@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, ArrowLeft, ArrowUpRight, Boxes, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileText, Flame, Layers3, Loader2, LoaderCircle, MapPin, Save, Sparkles, Trash2, Upload, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, supabase } from '../lib/supabase'
+import {saveOfflineDraft,readOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from '../lib/offline'
 import { AUDIT_DEFINITIONS, getAuditDefinition, type AuditCriterion, type AuditDefinition, type RqCode } from './catalog'
 import './auditorias.css'
 import './warehouse-unified.css'
@@ -79,6 +80,7 @@ type TemplateRow = {
 }
 
 type Props = {
+  userId?:string
   profileName?: string | null
   canDelete?: boolean
   canManageTemplates?: boolean
@@ -113,7 +115,7 @@ function statusLabel(value:string) {
   return map[value] ?? value
 }
 
-export default function AuditoriasPage({profileName,canDelete=false,canManageTemplates=false}:Props) {
+export default function AuditoriasPage({userId='',profileName,canDelete=false,canManageTemplates=false}:Props) {
   const [executions,setExecutions]=useState<AuditExecution[]>([])
   const [templates,setTemplates]=useState<TemplateRow[]>([])
   const [active,setActive]=useState<AuditExecution|null>(null)
@@ -183,12 +185,20 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
     setLoadingPage(true)
     const loaded=await apiGet<any>('/api/auditorias/bootstrap')
     if (!loaded.error && loaded.data) {
+      void saveOfflineDraft(userId,'audit:bootstrap',loaded.data).catch(()=>undefined)
       setExecutions((loaded.data.executions ?? []) as AuditExecution[])
       setTemplates((loaded.data.templates ?? []) as TemplateRow[])
       setBootstrapFailed(false)
     } else {
-      setBootstrapFailed(true)
-      setNotice(loaded.error?.message || 'Não foi possível carregar as inspeções do armazém.')
+      const cached=await readOfflineDraft<any>(userId,'audit:bootstrap').catch(()=>null)
+      if(cached){
+        setExecutions(cached.executions||[])
+        setTemplates(cached.templates||[])
+        setBootstrapFailed(false)
+      }else{
+        setBootstrapFailed(true)
+        setNotice(loaded.error?.message || 'Não foi possível carregar as inspeções do armazém.')
+      }
     }
     setLoadingPage(false)
   }
@@ -274,9 +284,12 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
     if(!keepNotice)setNotice('')
     try {
       const loaded=await apiGet<any>(`/api/auditorias/${id}/detalhe`)
-      if (loaded.error || !loaded.data?.execution) throw new Error(loaded.error?.message || 'Não foi possível abrir a auditoria.')
+      let data=loaded.data
+      if (loaded.error || !data?.execution){
+        data=await readOfflineDraft<any>(userId,'audit:detail:'+id).catch(()=>null)
+        if(!data?.execution)throw new Error(loaded.error?.message || 'Não foi possível abrir a auditoria.')
+      }else void saveOfflineDraft(userId,'audit:detail:'+id,data).catch(()=>undefined)
       if(requestVersion!==openAuditVersion.current)return
-      const data=loaded.data
       const urls=data.photoUrls ?? {}
       const withUrls=((data.messages ?? []) as AuditMessage[]).map((m)=>({
         ...m,
@@ -318,11 +331,33 @@ export default function AuditoriasPage({profileName,canDelete=false,canManageTem
     setSavingRow(id)
     setNotice('')
     try{
-      const saved=await apiPut<any>('/api/auditorias/'+active.id+'/respostas/'+encodeURIComponent(criterion.key),{
-        resultado:result,localRef:local,observacao:note,confianca:1,
+      const path='/api/auditorias/'+active.id+'/respostas/'+encodeURIComponent(criterion.key)
+      const body={
+        itemKey:criterion.key,resultado:result,localRef:local,observacao:note,confianca:1,
         progressoTotalEsperado:definition?.fixedChecklist ? definition.criteria.length : 0
+      }
+      const saveLocally=async()=>{
+        if(!userId)throw new Error('Sessão offline indisponível.')
+        const key=userId+':audit-answer:'+active.id+':'+criterion.key+':'+local
+        const previous=(await offlineOperations(userId)).find(item=>item.id===key)
+        await enqueueOfflineOperation({id:key,userId,kind:'audit-answer',path,body,
+          expected:previous?.expected??JSON.stringify(answerMap.get(id)?{
+            resultado:answerMap.get(id)?.resultado,observacao:answerMap.get(id)?.observacao
+          }:null),createdAt:previous?.createdAt??Date.now()})
+        const row:AuditAnswer={id:answerMap.get(id)?.id||'offline-'+crypto.randomUUID(),
+          item_key:criterion.key,local_ref:local,resultado:result,observacao:note,confianca:1}
+        setAnswers(items=>[...items.filter(a=>!(a.item_key===row.item_key&&a.local_ref===row.local_ref)),row])
+        setNotice('Item salvo no dispositivo. Sincronização pendente.')
+      }
+      if(!navigator.onLine){await saveLocally();return}
+      const saved=await apiPut<any>(path,{
+        resultado:body.resultado,localRef:body.localRef,observacao:body.observacao,
+        confianca:body.confianca,progressoTotalEsperado:body.progressoTotalEsperado
       })
-      if(saved.error||!saved.data?.resposta)throw new Error(saved.error?.message||'Não foi possível salvar este item.')
+      if(saved.error||!saved.data?.resposta){
+        if(!navigator.onLine||connectionFailure(String(saved.error?.message||''))){await saveLocally();return}
+        throw new Error(saved.error?.message||'Não foi possível salvar este item.')
+      }
       const row=saved.data.resposta as AuditAnswer
       setAnswers(previous=>[...previous.filter(a=>!(a.item_key===row.item_key&&a.local_ref===row.local_ref)),row])
       setActive(previous=>previous?{...previous,progresso_concluido:saved.data.progresso_concluido,progresso_total:saved.data.progresso_total}:previous)
