@@ -66,11 +66,12 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
  },[userId,inspectionId,pending,photoDraftLoaded])
  async function queuePhotoOffline(photo:Pending,selectedInspectionId:string){
   if(!userId)throw new Error('Usuário não identificado para fotos offline.')
-  const path=selectedInspectionId+'/gerais/'+photo.id+'-'+photo.file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
+  const file=await compressed(photo.file)
+  const path=selectedInspectionId+'/gerais/'+photo.id+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
   await enqueueOfflineOperation({
     id:userId+':inspection-photo:'+selectedInspectionId+':'+photo.id,userId,
     kind:'inspection-photo',path:'/api/inspecoes/'+selectedInspectionId+'/fotos/registrar',
-    body:{inspectionId:selectedInspectionId,path,file:photo.file,legend:photo.legenda.trim()},
+    body:{inspectionId:selectedInspectionId,path,file,legend:photo.legenda.trim()},
     createdAt:Date.now()
   })
  }
@@ -142,14 +143,13 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
   const arr=Array.from(files)
   if(arr.some(f=>!f.type.startsWith('image/'))){setError('Selecione apenas imagens.');return}
   if(arr.some(f=>f.size>25*1024*1024)){setError('Cada imagem deve ter no máximo 25 MB.');return}
-  if(pending.length+arr.length>20){setError('Envie até 20 fotos por vez.');return}
+  if(pending.length+arr.length>60){setError('Selecione até 60 fotos por lote.');return}
   setPending(current=>[...current,...arr.map(file=>({id:crypto.randomUUID(),file,preview:URL.createObjectURL(file),legenda:''}))])
   setError('');setMessage('')
  }
  function remove(id:string){const p=pending.find(x=>x.id===id);if(p)URL.revokeObjectURL(p.preview);setPending(current=>current.filter(x=>x.id!==id))}
  async function save(){
   if(!canWrite||!inspectionId||!context||busyRef.current||!pending.length)return
-  if(pending.some(p=>!p.legenda.trim())){setError('Informe a legenda de cada foto.');return}
   if(!navigator.onLine){
     busyRef.current=true;setBusy(true);setError('')
     try{
@@ -163,35 +163,45 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
     return
   }
   busyRef.current=true;setBusy(true);setError('');setMessage('')
-  const successful=new Set<string>();let failures=0
-  for(const photo of pending){
-   try{
-    const file=await compressed(photo.file)
-    // Stable storage path makes retrying a failed request safe.
-    const path=inspectionId+'/gerais/'+photo.id+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
-    const up=await supabase.storage.from('inspecao-fotos').upload(path,file,{contentType:file.type||'image/jpeg'})
-    // The bucket deliberately has no UPDATE policy: on retry, an already-created object
-    // means we should proceed to the idempotent registration, not overwrite evidence.
-    if(up.error && !/already exists|duplicate|resource already exists|409/i.test(up.error.message))
-      throw new Error(up.error.message)
-    const saved=await apiPost<{salvas:number}>('/api/inspecoes/'+encodeURIComponent(inspectionId)+'/fotos/registrar',{fotos:[{storagePath:path,legenda:photo.legenda.trim()}]})
-    if(saved.error||!saved.data?.salvas)throw new Error(saved.error?.message||'Falha ao registrar foto.')
-    successful.add(photo.id)
-   }catch(e:any){
-    if(!navigator.onLine||connectionFailure(String(e?.message||''))){
-      try{await queuePhotoOffline(photo,inspectionId);successful.add(photo.id);continue}
-      catch(offlineError:any){setError('Falha ao guardar foto: '+String(offlineError?.message||''))}
+  const batch=[...pending]
+  const outcomes:Array<{id:string;ok:boolean;offline:boolean;error?:string}>=new Array(batch.length)
+  let index=0
+  const worker=async()=>{
+   while(index<batch.length){
+    const position=index++,photo=batch[position]
+    try{
+     const file=await compressed(photo.file)
+     // The photo ID gives each upload a stable, idempotent path.
+     const path=inspectionId+'/gerais/'+photo.id+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
+     const up=await supabase.storage.from('inspecao-fotos').upload(path,file,{contentType:file.type||'image/jpeg'})
+     if(up.error&&!/already exists|duplicate|resource already exists|409/i.test(up.error.message))
+       throw new Error(up.error.message)
+     const saved=await apiPost<{salvas:number}>('/api/inspecoes/'+encodeURIComponent(inspectionId)+'/fotos/registrar',{fotos:[{storagePath:path,legenda:photo.legenda.trim()}]})
+     if(saved.error||!saved.data?.salvas)throw new Error(saved.error?.message||'Falha ao registrar foto.')
+     outcomes[position]={id:photo.id,ok:true,offline:false}
+    }catch(e:any){
+     const reason=String(e?.message||'Erro ao salvar foto')
+     if(!navigator.onLine||connectionFailure(reason)){
+      try{await queuePhotoOffline(photo,inspectionId);outcomes[position]={id:photo.id,ok:true,offline:true};continue}
+      catch(queueError:any){outcomes[position]={id:photo.id,ok:false,offline:false,error:String(queueError?.message||reason)};continue}
+     }
+     outcomes[position]={id:photo.id,ok:false,offline:false,error:reason}
     }
-    failures++
-    setPending(list=>list.map(p=>p.id===photo.id?{...p,error:e?.message||'Erro ao salvar foto'}:p))
    }
   }
-  pending.filter(p=>successful.has(p.id)).forEach(p=>URL.revokeObjectURL(p.preview))
-  setPending(list=>list.filter(p=>!successful.has(p.id)))
+  await Promise.all(Array.from({length:Math.min(3,batch.length)},()=>worker()))
+  const successful=new Set(outcomes.filter(x=>x?.ok).map(x=>x.id))
+  const failures=outcomes.filter(x=>!x?.ok).length
+  const queued=outcomes.filter(x=>x?.ok&&x.offline).length
+  batch.filter(p=>successful.has(p.id)).forEach(p=>URL.revokeObjectURL(p.preview))
+  setPending(list=>list.filter(p=>!successful.has(p.id)).map(p=>{
+   const outcome=outcomes.find(x=>x?.id===p.id)
+   return outcome?.error?{...p,error:outcome.error}:p
+  }))
   busyRef.current=false;setBusy(false)
-  if(successful.size)setMessage(successful.size+' foto(s) salva(s). Finalize a inspeção no computador.')
-  if(failures)setError(failures+' foto(s) não foram enviadas. Tente novamente.')
-  if(successful.size)void load(inspectionId)
+  if(successful.size)setMessage(successful.size+' foto(s) '+(queued?'salva(s); '+queued+' aguardando sincronização.':'enviada(s).')+' Legendas no computador.')
+  if(failures)setError(failures+' foto(s) não foram salvas. Tente novamente.')
+  if(successful.size&&successful.size>queued)void load(inspectionId)
  }
  return <main className="sgq-mobile-photo">
   <header className="sgq-mobile-photo-header"><div className="sgq-mobile-logo"><ShieldCheck size={24}/><div><strong>SGQ</strong><small>Modo Fotos</small></div></div><button type="button" onClick={()=>{if(clearDraft())onExit()}} disabled={busy}>SGQ completo</button></header>
@@ -203,7 +213,7 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
    </div>
    {error&&<div role="alert" className="sgq-mobile-notice error">{error}</div>}
    {message&&<div role="status" className="sgq-mobile-notice success"><CheckCircle2 size={18}/>{message}</div>}
-   {!processId&&<><p className="sgq-mobile-description">Escolha um processo para registrar fotos e legendas.</p>
+   {!processId&&<><p className="sgq-mobile-description">Escolha um processo para registrar as fotos.</p>
     {active.map(p=><button type="button" className="sgq-mobile-process" key={p.id} onClick={()=>selectProcess(p.id)}>
      <span className="sgq-mobile-process-header"><strong>{fst(p.codigo)}</strong><small>{(linked.get(p.id)||[]).length} inspeção(ões)</small></span>
      <span>{p.cliente||'Cliente não informado'}</span><b><Camera size={17}/> Adicionar fotos</b>
@@ -221,19 +231,19 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
      <div className="sgq-mobile-section-head"><strong>Adicionar evidências</strong><small>{context.photos.length} salva(s)</small></div>
      {canWrite?<div className="sgq-mobile-capture">
       <label><Camera size={23}/><strong>Tirar foto</strong><input type="file" accept="image/*" capture="environment" onChange={e=>{addFiles(e.target.files);e.target.value=''}}/></label>
-      <label><ImagePlus size={23}/><strong>Galeria</strong><input type="file" accept="image/*" multiple onChange={e=>{addFiles(e.target.files);e.target.value=''}}/></label>
+      <label><ImagePlus size={23}/><strong>Selecionar várias</strong><input type="file" accept="image/*" multiple onChange={e=>{addFiles(e.target.files);e.target.value=''}}/></label>
      </div>:<div className="sgq-mobile-notice">Seu perfil permite apenas visualizar.</div>}
-     {pending.map((p,index)=><div className="sgq-mobile-draft" key={p.id}>
-      <img src={p.preview} alt={'Foto pendente '+(index+1)}/>
-      <div><label htmlFor={'legend-'+p.id}>Legenda {index+1}</label>
-       <textarea id={'legend-'+p.id} rows={2} maxLength={300} value={p.legenda} disabled={busy} placeholder="Descreva o que aparece na foto" onChange={e=>setPending(rows=>rows.map(r=>r.id===p.id?{...r,legenda:e.target.value,error:undefined}:r))}/>
+     {!!pending.length&&<div className="sgq-mobile-batch">
+      <div className="sgq-mobile-batch-title"><strong>{pending.length} foto(s) selecionada(s)</strong><small>Legendas no computador</small></div>
+      <div className="sgq-mobile-batch-grid">{pending.map((p,index)=><div className="sgq-mobile-batch-photo" key={p.id}>
+       <img src={p.preview} alt={'Foto pendente '+(index+1)}/>
+       <button type="button" aria-label={'Remover foto '+(index+1)} disabled={busy} onClick={()=>remove(p.id)}><X size={16}/></button>
        {p.error&&<small role="alert" className="sgq-mobile-error">{p.error}</small>}
-      </div>
-      <button type="button" aria-label="Remover foto" disabled={busy} onClick={()=>remove(p.id)}><X size={19}/></button>
-     </div>)}
-     {!!pending.length&&<button className="sgq-mobile-save" type="button" onClick={()=>void save()} disabled={busy||!canWrite}><Upload size={19}/>{busy?'Enviando…':'Salvar '+pending.length+' foto(s)'}</button>}
+      </div>)}</div>
+      <button className="sgq-mobile-save" type="button" onClick={()=>void save()} disabled={busy||!canWrite}><Upload size={19}/>{busy?'Salvando lote…':'Salvar '+pending.length+' foto(s)'}</button>
+     </div>}}
      <div className="sgq-mobile-saved"><div className="sgq-mobile-section-head"><strong>Fotos salvas</strong><button type="button" disabled={busy||loading} onClick={()=>void load(inspectionId)}><RefreshCw size={16}/> Atualizar</button></div>
-      {context.photos.length?<div className="sgq-mobile-saved-grid">{context.photos.map(p=><figure key={p.id}>{p.signed_url?<img src={p.signed_url} alt={p.legenda}/>:<div className="sgq-mobile-placeholder"><Camera size={20}/></div>}<figcaption>{p.legenda}</figcaption></figure>)}</div>:<p>Nenhuma foto enviada ainda.</p>}
+      {context.photos.length?<div className="sgq-mobile-saved-grid">{context.photos.map(p=><figure key={p.id}>{p.signed_url?<img src={p.signed_url} alt={p.legenda}/>:<div className="sgq-mobile-placeholder"><Camera size={20}/></div>}<figcaption>{p.legenda||'Sem legenda'}</figcaption></figure>)}</div>:<p>Nenhuma foto enviada ainda.</p>}
      </div>
     </section>}
     <p className="sgq-mobile-description">As evidências ficam na inspeção original. A conclusão será feita no computador.</p>
