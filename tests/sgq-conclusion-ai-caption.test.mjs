@@ -17,7 +17,7 @@ function runtime(fetchImpl,model='gemini-2.5-flash'){
  const transpiled=ts.transpileModule(edge,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}})
   .outputText.replace(/^import .*;\s*$/gm,'')
  const script=new Function('Deno','createClient','fetch','AbortSignal',
-  transpiled+'\nreturn {generate,publicError}')
+  transpiled+'\nreturn {generate,publicError,conciseQualitySummary}')
  const controls=script(Deno,()=>({rpc:async()=>({data:null,error:null})}),fetchImpl,AbortSignal)
  return {...controls,handler}
 }
@@ -79,4 +79,26 @@ test('desktop always shows a labeled editor and Save legend button for each auth
  assert.match(css,/\.photo-gallery \.sgq-saved-photo-caption/)
  assert.match(app,/setAiConclusionError\(/)
  assert.match(app,/aiConclusionError&&<p/)
+})
+
+test('SGQ conclusion is short, with exact sample size and approval-aware NC status',()=>{
+ const {conciseQualitySummary}=runtime(async()=>{throw new Error('No AI request expected')})
+ const pending=conciseQualitySummary({tamanhoAmostra:32,naoConformes:0,resultado:'pendente',amostragemConcluida:true})
+ assert.equal(pending,'Tamanho da amostra - 32. Lote inspecionado sem não conformidades registradas.')
+ const accepted=conciseQualitySummary({tamanhoAmostra:32,naoConformes:0,resultado:'aprovado'})
+ assert.equal(accepted,'Tamanho da amostra - 32. Lote aprovado sem não conformidades.')
+ const rejected=conciseQualitySummary({tamanhoAmostra:32,naoConformes:2,resultado:'reprovado'})
+ assert.equal(rejected,'Tamanho da amostra - 32. Lote reprovado.')
+ const nonconforming=conciseQualitySummary({tamanhoAmostra:32,naoConformes:2,resultado:'pendente'})
+ assert.equal(nonconforming,'Tamanho da amostra - 32. Registradas 2 não conformidades.')
+})
+test('routine compliant inspection returns verified concise summary without invented AI prose',async()=>{
+ let calls=0
+ const {handler}=runtime(async()=>{calls++;throw new Error('Should not call provider for routine status')})
+ const req=new Request('https://example.test',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({tamanhoAmostra:32,naoConformes:0,amostragemConcluida:true,resultado:'pendente'})})
+ const response=await handler(req)
+ const body=await response.json()
+ assert.equal(calls,0)
+ assert.equal(body.text,'Tamanho da amostra - 32. Lote inspecionado sem não conformidades registradas.')
 })
