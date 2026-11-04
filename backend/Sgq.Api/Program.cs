@@ -601,6 +601,26 @@ app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory f
     catch(Exception e){return Results.Json(Error("Falha ao carregar o painel.",e.Message),statusCode:500);}
 });
 
+
+// Read-only source for the Insights dashboard. All queries use the user's JWT
+// so table RLS applies. Rows without an Omie PV snapshot are not extrapolated.
+app.MapGet("/api/app/insights",async(HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            "select=id,numero,status,resultado,criado_em,grupo_inspecao_id,grupos_inspecao(id,processo_id,processos(id,codigo,cliente,excluido_em))&excluido_em=is.null&order=criado_em.desc&limit=1000");
+        var linksTask=RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+            "select=grupo_inspecao_id,processo_itens(id,codigo_cliente,quantidade,quantidade_pv,pv_numero,pv_fst,produtos(sku,nome))&limit=10000");
+        await Task.WhenAll(inspectionsTask,linksTask);
+        return Results.Ok(new{data=new{inspections=inspectionsTask.Result,links=linksTask.Result,
+            maxInspections=1000},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar os Insights do SGQ.",e.Message),statusCode:500);}
+});
+
 app.MapGet("/api/app/catalogos", async (HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -714,7 +734,7 @@ app.MapGet("/api/inspecoes/{id}/detalhe", async (string id,HttpRequest request,I
         var itId=i.TryGetProperty("it_versao_id",out var itProp)&&itProp.ValueKind==JsonValueKind.String?itProp.GetString():null;
 
         var itemsTask=RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
-            $"select=id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,material,capacidade,quantidade_por_caixa,caixas_recebidas,caixas_inspecionadas,distribuicao_caixas,produtos(id,sku,nome,foto_principal_path))&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
+            $"select=id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,codigo_cliente,quantidade_pv,pv_numero,pv_fst,material,capacidade,quantidade_por_caixa,caixas_recebidas,caixas_inspecionadas,distribuicao_caixas,produtos(id,sku,nome,foto_principal_path))&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
         var checklistTask=string.IsNullOrWhiteSpace(itId) ? Task.FromResult<JsonElement?>(null) : RestAsync(client,token,HttpMethod.Get,"it_checklist",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
         var checkResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_checklist_resultados",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
         var paramsTask=string.IsNullOrWhiteSpace(itId) ? Task.FromResult<JsonElement?>(null) : RestAsync(client,token,HttpMethod.Get,"it_parametros_dimensionais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
@@ -1230,7 +1250,10 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 new {
                     processo_id = processId,
                     produto_id = productId,
-                    codigo_cliente = (string?)null,
+                    codigo_cliente = string.IsNullOrWhiteSpace(item.CodigoCliente)?null:item.CodigoCliente.Trim(),
+                    quantidade_pv = item.QuantidadePv,
+                    pv_numero = string.IsNullOrWhiteSpace(item.NumeroPedidoPv)?null:item.NumeroPedidoPv.Trim(),
+                    pv_fst = string.IsNullOrWhiteSpace(item.FstPv)?null:item.FstPv.Trim(),
                     lote = string.IsNullOrWhiteSpace(item.Lote) ? null : item.Lote.Trim(),
                     material = string.IsNullOrWhiteSpace(item.Material) ? null : item.Material.Trim(),
                     capacidade = string.IsNullOrWhiteSpace(item.Capacidade) ? null : item.Capacidade.Trim(),
@@ -1401,6 +1424,10 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 var createdItem=await RestAsync(client,token,HttpMethod.Post,"processo_itens","select=id",
                     new {
                         processo_id=processId,produto_id=newProductId,
+                        codigo_cliente=string.IsNullOrWhiteSpace(item.CodigoCliente)?null:item.CodigoCliente.Trim(),
+                        quantidade_pv=item.QuantidadePv,
+                        pv_numero=string.IsNullOrWhiteSpace(item.NumeroPedidoPv)?null:item.NumeroPedidoPv.Trim(),
+                        pv_fst=string.IsNullOrWhiteSpace(item.FstPv)?null:item.FstPv.Trim(),
                         lote=string.IsNullOrWhiteSpace(item.Lote)?null:item.Lote.Trim(),
                         material=string.IsNullOrWhiteSpace(item.Material)?null:item.Material.Trim(),
                         capacidade=string.IsNullOrWhiteSpace(item.Capacidade)?null:item.Capacidade.Trim(),
@@ -1443,6 +1470,10 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
 
             var patch=new Dictionary<string,object?> {
                 ["lote"]=string.IsNullOrWhiteSpace(item.Lote)?null:item.Lote.Trim(),
+                ["codigo_cliente"]=string.IsNullOrWhiteSpace(item.CodigoCliente)?null:item.CodigoCliente.Trim(),
+                ["quantidade_pv"]=item.QuantidadePv,
+                ["pv_numero"]=string.IsNullOrWhiteSpace(item.NumeroPedidoPv)?null:item.NumeroPedidoPv.Trim(),
+                ["pv_fst"]=string.IsNullOrWhiteSpace(item.FstPv)?null:item.FstPv.Trim(),
                 ["material"]=string.IsNullOrWhiteSpace(item.Material)?null:item.Material.Trim(),
                 ["capacidade"]=string.IsNullOrWhiteSpace(item.Capacidade)?null:item.Capacidade.Trim(),
                 ["quantidade"]=effectiveQuantity,
@@ -3148,6 +3179,10 @@ public sealed class CreateInspectionItem
     public string? ProcessoItemId { get; set; }
     public string Sku { get; set; } = "";
     public string Nome { get; set; } = "";
+    public string? CodigoCliente { get; set; }
+    public decimal? QuantidadePv { get; set; }
+    public string? NumeroPedidoPv { get; set; }
+    public string? FstPv { get; set; }
     public string? Lote { get; set; }
     public string? Material { get; set; }
     public string? Capacidade { get; set; }
