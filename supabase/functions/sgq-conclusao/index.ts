@@ -38,7 +38,7 @@ async function generate(apiKey:string,model:string,prompt:string):Promise<Attemp
   maxOutputTokens:1536,
   ...(model.startsWith("gemini-2.5-flash")
    ? {thinkingConfig:{thinkingBudget:0},temperature:0.2}
-   : model.startsWith("gemini-3.")&&!model.includes("-pro")
+   : /^gemini-3\.(?:5|6)-flash/.test(model)
      ? {thinkingConfig:{thinkingLevel:"minimal"}}
      : {})
  };
