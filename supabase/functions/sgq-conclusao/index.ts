@@ -69,6 +69,57 @@ async function generate(apiKey:string,model:string,prompt:string):Promise<Attemp
   return {failure:{error:"ai_provider_unavailable",message:"Não foi possível conectar ao provedor de IA."}};
  }
 }
+
+function conciseQualitySummary(ctx:Record<string,unknown>):string{
+ const count=(value:unknown):number|null=>{
+  if(value===null||value===undefined||value==="")return null;
+  const n=Number(value);
+  return Number.isFinite(n)&&n>=0?Math.round(n):null;
+ };
+ const sample=count(ctx.tamanhoAmostra);
+ const inspected=count(ctx.totalInspecionado);
+ const samplingComplete=ctx.amostragemConcluida===true;
+ const checks=Array.isArray(ctx.checklist)?ctx.checklist as Record<string,unknown>[]:[];
+ const dimensionals=Array.isArray(ctx.dimensionais)?ctx.dimensionais as Record<string,unknown>[]:[];
+ const tests=Array.isArray(ctx.testes)?ctx.testes as Record<string,unknown>[]:[];
+ const nc=count(ctx.naoConformes);
+ const reportedNc=checks.filter(x=>x.resultado==="nao_conforme").length+
+    tests.filter(x=>x.resultado==="nao_conforme").length+
+    dimensionals.filter(x=>x.conforme===false).length;
+ const hasNonconformance=reportedNc>0||(nc!==null&&nc>0);
+ const decision=String(ctx.resultado??"").toLowerCase();
+ const finished=decision==="aprovado"||decision==="reprovado";
+ const ready=samplingComplete||ctx.checklistConcluido===true||
+    ctx.dimensionaisConcluidos===true||ctx.testesConcluidos===true||
+    (inspected!==null&&inspected>0)||checks.length>0||dimensionals.length>0||tests.length>0;
+ const sentences:string[]=[];
+ if(sample!==null&&sample>0)sentences.push("Tamanho da amostra - "+sample+".");
+ if(decision==="aprovado"&&!hasNonconformance)
+  sentences.push("Lote aprovado sem não conformidades.");
+ else if(decision==="reprovado")
+  sentences.push("Lote reprovado.");
+ else if(hasNonconformance){
+  if(nc!==null&&nc>0)
+   sentences.push(nc===1?"Registrada 1 não conformidade.":"Registradas "+nc+" não conformidades.");
+  else sentences.push("Há não conformidades nos registros de inspeção.");
+ }else if(ready||finished)
+  sentences.push("Lote inspecionado sem não conformidades registradas.");
+ return sentences.join(" ");
+}
+function significantObservation(ctx:Record<string,unknown>):boolean{
+ const arrays=[ctx.checklist,ctx.dimensionais,ctx.testes];
+ return arrays.some(v=>Array.isArray(v)&&v.some(x=>
+  typeof x?.observacao==="string"&&x.observacao.trim()!=="")) ||
+   (typeof ctx.textoAtual==="string"&&ctx.textoAtual.trim().length>0);
+}
+function shortenComplement(raw:string,baseline:string):string{
+ let text=raw.replace(/[*#]/g,"").replace(/\s+/g," ").trim();
+ if(!text||/^SEM_COMPLEMENTO\b/i.test(text))return "";
+ text=text.replace(/^Tamanho da amostra\s*[-–:]\s*\d+\.?\s*/i,"");
+ text=text.replace(/^Lote (?:aprovado|reprovado|inspecionado)[^.]*\.\s*/i,"");
+ if(text.toLowerCase()===baseline.toLowerCase())return "";
+ return text.length>230?text.slice(0,227).replace(/\s+\S*$/,"")+"...":text;
+}
 Deno.serve(async(req:Request)=>{
  if(req.method==="OPTIONS")return new Response("ok",{headers:cors});
  if(req.method!=="POST")return answer({error:"method_not_allowed",message:"Somente POST."},405);
@@ -76,19 +127,26 @@ Deno.serve(async(req:Request)=>{
   const context=await req.json();
   if(!context||typeof context!=="object"||Array.isArray(context))
    return answer({error:"ai_invalid_request",message:"Dados da inspeção inválidos."},400);
+  const baseline=conciseQualitySummary(context as Record<string,unknown>);
+  // No narrative evidence to analyze: produce the precise verified summary
+  // without an unnecessary AI request or fabricated technical considerations.
+  if(baseline&&!significantObservation(context as Record<string,unknown>))
+   return answer({text:baseline,source:"indicadores"});
   const [key,modelSecret]=await Promise.all([secret("GEMINI_API_KEY"),secret("GEMINI_MODEL")]);
-  if(!key)return answer({error:"ai_not_configured",message:"GEMINI_API_KEY não configurada."},503);
+  if(!key){
+   if(baseline)return answer({text:baseline,source:"indicadores"});
+   return answer({error:"ai_not_configured",message:"GEMINI_API_KEY não configurada."},503);
+  }
   const prompt=[
-   "Você é um profissional de Qualidade responsável por sugerir conclusões de inspeções de produtos.",
-   "Com base somente nos dados registrados, escreva um parágrafo técnico, natural e auditável em português brasileiro.",
-   "Não invente medições, não conformidades, resultados de testes, datas nem quantidades.",
-   "A ausência de um registro não equivale a resultado conforme nem a zero unidades inspecionadas.",
-   "Se houver informações insuficientes, mencione que a avaliação ainda depende de complementação.",
-   "Não afirme aprovação ou reprovação: essa decisão é exclusiva do responsável pela inspeção.",
-   "Cite apenas as observações, amostragens, verificações, não conformidades, dimensionais e testes que constarem dos dados.",
-   "Evite fórmulas mecânicas, plural entre parênteses, listas e repetir campos não relevantes.",
-   "Retorne somente o texto da sugestão, sem títulos, aspas ou comentários adicionais.",
-   "",
+   "Você auxilia a Qualidade a completar uma conclusão técnica extremamente objetiva.",
+   "Resumo obrigatório, já calculado a partir dos registros: "+(baseline||"Não há resumo de indicadores disponível."),
+   "Escreva SOMENTE uma frase complementar curta, até 25 palavras, e APENAS se houver observação real, técnica e específica que não esteja no resumo.",
+   "Se não existir achado técnico adicional, responda exatamente SEM_COMPLEMENTO.",
+   "Nunca repita tamanho da amostra, número de NC ou conclusão sobre aprovação.",
+   "Nunca afirme 'aprovado' ou 'reprovado' sem o resultado formal da inspeção.",
+   "Não invente fatos, medições, causas, riscos, produto ou cliente.",
+   "Sem listas, saudação, siglas inventadas, recomendações genéricas ou justificativas.",
+   "Dados de origem, para identificar apenas o complemento relevante:",
    JSON.stringify(context)
   ].join("\n");
   const primary=(modelSecret||"gemini-3.5-flash-lite").trim();
@@ -98,10 +156,14 @@ Deno.serve(async(req:Request)=>{
   let failure:Failure={error:"ai_provider_unavailable",message:"A geração da conclusão não está disponível."};
   for(let i=0;i<models.length;i++){
    const result=await generate(key,models[i],prompt);
-   if(result.text)return answer({text:result.text,model:models[i]});
+   if(result.text){
+    const supplement=shortenComplement(result.text,baseline);
+    return answer({text:[baseline,supplement].filter(Boolean).join(" ").trim(),model:models[i]});
+   }
    failure=result.failure??failure;
    if(!["ai_model_unavailable","ai_invalid_request","ai_empty_response"].includes(failure.error))break;
   }
+  if(baseline)return answer({text:baseline,source:"indicadores"});
   return answer(failure,503);
  }catch(e){
   console.error("sgq-conclusao unexpected error",{name:e instanceof Error?e.name:"unknown"});

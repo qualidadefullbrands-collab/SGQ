@@ -6,8 +6,12 @@ from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 from docx.oxml.ns import qn
-from PIL import Image
+from PIL import Image, ImageOps
+from docx.shared import RGBColor
+from docx.oxml import OxmlElement
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
+import unicodedata
 
 def fmt_date(value: str | None) -> str:
     if not value: return ""
@@ -57,15 +61,25 @@ def add_row(table,values,size=7.5):
 def photo_bytes(source):
     return source if isinstance(source,(bytes,bytearray)) else None
 
-def add_photo(cell,data:bytes,caption:str,width=1.75):
-    im=Image.open(BytesIO(data)); im.thumbnail((1100,800))
-    out=BytesIO(); im.convert("RGB").save(out,format="JPEG",quality=84); out.seek(0)
+def add_photo(cell,data:bytes,caption:str,width=1.75,fixed_frame=False):
+    im=ImageOps.exif_transpose(Image.open(BytesIO(data))).convert("RGB")
+    if fixed_frame:
+        # Fixed canvas prevents photos of different aspect ratios getting distorted,
+        # while every report image occupies precisely the same rectangle.
+        frame=Image.new("RGB",(1050,750),"white")
+        fitted=ImageOps.contain(im,(1030,730),method=Image.Resampling.LANCZOS)
+        frame.paste(fitted,((1050-fitted.width)//2,(750-fitted.height)//2))
+        im=frame
+    else: im.thumbnail((1100,800))
+    out=BytesIO(); im.save(out,format="JPEG",quality=85); out.seek(0)
     for p in list(cell.paragraphs):
         p._element.getparent().remove(p._element)
     p=cell.add_paragraph(); p.alignment=WD_ALIGN_PARAGRAPH.CENTER
-    p.add_run().add_picture(out,width=Inches(width))
-    cap=cell.add_paragraph(); cap.alignment=WD_ALIGN_PARAGRAPH.LEFT
-    r=cap.add_run(caption); set_font(r,7)
+    if fixed_frame: p.add_run().add_picture(out,width=Inches(width),height=Inches(width*750/1050))
+    else: p.add_run().add_picture(out,width=Inches(width))
+    cap=cell.add_paragraph(); cap.alignment=WD_ALIGN_PARAGRAPH.CENTER if fixed_frame else WD_ALIGN_PARAGRAPH.LEFT
+    r=cap.add_run(filled(caption) if fixed_frame else str(caption or "")); set_font(r,7,bold=fixed_frame)
+    if fixed_frame: r.font.color.rgb=NAVY
 
 def fill_photos(table,photos,max_photos):
     for idx,item in enumerate(photos[:max_photos]):
@@ -219,6 +233,143 @@ def _first(payload,key,default=""):
     v=payload.get(key,default)
     return "" if v is None else str(v)
 
+
+NAVY=RGBColor(21,58,93)
+HIGHLIGHT_FILL="DDEBF7"
+EMPTY="–"
+
+def filled(value):
+    if value is None or str(value).strip()=="": return EMPTY
+    return str(value).strip()
+
+def whole_number(value):
+    """Operational quantities are whole units; preserve decimals only for dimensions/capacity."""
+    if value is None or str(value).strip()=="": return EMPTY
+    try:
+        if isinstance(value,str):
+            raw=value.strip().replace(" ","")
+            if "," in raw and "." in raw:
+                raw=raw.replace(".","").replace(",",".")
+            elif "," in raw:
+                raw=raw.replace(",",".")
+        else: raw=str(value)
+        d=Decimal(raw)
+        if not d.is_finite(): return EMPTY
+        return str(int(d.quantize(Decimal("1"),rounding=ROUND_HALF_UP)))
+    except (InvalidOperation, ValueError):
+        return filled(value)
+
+def fst_code(value):
+    raw=str(value or "").strip().upper()
+    if not raw: return EMPTY
+    raw=re.sub(r"\s+","",raw)
+    return raw if raw.startswith("FST") else "FST"+raw
+
+def inspection_cell(cell,value,size=8,center=False,whole=False):
+    """Rendered inspection data is navy and bold; template labels keep their own style."""
+    text=whole_number(value) if whole else filled(value)
+    set_cell(cell,text,size=size,bold=True,center=center)
+    for p in cell.paragraphs:
+        for run in p.runs:
+            run.font.color.rgb=NAVY
+    return cell
+
+def mark_cell(cell,fill=HIGHLIGHT_FILL):
+    tcPr=cell._tc.get_or_add_tcPr()
+    shd=tcPr.find(qn("w:shd"))
+    if shd is None:
+        shd=OxmlElement("w:shd")
+        tcPr.append(shd)
+    shd.set(qn("w:fill"),fill)
+    for p in cell.paragraphs:
+        for run in p.runs:
+            run.bold=True
+            run.font.color.rgb=NAVY
+
+def _numeric_ranges(text):
+    text=str(text or "").replace("\u00a0"," ")
+    values=[]
+    integer=r"(?:\d{1,3}(?:[., ]\d{3})+|\d{1,9})"
+    pattern=rf"(?<!\d)({integer})\s*(?:a|até|ate|[-–—])\s*({integer})(?!\d)"
+    for m in re.finditer(pattern,text,re.I):
+        a,b=int(re.sub(r"[., ]","",m.group(1))),int(re.sub(r"[., ]","",m.group(2)))
+        if a<=b: values.append((a,b))
+    return values
+
+def _contains_number(celltext,value):
+    if value is None or str(value).strip()=="": return False
+    try: n=int(Decimal(str(value)))
+    except (InvalidOperation,ValueError): return False
+    return any(a<=n<=b for a,b in _numeric_ranges(celltext)) or bool(re.search(r"(?<!\d)"+re.escape(str(n))+r"(?!\d)",str(celltext)))
+
+def _range_matches(celltext,value):
+    if value is None: return False
+    try: n=int(Decimal(str(value)))
+    except (InvalidOperation,ValueError): return False
+    raw=str(celltext or "")
+    ranges=_numeric_ranges(raw)
+    if ranges:return any(a<=n<=b for a,b in ranges)
+    maximum=re.search(r"\bat[eé]\s+(\d[\d., ]*)",raw,re.I)
+    if maximum and n<=int(re.sub(r"[., ]","",maximum.group(1))):return True
+    minimum=re.search(r"\b(\d[\d., ]*)\s+(?:ou mais|em diante)",raw,re.I)
+    if minimum and n>=int(re.sub(r"[., ]","",minimum.group(1))):return True
+    return False
+
+def emphasize_sampling_tables(doc,inspection):
+    """Mark the statistical-lot row/code and selected box-sampling row in official IT tables.
+
+    Only tables containing appropriate sampling/box headers qualify.  Never highlight
+    arbitrary numeric measurements or an unrelated row just because a number matches.
+    """
+    lot=inspection.get("tamanho_lote")
+    code=str(inspection.get("codigo_amostragem") or "").strip().upper()
+    boxes=inspection.get("caixas_recebidas")
+    if boxes is None: boxes=inspection.get("total_caixas_recebidas")
+    evaluate=inspection.get("caixas_avaliar")
+    for table in doc.tables:
+        lines=[" | ".join(_norm(c.text) for c in row.cells) for row in table.rows]
+        scope=unicodedata.normalize("NFKD"," ".join(lines[:min(len(lines),5)]))
+        scope="".join(ch for ch in scope if not unicodedata.combining(ch))
+        is_lot=("tamanho do lote" in scope or "tamanho lote" in scope) and (
+            "codigo" in scope or "amostr" in scope or "inspec" in scope)
+        is_boxes=("caixas recebidas" in scope or "caixas a avaliar" in scope or
+                  "caixas para avaliar" in scope or "caixas avaliadas" in scope or
+                  "caixas a inspecionar" in scope)
+        if is_lot and lot is not None:
+            for row in table.rows:
+                texts=[c.text for c in row.cells]
+                if not any(_range_matches(t,lot) for t in texts): continue
+                # Highlight the selected statistical range and the applied code
+                # in the same row/level when the code is present.
+                for cell in row.cells: mark_cell(cell)
+                if code and len(code)<=3:
+                    for cell in row.cells:
+                        if re.fullmatch(re.escape(code),cell.text.strip(),re.I):
+                            mark_cell(cell,"BED9EF")
+                break
+        if is_boxes and boxes is not None:
+            for row in table.rows:
+                cells=row.cells
+                if not cells: continue
+                if not any(_range_matches(c.text,boxes) for c in cells): continue
+                for cell in cells: mark_cell(cell)
+                if evaluate is not None:
+                    for cell in cells:
+                        if _contains_number(cell.text,evaluate):
+                            mark_cell(cell,"BED9EF")
+                break
+            # Some official templates use a two-column box summary instead of
+            # ranges.  Emphasize its actual received/evaluated numbers.
+            for row in table.rows:
+                cells=row.cells
+                for idx,cell in enumerate(cells[:-1]):
+                    label=_norm(cell.text)
+                    if ("caixas recebidas" in label or "caixas a avaliar" in label or
+                        "caixas avaliadas" in label or "caixas para avaliar" in label):
+                        target=boxes if "recebidas" in label else evaluate
+                        if target is not None and _contains_number(cells[idx+1].text,target):
+                            mark_cell(cells[idx+1],"BED9EF")
+
 def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
     doc=Document(BytesIO(template_bytes))
     inspection=payload.get("inspection") or {}
@@ -234,22 +385,27 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
 
     first_item=items[0] if items else {}
     product=first_item.get("produto") or {}
+    total_boxes=inspection.get("caixas_recebidas")
+    if total_boxes is None: total_boxes=first_item.get("caixas_recebidas")
     identification={
         "produto / descrição": product.get("nome") or "",
         # In SGQ the customer's product code is the registered SKU.
         "código do cliente": product.get("sku") or "",
         "cliente": process.get("cliente") or "",
-        "processo fst": process.get("codigo") or "",
+        "processo fst": fst_code(process.get("codigo")),
         "nota fiscal": process.get("nota_fiscal") or "",
         "lote": first_item.get("lote") or "",
         "material": first_item.get("material") or "",
         "capacidade": first_item.get("capacidade") or "",
         "origem": process.get("origem") or "",
         "transporte": process.get("transporte") or "",
-        "quantidade recebida": first_item.get("quantidade") or "",
-        "quantidade por caixa": first_item.get("quantidade_por_caixa") or "",
-        "nº de caixas recebidas": first_item.get("caixas_recebidas") or "",
-        "n° de caixas recebidas": first_item.get("caixas_recebidas") or "",
+        "quantidade recebida": whole_number(first_item.get("quantidade")),
+        "quantidade por caixa": whole_number(first_item.get("quantidade_por_caixa")),
+        "nº de caixas recebidas": whole_number(total_boxes),
+        "n° de caixas recebidas": whole_number(total_boxes),
+        "caixas recebidas": whole_number(total_boxes),
+        "nº caixas recebidas": whole_number(total_boxes),
+        "total de caixas recebidas": whole_number(total_boxes),
         "chegada no cd": fmt_date(process.get("chegada_cd")),
         "data da inspeção": fmt_date(inspection.get("data_inspecao")),
     }
@@ -259,22 +415,27 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             cells=row.cells
             if len(cells)>=2:
                 for idx in range(0,len(cells)-1):
-                    label=_norm(cells[idx].text)
+                    label=_norm(cells[idx].text).rstrip(" :")
                     if label in identification:
-                        set_cell(cells[idx+1],identification[label],8)
+                        inspection_cell(cells[idx+1],identification[label],8)
             joined=" ".join(c.text for c in cells)
             if "Nível de inspeção" in joined or "Nível I" in joined:
                 level=str(inspection.get("nivel_inspecao") or "")
                 for cell in cells:
                     if "Nível" in cell.text or "Especial" in cell.text:
-                        set_cell(cell,_fill_choice_text(cell.text,{"I":"Nível I","II":"Nível II","III":"Nível III","S1":"Especial S1","S2":"Especial S2","S3":"Especial S3","S4":"Especial S4"}.get(level,level)),8)
-            if len(cells)>=2 and _norm(cells[0].text)=="quantidade amostrada":
+                        inspection_cell(cell,_fill_choice_text(cell.text,{"I":"Nível I","II":"Nível II","III":"Nível III","S1":"Especial S1","S2":"Especial S2","S3":"Especial S3","S4":"Especial S4"}.get(level,level)),8)
+            if len(cells)>=2 and _norm(cells[0].text) in ("quantidade amostrada","quantidade avaliada","qtd avaliada","qnt avaliada","quantidade inspecionada"):
                 sampled=inspection.get("total_inspecionado")
                 if sampled is None:
                     sampled=inspection.get("tamanho_amostra")
-                set_cell(cells[1],sampled if sampled is not None else "",8,bold=True,center=True)
-            if len(cells)>=4 and _norm(cells[2].text)=="caixas avaliadas":
-                set_cell(cells[3],inspection.get("caixas_avaliar") or "",8,bold=True,center=True)
+                inspection_cell(cells[1],sampled,8,center=True,whole=True)
+            for idx,cell in enumerate(cells[:-1]):
+                if _norm(cell.text).rstrip(" :") in (
+                    "caixas avaliadas","caixas a avaliar","caixas para avaliar",
+                    "caixas a inspecionar","nº caixas avaliadas"):
+                    # Do not overwrite a reference table's adjacent header cell.
+                    if _norm(cells[idx+1].text) in ("","-","–"):
+                        inspection_cell(cells[idx+1],inspection.get("caixas_avaliar"),8,center=True,whole=True)
 
     by_check={str(x.get("checklist_id")):x for x in check_results}
     by_order={str(x.get("ordem")):x for x in checks}
@@ -288,9 +449,9 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                 if not check: continue
                 result=by_check.get(str(check.get("id")),{}).get("resultado")
                 if len(row.cells)>=6:
-                    set_cell(row.cells[3],"X" if result=="conforme" else "",9,bold=True,center=True)
-                    set_cell(row.cells[4],"X" if result=="nao_conforme" else "",9,bold=True,center=True)
-                    set_cell(row.cells[5],"X" if result=="nao_aplicavel" else "",9,bold=True,center=True)
+                    for column,selected in ((3,"conforme"),(4,"nao_conforme"),(5,"nao_aplicavel")):
+                        if result==selected: inspection_cell(row.cells[column],"X",9,center=True)
+                        else: set_cell(row.cells[column],"",9,center=True)
 
     config_key={(str(x.get("processo_item_id")),str(x.get("parametro_id"))):x for x in dim_configs}
     result_key={}
@@ -312,14 +473,14 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             vals=result_key.get((first_item_id,pid),[])
             if len(row.cells)>1:
                 base=row.cells[1].text.split(":")[0].strip()
-                set_cell(row.cells[1],f"{base}: {cfg.get('equipamento') or ''}",7.5)
+                inspection_cell(row.cells[1],f"{base}: {filled(cfg.get('equipamento'))}",7.5)
             if len(row.cells)>2:
                 base=row.cells[2].text.split(":")[0].strip()
-                set_cell(row.cells[2],f"{base}: {cfg.get('codigo_equipamento') or ''}",7.5)
+                inspection_cell(row.cells[2],f"{base}: {filled(cfg.get('codigo_equipamento'))}",7.5)
             if len(row.cells)>3:
                 base=row.cells[3].text.split(":")[0].strip()
                 spec=cfg.get("especificacao_desvio") or ""
-                set_cell(row.cells[3],f"{base}: {spec}",7.5)
+                inspection_cell(row.cells[3],f"{base}: {filled(spec)}",7.5)
             for rr in table.rows[ridx+1:min(ridx+3,len(table.rows))]:
                 for cell in rr.cells:
                     m=re.match(r"\s*(\d+)\.",cell.text)
@@ -329,7 +490,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                     if hit:
                         value=hit.get("valor")
                         unit=hit.get("unidade") or cfg.get("unidade") or param.get("unidade") or ""
-                        set_cell(cell,f"{seq}. {value} {unit}".strip(),7.5)
+                        inspection_cell(cell,f"{seq}. {filled(value)} {unit}".strip(),7.5)
 
     evaluated_dim=[x for x in dim_results if x.get("conforme") is not None]
     dim_choice=""
@@ -339,7 +500,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
         for row in table.rows:
             if row.cells and _norm(row.cells[0].text)=="resultado dimensional":
                 for cell in row.cells[1:]:
-                    set_cell(cell,_fill_choice_text(cell.text,dim_choice),8,bold=True)
+                    inspection_cell(cell,_fill_choice_text(cell.text,dim_choice),8)
 
     final_result=str(inspection.get("resultado") or "").lower()
     final_choice="APROVADO" if final_result=="aprovado" else "REPROVADO" if final_result=="reprovado" else ""
@@ -349,14 +510,16 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             label=_norm(row.cells[0].text)
             if label=="resultado final":
                 for cell in row.cells[1:]:
-                    set_cell(cell,_fill_choice_text(cell.text,final_choice),8,bold=True)
+                    inspection_cell(cell,_fill_choice_text(cell.text,final_choice),8)
             elif label=="inspecionado por" and len(row.cells)>=2:
-                set_cell(row.cells[1],inspector,8)
-                if len(row.cells)>=4: set_cell(row.cells[3],fmt_date(inspection.get("data_inspecao")),8)
+                inspection_cell(row.cells[1],inspector,8)
+                if len(row.cells)>=4: inspection_cell(row.cells[3],fmt_date(inspection.get("data_inspecao")),8)
             elif label.startswith("responsável técnico") and len(row.cells)>=2:
-                set_cell(row.cells[1],"Vanessa T. Casarin – Responsável Técnica – CRF 22864",8)
+                inspection_cell(row.cells[1],"Vanessa T. Casarin – Responsável Técnica – CRF 22864",8)
             elif label.startswith("observação / conclusão") and len(row.cells)>=2:
-                set_cell(row.cells[1],inspection.get("observacoes") or "",8)
+                inspection_cell(row.cells[1],inspection.get("observacoes"),8)
+
+    emphasize_sampling_tables(doc,inspection)
 
     photo_table=None
     for idx,table in enumerate(doc.tables):
@@ -368,11 +531,16 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
         for idx,item in enumerate(photos[:len(cells)]):
             data=photo_bytes(item.get("bytes"))
             if data:
-                add_photo(cells[idx],data,item.get("caption") or "",width=1.75)
+                add_photo(cells[idx],data,item.get("caption") or "",width=1.75,fixed_frame=True)
 
     out=BytesIO(); doc.save(out); return out.getvalue()
 
-def inspection_file_name(process_code:str|None,inspection_number:str|None)->str:
-    process=str(process_code or "FST").replace("/","-")
-    number=str(inspection_number or "INSPECAO").replace("/","-")
-    return f"{process} - {number} - Laudo de Inspeção.docx"
+def inspection_file_name(process_code:str|None,sku:str|None,product_name:str|None=None)->str:
+    process=fst_code(process_code) if process_code else "FST-SEM-NUMERO"
+    sku=str(sku or "SEM-SKU").strip()
+    product=str(product_name or "PRODUTO").strip()
+    # The visible Word filename is separate from the safe storage object key.
+    raw=f"{process} . {sku} {product}"
+    clean=re.sub(r'[\\/:*?"<>|]+'," ",raw)
+    clean=re.sub(r"\s+"," ",clean).strip(" .")
+    return f"{clean[:170].rstrip(' .')}.docx"
