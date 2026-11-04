@@ -2634,3 +2634,34 @@ body:has(.login-shell) {background:#f3f6fa!important;color:#20374a}
 .sgq-operational-shell .sgq-inline-save-status{
  display:block;text-align:center;margin:9px 0 1px;font-size:12px;font-weight:750;color:#246c54;
 }
+
+
+/* Saved inspection evidence: every photo has a visible, directly editable legend. */
+.sgq-operational-shell .photo-gallery .photo-card.saved{align-content:start;min-width:0}
+.sgq-operational-shell .photo-gallery .sgq-saved-photo-caption{
+  display:grid!important;grid-template-columns:minmax(0,1fr) auto;
+  gap:7px 8px;padding:9px;border:1px solid #bfd5e5;border-radius:9px;
+  background:#eff6fb;align-items:center;min-width:0
+}
+.sgq-operational-shell .photo-gallery .sgq-saved-photo-caption label{
+  grid-column:1/-1;color:#28516e;font-weight:700;font-size:12px;line-height:1.2
+}
+.sgq-operational-shell .photo-gallery .sgq-saved-photo-caption input{
+  width:100%;min-width:0;height:38px;padding:7px 9px;font-size:13px;
+  border:1px solid #aebfcb;border-radius:7px;background:#fff
+}
+.sgq-operational-shell .photo-gallery .sgq-saved-photo-caption .sgq-caption-save{
+  display:inline-flex;align-items:center;justify-content:center;min-width:116px;
+  min-height:38px;padding:7px 11px;font-size:12px;white-space:nowrap
+}
+.sgq-operational-shell .photo-gallery .sgq-caption-saved{
+  grid-column:1/-1;color:#16704c;font-size:12px;font-weight:700
+}
+.sgq-operational-shell .sgq-ai-conclusion-error{
+  color:#963b21;background:#fff6ef;border:1px solid #eac6b3;
+  padding:10px 12px;border-radius:8px;font-size:13px
+}
+@media(max-width:650px){
+  .sgq-operational-shell .photo-gallery .sgq-saved-photo-caption{grid-template-columns:1fr}
+  .sgq-operational-shell .photo-gallery .sgq-saved-photo-caption .sgq-caption-save{width:100%}
+}
