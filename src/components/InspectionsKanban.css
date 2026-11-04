@@ -9,12 +9,11 @@
 .sgq-operational-shell .sgq-kanban-search:focus-within{outline:2px solid #b2d9ee;border-color:#469cc8}
 .sgq-operational-shell .sgq-kanban-search input{height:100%;min-width:0;flex:1;background:transparent;border:0!important;box-shadow:none!important;outline:0!important;padding:0!important;color:#233f51;font-size:13px}
 .sgq-operational-shell .sgq-kanban-new{min-height:41px;white-space:nowrap}
-.sgq-operational-shell .sgq-kanban-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;align-items:start}
+.sgq-operational-shell .sgq-kanban-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
 .sgq-operational-shell .sgq-kanban-lane{--lane:#728699;--lane-tint:#f3f6f9;--lane-border:#d5dfe8;min-width:0;border:1px solid #e1e8ed;border-radius:15px;background:var(--lane-tint);overflow:visible}
 .sgq-operational-shell .sgq-kanban-lane.tone-queued{--lane:#71859a;--lane-tint:#f3f6f9;--lane-border:#dbe3eb}
 .sgq-operational-shell .sgq-kanban-lane.tone-active{--lane:#147eaa;--lane-tint:#eef7fb;--lane-border:#c6e2ef}
 .sgq-operational-shell .sgq-kanban-lane.tone-done{--lane:#21866b;--lane-tint:#f0f8f5;--lane-border:#cce6dc}
-.sgq-operational-shell .sgq-kanban-lane.tone-cancelled{--lane:#a26a70;--lane-tint:#faf4f4;--lane-border:#ead8da}
 .sgq-operational-shell .sgq-kanban-lane.tone-other{--lane:#8a6aa7;--lane-tint:#f6f3fb;--lane-border:#e4d9ec}
 .sgq-operational-shell .sgq-kanban-lane-head{display:flex;align-items:center;gap:9px;min-height:56px;padding:0 14px;border-bottom:1px solid var(--lane-border)}
 .sgq-operational-shell .sgq-kanban-lane-dot{width:9px;height:9px;border-radius:50%;background:var(--lane);box-shadow:0 0 0 4px color-mix(in srgb,var(--lane) 11%,transparent);flex:none}
@@ -70,3 +69,30 @@
 
 .sgq-operational-shell .sgq-kanban-loadmore{width:100%;min-height:36px;border:1px solid var(--lane-border);background:#fff;border-radius:8px;font-size:12px;font-weight:750;color:var(--lane);cursor:pointer}
 .sgq-operational-shell .sgq-kanban-loadmore:hover{background:var(--lane-tint)}
+
+
+/* Kanban transitions: only actionable lanes accept drops; status never changes on drag alone. */
+.sgq-operational-shell .sgq-kanban-lane[data-drop-active="true"]{
+  outline:2px dashed var(--lane);outline-offset:-4px;background:color-mix(in srgb,var(--lane) 9%,white)
+}
+.sgq-operational-shell .sgq-kanban-card[draggable="true"]{cursor:grab}
+.sgq-operational-shell .sgq-kanban-card[data-dragging="true"]{opacity:.52;cursor:grabbing}
+.sgq-operational-shell .sgq-kanban-card-bottom{gap:5px}
+.sgq-operational-shell .sgq-kanban-move{
+  display:grid;place-items:center;width:30px;height:29px;border:1px solid var(--lane-border);
+  background:#fff;border-radius:8px;color:var(--lane);cursor:pointer;margin-left:auto
+}
+.sgq-operational-shell .sgq-kanban-move:hover{background:var(--lane-tint)}
+.sgq-operational-shell .sgq-kanban-move:disabled{opacity:.45;cursor:default}
+.sgq-operational-shell .sgq-kanban-embedded{padding-top:18px;border-top:1px solid #e0e8ee;margin-top:22px}
+.sgq-operational-shell .sgq-kanban-embedded .sgq-kanban-title h2{
+  color:#224258;font-size:18px;letter-spacing:-.02em;margin:0
+}
+.sgq-operational-shell .sgq-kanban-embedded .sgq-kanban-toolbar{margin-bottom:14px}
+.sgq-operational-shell .sgq-kanban-embedded .sgq-kanban-lane-content{min-height:85px}
+.sgq-operational-shell .sgq-kanban-embedded .sgq-kanban-board{gap:11px}
+@media(max-width:920px){.sgq-operational-shell .sgq-kanban-board{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:720px){.sgq-operational-shell .sgq-kanban-board{grid-template-columns:minmax(0,1fr)}}
+@media(prefers-reduced-motion:reduce){
+  .sgq-operational-shell .sgq-kanban-card[draggable="true"]{transition:none}
+}
