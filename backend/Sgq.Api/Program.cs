@@ -1074,6 +1074,18 @@ decimal? OperationalUnitsPerBox(CreateInspectionItem item)
         item.QuantidadePorCaixa is >0m?item.QuantidadePorCaixa:null;
 }
 
+bool InvalidOperationalUnits(IEnumerable<CreateInspectionItem>? rows)
+{
+    return (rows??[]).Any(item =>
+        item.CaixasRecebidas!=decimal.Truncate(item.CaixasRecebidas) ||
+        item.CaixasInspecionadas!=decimal.Truncate(item.CaixasInspecionadas) ||
+        item.Quantidade!=decimal.Truncate(item.Quantidade) ||
+        (item.QuantidadePorCaixa.HasValue && item.QuantidadePorCaixa.Value!=decimal.Truncate(item.QuantidadePorCaixa.Value)) ||
+        item.UnidadesPorConjunto!=decimal.Truncate(item.UnidadesPorConjunto) ||
+        (item.DistribuicaoCaixas?.Any(b => b.Caixas!=decimal.Truncate(b.Caixas) ||
+            b.Unidades!=decimal.Truncate(b.Unidades))??false));
+}
+
 app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRequest request, IHttpClientFactory factory) =>
 {
     try
@@ -1082,6 +1094,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         var client = factory.CreateClient("supabase");
         var userId = await CurrentUserId(client, token);
 
+        if(InvalidOperationalUnits(input.Itens))
+            return Results.Json(Error("Caixas, peças e unidades precisam ser números inteiros. Registre caixas fracionadas separadamente."),statusCode:400);
         var startNow=input.Iniciar;
         // Stable submission token allows a safe retry if the HTTP response is lost.
         var requestId=Guid.TryParse(input.RequestId,out var parsedRequestId)?parsedRequestId.ToString("N"):null;
@@ -1383,6 +1397,8 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
             (x.DistribuicaoCaixas?.Any(g=>g.Caixas<0||g.Unidades<0)??false)))
             return Results.Json(Error("As quantidades e caixas devem ser válidas e não negativas."),statusCode:400);
 
+        if(InvalidOperationalUnits(items))
+            return Results.Json(Error("Caixas e peças devem ser números inteiros; use a coluna de caixas fracionadas."),statusCode:400);
         // Parallelism is bounded to avoid saturating PostgREST on large kits.
         using var gate=new SemaphoreSlim(4);
         await Task.WhenAll(items.Select(async item=>{
@@ -1477,6 +1493,8 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         }
         await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(processId)}",processUpdate,"return=minimal");
 
+        if(InvalidOperationalUnits(input.Itens))
+            return Results.Json(Error("Caixas e peças devem ser números inteiros; use caixas fracionadas."),statusCode:400);
         foreach(var item in input.Itens ?? [])
         {
             if(string.IsNullOrWhiteSpace(item.ProcessoItemId))
@@ -2456,31 +2474,40 @@ app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInsp
            process.ValueKind!=JsonValueKind.Object ||
            (process.TryGetProperty("excluido_em",out var archived)&&archived.ValueKind!=JsonValueKind.Null))
             return Results.Json(Error("Processo arquivado ou indisponível."),statusCode:409);
-        var saved=0;
-        foreach(var photo in input.Fotos ?? [])
+        var incoming=input.Fotos??[];
+        if(incoming.Count>80)return Results.Json(Error("Envie no máximo 80 fotos por lote."),statusCode:400);
+        var valid=new List<RegisterInspectionPhotoItem>();
+        var paths=new HashSet<string>(StringComparer.Ordinal);
+        foreach(var photo in incoming)
         {
             if(string.IsNullOrWhiteSpace(photo.StoragePath))continue;
             if(photo.Legenda?.Trim().Length>300)
                 return Results.Json(Error("Legenda com mais de 300 caracteres."),statusCode:400);
             if(!photo.StoragePath.StartsWith(id+"/gerais/",StringComparison.Ordinal))
                 return Results.Json(Error("A foto não pertence a esta inspeção."),statusCode:400);
-            // A repeat request after mobile network failure must not create duplicate evidence.
-            var existing=await RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
-                $"select=id&inspecao_id=eq.{Uri.EscapeDataString(id)}&storage_path=eq.{Uri.EscapeDataString(photo.StoragePath)}&limit=1");
-            var (_,alreadySaved)=FirstRow(existing);
-            if(!alreadySaved)
-            {
-                await RestAsync(client,token,HttpMethod.Post,"inspecao_fotos","",
-                    new {inspecao_id=id,storage_path=photo.StoragePath,legenda=string.IsNullOrWhiteSpace(photo.Legenda)?null:photo.Legenda.Trim()},"return=minimal");
-                if(!string.IsNullOrWhiteSpace(photo.ProductId)&&!string.IsNullOrWhiteSpace(photo.ProductPhotoPath))
-                {
-                    await RestAsync(client,token,HttpMethod.Patch,"produtos",
-                        $"id=eq.{Uri.EscapeDataString(photo.ProductId)}",
-                        new {foto_principal_path=photo.ProductPhotoPath,atualizado_em=DateTimeOffset.UtcNow},"return=minimal");
-                }
-            }
-            saved++;
+            if(paths.Add(photo.StoragePath))valid.Add(photo);
         }
+        // DB unique index (inspecao_id,storage_path) + ignore-duplicates makes batch
+        // upload idempotent, including client retry after a lost network response.
+        if(valid.Count>0)
+        {
+            var rows=valid.Select(p=>new {
+                inspecao_id=id,storage_path=p.StoragePath,
+                legenda=string.IsNullOrWhiteSpace(p.Legenda)?null:p.Legenda.Trim()
+            }).ToArray();
+            await RestAsync(client,token,HttpMethod.Post,"inspecao_fotos",
+                "on_conflict=inspecao_id,storage_path",rows,
+                "resolution=ignore-duplicates,return=minimal");
+            foreach(var photo in valid.Where(p=>!string.IsNullOrWhiteSpace(p.ProductId) &&
+                !string.IsNullOrWhiteSpace(p.ProductPhotoPath)))
+            {
+                await RestAsync(client,token,HttpMethod.Patch,"produtos",
+                    $"id=eq.{Uri.EscapeDataString(photo.ProductId!)}",
+                    new {foto_principal_path=photo.ProductPhotoPath,atualizado_em=DateTimeOffset.UtcNow},
+                    "return=minimal");
+            }
+        }
+        var saved=valid.Count;
         if(saved>0)
         {
             // Newly uploaded evidence must appear in the next generated Word.
@@ -2737,9 +2764,17 @@ app.MapPost("/api/inspecoes/{id}/retencao", async (string id,RetentionRequest in
             if(already) continue;
 
             var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
-                $"select=nome,foto_principal_path&id=eq.{Uri.EscapeDataString(productId)}&limit=1");
+                $"select=sku,nome,foto_principal_path&id=eq.{Uri.EscapeDataString(productId)}&limit=1");
             var (product,pf)=FirstRow(productRows);
-            var productName=pf && product!.Value.TryGetProperty("nome",out var pn)&&pn.ValueKind==JsonValueKind.String?pn.GetString():null;
+            var productSku=pf?StockText(product!.Value,"sku"):null;
+            if(string.IsNullOrWhiteSpace(productSku))
+                return Results.Json(Error("SKU ausente no estoque. Vincule o produto Omie antes de reter."),statusCode:409);
+            var omie=await OmieStockProduct(client,token,productSku);
+            if(!omie.Found)return Results.Json(Error(omie.Error),statusCode:422);
+            var conflict=await StockDuplicateDescription(client,token,productSku,omie.Name!);
+            if(conflict!=null)return Results.Json(Error(
+                $"Descrição duplicada nos SKUs {productSku} e {conflict}. Retenção bloqueada até revisão."),statusCode:409);
+            var productName=omie.Name;
             var principalPhoto=pf && product!.Value.TryGetProperty("foto_principal_path",out var pp)&&pp.ValueKind==JsonValueKind.String?pp.GetString():null;
             var retentionPhoto=string.IsNullOrWhiteSpace(item.FotoCadastroPath)?principalPhoto:item.FotoCadastroPath;
             var lote=processItem.Value.TryGetProperty("lote",out var lt)&&lt.ValueKind==JsonValueKind.String?lt.GetString():null;
@@ -2828,6 +2863,75 @@ app.MapGet("/api/amostras/{id}/detalhe", async (string id,HttpRequest request,IH
     catch(Exception e){return Results.Json(Error("Falha ao carregar amostra.",e.Message),statusCode:500);}
 });
 
+// Stock SKU identity is the code validated by Omie, never the free-text description.
+async Task<(bool Found,string? Name,string Error)> OmieStockProduct(
+    HttpClient client,string token,string code)
+{
+    if(string.IsNullOrWhiteSpace(code))return (false,null,"SKU obrigatório.");
+    using var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/omie-produto");
+    ApplyAuth(fn,token);
+    fn.Content=JsonContent.Create(new {codigo=code.Trim()});
+    try{
+        using var res=await client.SendAsync(fn);
+        if(!res.IsSuccessStatusCode)return (false,null,"Não foi possível validar o SKU no Omie.");
+        using var doc=JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var root=doc.RootElement;
+        var found=root.TryGetProperty("found",out var status)&&status.ValueKind==JsonValueKind.True;
+        var name=root.TryGetProperty("descricao",out var d)&&d.ValueKind==JsonValueKind.String?d.GetString():null;
+        return found&&!string.IsNullOrWhiteSpace(name)
+            ?(true,name!.Trim(),""):(false,null,"SKU não localizado ou sem descrição no Omie.");
+    }catch{return (false,null,"Integração Omie indisponível; cadastro bloqueado até validação.");}
+}
+async Task<string?> StockDuplicateDescription(HttpClient client,string token,string sku,string name)
+{
+    var results=await RestAsync(client,token,HttpMethod.Get,"produtos",
+        $"select=sku,nome&nome=ilike.{Uri.EscapeDataString(name)}&limit=500");
+    if(results is not {ValueKind:JsonValueKind.Array})return null;
+    foreach(var product in results.Value.EnumerateArray()){
+        var other=StockText(product,"sku");
+        var otherName=StockText(product,"nome");
+        if(!string.IsNullOrWhiteSpace(other)&&
+           !string.Equals(other,sku,StringComparison.OrdinalIgnoreCase)&&
+           string.Equals(otherName?.Trim(),name.Trim(),StringComparison.OrdinalIgnoreCase))
+            return other;
+    }
+    return null;
+}
+app.MapGet("/api/estoque/conflitos-sku",async(HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var token=Token(request);var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var rows=await RestAsync(client,token,HttpMethod.Get,"vw_saldo_amostras",
+            "select=sku,descricao&status=eq.ativa&limit=4000");
+        var issues=new List<object>();
+        if(rows is {ValueKind:JsonValueKind.Array}){
+            foreach(var group in rows.Value.EnumerateArray()
+                .Where(x=>!string.IsNullOrWhiteSpace(StockText(x,"sku"))&&
+                          !string.IsNullOrWhiteSpace(StockText(x,"descricao")))
+                .GroupBy(x=>StockText(x,"descricao")!.Trim().ToUpperInvariant())){
+                var codes=group.Select(x=>StockText(x,"sku")!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToArray();
+                if(codes.Length>1)
+                    issues.Add(new{descricao=StockText(group.First(),"descricao"),skus=codes,registros=group.Count()});
+            }
+        }
+        return Results.Ok(new {data=new {conflitos=issues},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao verificar SKUs de estoque.",e.Message),statusCode:500);}
+});
+app.MapPost("/api/estoque/validar-sku",async(ProductLookupRequest input,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var token=Token(request);var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var sku=(input.Codigo??"").Trim();
+        var result=await OmieStockProduct(client,token,sku);
+        if(!result.Found)return Results.Json(Error(result.Error),statusCode:422);
+        var other=await StockDuplicateDescription(client,token,sku,result.Name!);
+        return Results.Ok(new{data=new{sku,descricao=result.Name,found=true,
+            conflito=other==null?null:other},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao validar SKU no Omie.",e.Message),statusCode:502);}
+});
+
 app.MapPost("/api/amostras/criar", async (CreateSampleRequest input,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -2842,16 +2946,33 @@ app.MapPost("/api/amostras/criar", async (CreateSampleRequest input,HttpRequest 
             $"select=id,nome,processo_id&id=eq.{Uri.EscapeDataString(input.GroupId)}&limit=1");
         var (group,found)=FirstRow(groupRows);
         if(!found) return Results.Json(Error("Grupo de inspeção não encontrado."),statusCode:404);
+        var sku=(input.Sku??"").Trim();
+        var omie=await OmieStockProduct(client,token,sku);
+        if(!omie.Found)return Results.Json(Error(omie.Error),statusCode:422);
+        var conflict=await StockDuplicateDescription(client,token,sku,omie.Name!);
+        if(conflict!=null)return Results.Json(Error(
+            $"A descrição do Omie também está vinculada ao SKU {conflict}. Resolva o conflito antes de cadastrar."),statusCode:409);
+        var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
+            $"select=id&sku=ilike.{Uri.EscapeDataString(sku)}&limit=1");
+        var (product,pf)=FirstRow(productRows);
+        string productId;
+        if(pf)productId=product!.Value.GetProperty("id").GetString()!;
+        else{
+            var createdProduct=await RestAsync(client,token,HttpMethod.Post,"produtos","select=id",
+                new {sku,nome=omie.Name},"return=representation");
+            var (cp,cf)=FirstRow(createdProduct);
+            if(!cf)return Results.Json(Error("Não foi possível vincular o produto Omie."),statusCode:500);
+            productId=cp!.Value.GetProperty("id").GetString()!;
+        }
         var code=$"AMO-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
-        var description=!string.IsNullOrWhiteSpace(input.Descricao)?input.Descricao.Trim():
-            (group!.Value.TryGetProperty("nome",out var gn)&&gn.ValueKind==JsonValueKind.String?gn.GetString():null);
+        var description=omie.Name;
 
         var created=await RestAsync(client,token,HttpMethod.Post,"amostras","select=id",
             new {
                 codigo=code,
                 processo_id=group!.Value.GetProperty("processo_id").GetString(),
                 grupo_inspecao_id=input.GroupId,
-                produto_id=(string?)null,
+                produto_id=productId,
                 descricao=description,
                 lote=string.IsNullOrWhiteSpace(input.Lote)?null:input.Lote.Trim(),
                 quantidade_inicial=input.Quantidade,
@@ -2876,6 +2997,141 @@ app.MapPost("/api/amostras/criar", async (CreateSampleRequest input,HttpRequest 
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao criar amostra.",e.Message),statusCode:500);}
+});
+
+
+async Task<bool> InventoryAuthorized(HttpClient client,string token,bool approval=false)
+{
+    var userId=await CurrentUserId(client,token);
+    var profiles=await RestAsync(client,token,HttpMethod.Get,"profiles",
+        $"select=perfil,ativo&id=eq.{Uri.EscapeDataString(userId)}&ativo=is.true&limit=1");
+    var (profile,found)=FirstRow(profiles);
+    var role=found&&profile!.Value.TryGetProperty("perfil",out var r)?r.GetString():"";
+    return approval?role is "administrador" or "gestor":
+        role is "administrador" or "gestor" or "inspetor";
+}
+string? StockText(JsonElement row,string field)=>
+    row.TryGetProperty(field,out var value)&&value.ValueKind==JsonValueKind.String?value.GetString():null;
+decimal StockNumber(JsonElement row,string field)=>
+    row.TryGetProperty(field,out var value)&&value.ValueKind==JsonValueKind.Number?value.GetDecimal():0m;
+
+app.MapGet("/api/estoque/inventarios",async(HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var client=factory.CreateClient("supabase");var token=Token(request);
+        await CurrentUserId(client,token);
+        var items=await RestAsync(client,token,HttpMethod.Get,"inventarios",
+            "select=id,codigo,status,endereco,observacao,criado_em,concluido_em,ajustado_em&order=criado_em.desc&limit=50");
+        return Results.Ok(new {data=new {inventarios=items},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao listar inventários.",e.Message),statusCode:500);}
+});
+app.MapPost("/api/estoque/inventarios",async(CreateInventoryRequest input,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var client=factory.CreateClient("supabase");var token=Token(request);
+        if(!await InventoryAuthorized(client,token))
+            return Results.Json(Error("Sem permissão para iniciar inventários."),statusCode:403);
+        var endereco=string.IsNullOrWhiteSpace(input.Endereco)?null:input.Endereco.Trim();
+        var query="select=id,sku,descricao,endereco,saldo,unidade_controle&status=eq.ativa&saldo=gt.0&limit=4000";
+        if(endereco!=null)query+="&endereco=eq."+Uri.EscapeDataString(endereco);
+        var snapshots=await RestAsync(client,token,HttpMethod.Get,"vw_saldo_amostras",query);
+        if(snapshots is not {ValueKind:JsonValueKind.Array} || snapshots.Value.GetArrayLength()==0)
+            return Results.Json(Error("Não há amostras com saldo para este inventário."),statusCode:400);
+        if(snapshots.Value.GetArrayLength()>=4000)
+            return Results.Json(Error("Inventário acima do limite por sessão; filtre por endereço."),statusCode:400);
+        var userId=await CurrentUserId(client,token);
+        var codigo=$"INV-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+        var newRow=await RestAsync(client,token,HttpMethod.Post,"inventarios","select=id,codigo",
+            new {codigo,status="aberto",endereco,criado_por=userId},"return=representation");
+        var (session,created)=FirstRow(newRow);
+        if(!created)return Results.Json(Error("Não foi possível abrir o inventário."),statusCode:500);
+        var invId=session!.Value.GetProperty("id").GetString()!;
+        var records=snapshots.Value.EnumerateArray().Select(row=>new{
+            inventario_id=invId,amostra_id=row.GetProperty("id").GetString(),
+            sku=StockText(row,"sku"),descricao=StockText(row,"descricao"),
+            endereco=StockText(row,"endereco"),
+            unidade_controle=StockText(row,"unidade_controle")??"unidade",
+            saldo_sistema=StockNumber(row,"saldo")
+        }).ToArray();
+        await RestAsync(client,token,HttpMethod.Post,"inventario_itens","",records,"return=minimal");
+        return Results.Ok(new {data=new {id=invId,codigo,itens=records.Length},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível criar inventário.",e.Message),statusCode:500);}
+});
+app.MapGet("/api/estoque/inventarios/{id}",async(string id,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("Inventário inválido."),statusCode:400);
+        var client=factory.CreateClient("supabase");var token=Token(request);
+        await CurrentUserId(client,token);
+        var list=await RestAsync(client,token,HttpMethod.Get,"inventarios",
+            $"select=*&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inv,found)=FirstRow(list);
+        if(!found)return Results.Json(Error("Inventário não encontrado."),statusCode:404);
+        var items=await RestAsync(client,token,HttpMethod.Get,"inventario_itens",
+            $"select=id,inventario_id,amostra_id,sku,descricao,endereco,unidade_controle,saldo_sistema,quantidade_contada,contado_em&inventario_id=eq.{Uri.EscapeDataString(id)}&order=sku.asc&limit=4000");
+        return Results.Ok(new {data=new {inventario=inv,itens=items},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar inventário.",e.Message),statusCode:500);}
+});
+app.MapPut("/api/estoque/inventarios/{id}/contar",async(string id,CountInventoryRequest input,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _)||!Guid.TryParse(input.AmostraId,out _))
+            return Results.Json(Error("Identificador inválido."),statusCode:400);
+        if(input.Quantidade.HasValue&&input.Quantidade.Value<0)
+            return Results.Json(Error("A contagem não pode ser negativa."),statusCode:400);
+        var client=factory.CreateClient("supabase");var token=Token(request);
+        if(!await InventoryAuthorized(client,token))
+            return Results.Json(Error("Sem permissão para realizar contagem."),statusCode:403);
+        var invRows=await RestAsync(client,token,HttpMethod.Get,"inventarios",
+            $"select=status&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inv,found)=FirstRow(invRows);
+        if(!found||StockText(inv!.Value,"status")!="aberto")
+            return Results.Json(Error("Este inventário não está aberto."),statusCode:409);
+        var updated=await RestAsync(client,token,HttpMethod.Patch,"inventario_itens",
+            $"inventario_id=eq.{Uri.EscapeDataString(id)}&amostra_id=eq.{Uri.EscapeDataString(input.AmostraId)}&select=id",
+            new {quantidade_contada=input.Quantidade,
+                contado_por=input.Quantidade.HasValue?await CurrentUserId(client,token):null,
+                contado_em=input.Quantidade.HasValue?DateTimeOffset.UtcNow:(DateTimeOffset?)null},
+            "return=representation");
+        var (_,saved)=FirstRow(updated);
+        if(!saved)return Results.Json(Error("Item não encontrado no inventário."),statusCode:404);
+        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao salvar contagem.",e.Message),statusCode:500);}
+});
+app.MapPost("/api/estoque/inventarios/{id}/fechar",async(string id,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("Inventário inválido."),statusCode:400);
+        var client=factory.CreateClient("supabase");var token=Token(request);
+        if(!await InventoryAuthorized(client,token,approval:true))
+            return Results.Json(Error("Somente gestores e administradores podem fechar inventários."),statusCode:403);
+        var rows=await RestAsync(client,token,HttpMethod.Get,"inventario_itens",
+            $"select=saldo_sistema,quantidade_contada&inventario_id=eq.{Uri.EscapeDataString(id)}&limit=4000");
+        if(rows is not {ValueKind:JsonValueKind.Array}||rows.Value.GetArrayLength()==0)
+            return Results.Json(Error("Inventário sem itens."),statusCode:400);
+        if(rows.Value.EnumerateArray().Any(x=>!x.TryGetProperty("quantidade_contada",out var n)||n.ValueKind==JsonValueKind.Null))
+            return Results.Json(Error("Existem itens sem contagem. Informe inclusive o valor zero."),statusCode:409);
+        var divergencias=rows.Value.EnumerateArray().Count(x=>
+            StockNumber(x,"quantidade_contada")!=StockNumber(x,"saldo_sistema"));
+        var changed=await RestAsync(client,token,HttpMethod.Patch,"inventarios",
+            $"id=eq.{Uri.EscapeDataString(id)}&status=eq.aberto&select=id",
+            new {status="fechado",concluido_em=DateTimeOffset.UtcNow},"return=representation");
+        var (_,saved)=FirstRow(changed);
+        if(!saved)return Results.Json(Error("O inventário já foi fechado ou alterado."),statusCode:409);
+        return Results.Ok(new {data=new {ok=true,divergencias},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao fechar inventário.",e.Message),statusCode:500);}
+});
+app.MapPost("/api/estoque/inventarios/{id}/aplicar",async(string id,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("Inventário inválido."),statusCode:400);
+        var client=factory.CreateClient("supabase");var token=Token(request);
+        if(!await InventoryAuthorized(client,token,approval:true))
+            return Results.Json(Error("Somente gestores e administradores podem aprovar ajustes."),statusCode:403);
+        var applied=await RestAsync(client,token,HttpMethod.Post,"rpc/sgq_aplicar_inventario","",
+            new {p_inventario_id=id},"return=representation");
+        return Results.Ok(new {data=applied,error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao aplicar inventário. O saldo pode ter mudado; revise a contagem.",e.Message),statusCode:409);}
 });
 
 app.MapPost("/api/estoque/{sampleId}/movimentar", async (string sampleId,StockMoveRequest input,HttpRequest request,IHttpClientFactory factory)=>
@@ -3253,6 +3509,7 @@ public sealed class RetentionItemRequest
 }
 public sealed class CreateSampleRequest
 {
+    public string Sku { get; set; } = "";
     public string GroupId { get; set; } = "";
     public string? Descricao { get; set; }
     public string? Lote { get; set; }
@@ -3372,3 +3629,9 @@ public sealed class BoxDistribution
     public decimal Unidades { get; set; }
 }
 public sealed class EditInspectionDataRequest : CreateInspectionRequest { }
+
+public sealed class CreateInventoryRequest { public string? Endereco { get; set; } }
+public sealed class CountInventoryRequest {
+    public string AmostraId { get; set; } = "";
+    public decimal? Quantidade { get; set; }
+}

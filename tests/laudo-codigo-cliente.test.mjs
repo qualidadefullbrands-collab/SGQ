@@ -47,6 +47,6 @@ test('all official Word inspection templates contain a client code field',()=>{
  }
 })
 test('Word generator maps Código do cliente to the SKU, as defined by the operation',()=>{
- assert.match(generator,/"código do cliente": product\.get\("sku"\) or ""/)
+ assert.match(generator,/"código do cliente": "\\n"\.join\(all_skus\)/)
  assert.doesNotMatch(generator,/"código do cliente": first_item\.get\("codigo_cliente"\)/)
 })

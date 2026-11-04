@@ -166,19 +166,17 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
   const batch=[...pending]
   const outcomes:Array<{id:string;ok:boolean;offline:boolean;error?:string}>=new Array(batch.length)
   let index=0
+  const uploaded:Array<{id:string;path:string;legenda:string;index:number}|undefined>=new Array(batch.length)
   const worker=async()=>{
    while(index<batch.length){
     const position=index++,photo=batch[position]
     try{
      const file=await compressed(photo.file)
-     // The photo ID gives each upload a stable, idempotent path.
      const path=inspectionId+'/gerais/'+photo.id+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
      const up=await supabase.storage.from('inspecao-fotos').upload(path,file,{contentType:file.type||'image/jpeg'})
      if(up.error&&!/already exists|duplicate|resource already exists|409/i.test(up.error.message))
        throw new Error(up.error.message)
-     const saved=await apiPost<{salvas:number}>('/api/inspecoes/'+encodeURIComponent(inspectionId)+'/fotos/registrar',{fotos:[{storagePath:path,legenda:photo.legenda.trim()}]})
-     if(saved.error||!saved.data?.salvas)throw new Error(saved.error?.message||'Falha ao registrar foto.')
-     outcomes[position]={id:photo.id,ok:true,offline:false}
+     uploaded[position]={id:photo.id,index:position,path,legenda:photo.legenda.trim()}
     }catch(e:any){
      const reason=String(e?.message||'Erro ao salvar foto')
      if(!navigator.onLine||connectionFailure(reason)){
@@ -189,7 +187,28 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
     }
    }
   }
-  await Promise.all(Array.from({length:Math.min(3,batch.length)},()=>worker()))
+  await Promise.all(Array.from({length:Math.min(4,batch.length)},()=>worker()))
+  // Register all uploaded photos in ONE request. Captions stay empty until edited
+  // on desktop; no mandatory caption or per-image metadata dialog.
+  const ready=uploaded.filter((x):x is NonNullable<typeof x>=>!!x)
+  if(ready.length){
+   const saved=await apiPost<{salvas:number}>('/api/inspecoes/'+encodeURIComponent(inspectionId)+'/fotos/registrar',{
+    fotos:ready.map(p=>({storagePath:p.path,legenda:p.legenda}))
+   })
+   if(!saved.error&&saved.data?.salvas===ready.length){
+    for(const p of ready)outcomes[p.index]={id:p.id,ok:true,offline:false}
+   }else{
+    const reason=saved.error?.message||'Falha ao registrar lote de fotos.'
+    for(const p of ready){
+     const photo=batch[p.index]
+     if(!navigator.onLine||connectionFailure(reason)){
+      try{await queuePhotoOffline(photo,inspectionId);outcomes[p.index]={id:p.id,ok:true,offline:true};continue}
+      catch{}
+     }
+     outcomes[p.index]={id:p.id,ok:false,offline:false,error:reason}
+    }
+   }
+  }
   const successful=new Set(outcomes.filter(x=>x?.ok).map(x=>x.id))
   const failures=outcomes.filter(x=>!x?.ok).length
   const queued=outcomes.filter(x=>x?.ok&&x.offline).length
@@ -240,7 +259,7 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
        <button type="button" aria-label={'Remover foto '+(index+1)} disabled={busy} onClick={()=>remove(p.id)}><X size={16}/></button>
        {p.error&&<small role="alert" className="sgq-mobile-error">{p.error}</small>}
       </div>)}</div>
-      <button className="sgq-mobile-save" type="button" onClick={()=>void save()} disabled={busy||!canWrite}><Upload size={19}/>{busy?'Salvando lote…':'Salvar '+pending.length+' foto(s)'}</button>
+      <button className="sgq-mobile-save" type="button" onClick={()=>void save()} disabled={busy||!canWrite}><Upload size={19}/>{busy?'Enviando fotos…':'Enviar '+pending.length+' foto(s) sem legenda'}</button>
      </div>}
      <div className="sgq-mobile-saved"><div className="sgq-mobile-section-head"><strong>Fotos salvas</strong><button type="button" disabled={busy||loading} onClick={()=>void load(inspectionId)}><RefreshCw size={16}/> Atualizar</button></div>
       {context.photos.length?<div className="sgq-mobile-saved-grid">{context.photos.map(p=><figure key={p.id}>{p.signed_url?<img src={p.signed_url} alt={p.legenda}/>:<div className="sgq-mobile-placeholder"><Camera size={20}/></div>}{p.legenda&&<figcaption>{p.legenda}</figcaption>}</figure>)}</div>:<p>Nenhuma foto enviada ainda.</p>}

@@ -54,7 +54,7 @@ export default function SkuQuantityGrid({rows,onChange,onAdd}:Props){
               {row.quantidadePv==null||row.quantidadePv===''?'—':number(row.quantidadePv).toLocaleString('pt-BR')}
             </td>
             {fields.map(col=><td key={col.key}>
-              <input type="number" min="0" step="0.01" inputMode="decimal"
+              <input type="number" min="0" step="1" inputMode="numeric"
                 aria-label={col.label+' · '+sku} title={col.label+' · '+sku}
                 value={col.key==='unidadesPadrao'?(row.unidadesPadrao||row.quantidadePorCaixa||''):(row[col.key]??'')}
                 onChange={e=>onChange(index,col.key,e.target.value)}/>

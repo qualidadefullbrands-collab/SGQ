@@ -9,3 +9,41 @@
 .insights-empty{color:#829ba9;padding:25px 0;margin:0;text-align:center}.insights-footnote{font-size:11px!important;color:#728898!important;margin:14px 0 0!important}
 @media(max-width:1100px){.insights-kpis{grid-template-columns:repeat(2,1fr)}.insights-grid{grid-template-columns:1fr}}
 @media(max-width:740px){.insights-heading{align-items:start;flex-direction:column}.insights-filters{grid-template-columns:1fr}.insights-kpis article{padding:16px}.insights-kpis strong{font-size:26px}}
+
+
+/* Each KPI opens a grounded drilldown; the existing density and palette stay intact. */
+.sgq-insights .insights-kpis .insights-kpi-card{
+  position:relative;display:grid;gap:7px;min-width:0;padding:22px;
+  border:1px solid #d6e2e8;border-radius:18px;
+  background:linear-gradient(145deg,#fff,#eff7fb 92%);
+  cursor:pointer;text-align:left;color:#244257;font:inherit
+}
+.sgq-insights .insights-kpi-card:hover,.sgq-insights .insights-kpi-card:focus-visible{
+  outline:2px solid #9ccce2;outline-offset:1px;border-color:#65a7c7
+}
+.sgq-insights .insights-kpi-card span,.sgq-insights .insights-kpi-card small{font-size:12px;color:#607c8d}
+.sgq-insights .insights-kpi-card strong{font-size:clamp(25px,3vw,40px);font-variant-numeric:tabular-nums;letter-spacing:-.04em;line-height:1.2}
+.sgq-insights .insights-kpi-arrow{position:absolute;right:13px;top:13px;color:#6c9fbc}
+.sgq-insights .insights-drilldown-overlay{
+ position:fixed;inset:0;z-index:1000;background:rgba(16,39,54,.58);display:flex;
+ align-items:center;justify-content:center;padding:18px
+}
+.sgq-insights .insights-drilldown{
+ width:min(740px,100%);max-height:90vh;display:flex;flex-direction:column;gap:14px;
+ padding:20px;border:1px solid #cee1eb;border-radius:17px;background:#fff;box-shadow:0 30px 65px #11293a50
+}
+.sgq-insights .insights-drilldown header{display:flex;justify-content:space-between;align-items:start;gap:10px}
+.sgq-insights .insights-drilldown header h2{margin:5px 0 0;font-size:22px;color:#223f54}
+.sgq-insights .insights-drilldown header small{font-size:10px;letter-spacing:.08em;color:#7991a0;font-weight:800}
+.sgq-insights .insights-drilldown header button{display:grid;place-items:center;border:1px solid #d8e5ed;background:#f6fafc;padding:8px;border-radius:8px;cursor:pointer}
+.sgq-insights .insights-drilldown>p{font-size:13px;color:#4a677a;margin:0;line-height:1.5}
+.sgq-insights .insights-drilldown-rows{display:grid;align-content:start;gap:7px;min-height:0;overflow-y:auto}
+.sgq-insights .insights-drilldown-rows button{display:flex;align-items:center;justify-content:space-between;gap:12px;
+ text-align:left;background:#f8fbfd;border:1px solid #e1eaf0;border-radius:10px;padding:11px;color:#365870;cursor:pointer}
+.sgq-insights .insights-drilldown-rows button:disabled{cursor:default}
+.sgq-insights .insights-drilldown-rows button>span{display:grid;gap:4px;min-width:0}
+.sgq-insights .insights-drilldown-rows b{font-size:12px}
+.sgq-insights .insights-drilldown-rows small{font-size:11px;color:#6d8291}
+.sgq-insights .insights-drilldown-rows strong{font-size:12px;white-space:nowrap}
+@media(max-width:740px){.sgq-insights .insights-kpi-card{padding:16px}.sgq-insights .insights-kpi-card strong{font-size:26px}
+ .sgq-insights .insights-drilldown{max-height:94vh;padding:13px}}

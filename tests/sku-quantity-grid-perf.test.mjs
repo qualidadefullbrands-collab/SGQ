@@ -48,7 +48,7 @@ test('grid shows all SKUs with per-row warehouse and lot values',()=>{
  assert.doesNotMatch(grid,/codigoCliente|Código do cliente/)
 })
 test('client code in templates is mapped to SKU with no duplicate frontend field',()=>{
- assert.match(word,/"código do cliente": product\.get\("sku"\) or ""/)
+ assert.match(word,/"código do cliente": "\\n"\.join\(all_skus\)/)
  assert.doesNotMatch(app,/codigoCliente|Código do cliente/)
  assert.match(api,/codigo_cliente=string\.IsNullOrWhiteSpace\(item\.Sku\)\?null:item\.Sku\.Trim\(\)/)
 })

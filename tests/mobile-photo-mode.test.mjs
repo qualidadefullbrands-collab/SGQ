@@ -49,7 +49,7 @@ test('API uses a lightweight read endpoint and rejects archived or finished insp
  assert.match(upload,/excluido_em=is\.null/)
  assert.match(upload,/record\.GetProperty\("status"\)\.GetString\(\) is not \("aberta" or "em_andamento"\)/)
  assert.match(upload,/photo\.StoragePath\.StartsWith\(id\+"\/gerais\/"/)
- assert.match(upload,/storage_path=eq\./)
+ assert.match(upload,/on_conflict=inspecao_id,storage_path/)
 })
 test('desktop has a manual lightweight refresh to receive photos captured on phone',()=>{
  assert.match(app,/async function refreshInspectionPhotoEvidence\(\)/)
@@ -74,7 +74,7 @@ test('photo cards visibly identify started versus not started inspections',()=>{
 
 test('mobile batch queue is bounded, concurrent and caption-free',()=>{
  assert.match(mobile,/pending\.length\+arr\.length>60/)
- assert.match(mobile,/Math\.min\(3,batch\.length\)/)
+ assert.match(mobile,/Math\.min\(4,batch\.length\)/)
  assert.match(mobile,/sgq-mobile-batch-grid/)
  assert.match(mobile,/Selecionar várias/)
  assert.match(mobile,/compressed\(photo\.file\)/)
@@ -86,8 +86,9 @@ test('server accepts captionless photos and supports safe later desktop editing'
  const upload=api.slice(api.indexOf('app.MapPost("/api/inspecoes/{id}/fotos/registrar"'),
    api.indexOf('app.MapPut("/api/inspecoes/{id}/fotos/{photoId}/legenda"'))
  assert.match(upload,/if\(string\.IsNullOrWhiteSpace\(photo\.StoragePath\)\)continue/)
+ assert.match(upload,/resolution=ignore-duplicates/)
  assert.doesNotMatch(upload,/string\.IsNullOrWhiteSpace\(photo\.Legenda\)\)continue/)
- assert.match(upload,/legenda=string\.IsNullOrWhiteSpace\(photo\.Legenda\)\?null:photo\.Legenda\.Trim\(\)/)
+ assert.match(upload,/legenda=string\.IsNullOrWhiteSpace\(p\.Legenda\)\?null:p\.Legenda\.Trim\(\)/)
  assert.match(api,/app\.MapPut\("\/api\/inspecoes\/\{id\}\/fotos\/\{photoId\}\/legenda"/)
  assert.match(api,/PhotoCaptionRequest/)
  assert.match(api,/photoId/)

@@ -5,6 +5,7 @@ import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from './lib/offline'
 import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSync'
 import SkuQuantityGrid from './components/SkuQuantityGrid'
+import InventoryPanel from './stock/InventoryPanel'
 import InspectionsKanban from './components/InspectionsKanban'
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
@@ -561,6 +562,10 @@ export default function App() {
   }>>({})
   const [retentionReason, setRetentionReason] = useState('')
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
+  const [stockMode,setStockMode]=useState<'posicoes'|'inventario'>('posicoes')
+  const [stockSkuConflicts,setStockSkuConflicts]=useState<Array<{descricao:string;skus:string[];registros:number}>>([])
+  const [stockSkuChecks,setStockSkuChecks]=useState<Record<string,string>>({})
+  const [stockSkuChecking,setStockSkuChecking]=useState<string|null>(null)
   const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string;productId:string;isProductId:boolean}>>([])
   const [photoCaptionDrafts,setPhotoCaptionDrafts]=useState<Record<string,string>>({})
   const [lastSavedPhotoCaptionId,setLastSavedPhotoCaptionId]=useState<string|null>(null)
@@ -639,6 +644,7 @@ export default function App() {
 
   const [sampleForm, setSampleForm] = useState({
     groupId: '',
+    sku: '',
     descricao: '',
     lote: '',
     quantidade: '',
@@ -2536,6 +2542,23 @@ export default function App() {
     await loadCatalogs()
   }
 
+  useEffect(()=>{if(tab==='estoque'&&stockMode==='posicoes')void refreshStockSkuConflicts()},[tab,stockMode])
+  async function refreshStockSkuConflicts(){
+    const reply=await apiGet<{conflitos:Array<{descricao:string;skus:string[];registros:number}>}>('/api/estoque/conflitos-sku')
+    if(!reply.error)setStockSkuConflicts(reply.data?.conflitos||[])
+  }
+  async function checkStockSku(code:string){
+    if(stockSkuChecking)return
+    setStockSkuChecking(code)
+    const result=await apiPost<{found:boolean;sku:string;descricao:string;conflito:string|null}>(
+      '/api/estoque/validar-sku',{codigo:code})
+    setStockSkuChecks(old=>({...old,[code]:result.error?
+      result.error.message:result.data?.conflito?
+        'Omie: '+result.data.descricao+' · mesma descrição de '+result.data.conflito:
+        'Validado no Omie: '+(result.data?.descricao||code)}))
+    setStockSkuChecking(null)
+  }
+
   async function createSample(e: React.FormEvent) {
     e.preventDefault()
     if (!canWrite) return
@@ -2547,6 +2570,7 @@ export default function App() {
 
     const created=await apiPost<any>('/api/amostras/criar',{
       groupId:sampleForm.groupId,
+      sku:sampleForm.sku.trim(),
       descricao:sampleForm.descricao.trim() || null,
       lote:sampleForm.lote.trim() || null,
       quantidade:Number(sampleForm.quantidade),
@@ -2556,7 +2580,7 @@ export default function App() {
     if (created.error || !created.data?.id) return setError(created.error?.message ?? 'Falha ao criar amostra.')
 
     setMessage(`${created.data.codigo} criada e endereçada.`)
-    setSampleForm({ groupId: '', descricao: '', lote: '', quantidade: '', endereco: '', unidade: 'conjunto' })
+    setSampleForm({ groupId: '', sku: '', descricao: '', lote: '', quantidade: '', endereco: '', unidade: 'conjunto' })
     await loadStock()
   }
 
@@ -3594,6 +3618,26 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
+          <div className="sgq-stock-mode">
+            <button type="button" className={stockMode==='posicoes'?'primary':'secondary'} onClick={()=>setStockMode('posicoes')}>Posições</button>
+            <button type="button" className={stockMode==='inventario'?'primary':'secondary'} onClick={()=>{setStockMode('inventario');setSelectedSample(null)}}>Inventário</button>
+          </div>
+          {stockMode==='inventario'&&<InventoryPanel samples={samples} canWrite={!!canWrite}
+            canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}
+            onRefreshStock={loadStock}/>}
+          {stockMode==='posicoes'&&<>
+          {stockSkuConflicts.length>0&&<section className="sgq-stock-sku-conflicts">
+            <div><b>Descrições associadas a SKUs diferentes</b><small>Revisar identificação no Omie antes de novos cadastros</small></div>
+            {stockSkuConflicts.map(x=><div className="sgq-stock-sku-issue" key={x.descricao}>
+              <strong>{x.descricao}</strong><span>{x.skus.join(' · ')}</span>
+              {x.skus.map(code=><div key={code}>
+                <button type="button" className="secondary small" disabled={!!stockSkuChecking}
+                  onClick={()=>void checkStockSku(code)}>
+                  {stockSkuChecking===code?'Validando…':'Validar '+code+' no Omie'}
+                </button>{stockSkuChecks[code]&&<small>{stockSkuChecks[code]}</small>}
+              </div>)}
+            </div>)}
+          </section>}
           <section className="stock-summary">
             <article><span>Saldo total</span><strong>{stockStats.unidades.toLocaleString('pt-BR')}</strong><small>unidades</small></article>
             <article><span>Registros</span><strong>{stockStats.registros}</strong><small>posições de estoque</small></article>
@@ -3775,6 +3819,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </article>
             </div>
           )}
+          </>}
         </section>
       )}
 
