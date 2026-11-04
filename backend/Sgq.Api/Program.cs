@@ -1642,6 +1642,53 @@ app.MapPost("/api/inspecoes/{id}/iniciar", async (string id,HttpRequest request,
     catch(Exception e){return Results.Json(Error("Falha ao iniciar inspeção.",e.Message),statusCode:500);}
 });
 
+// Kanban reversal is intentionally limited to started inspections, never completed ones.
+// Keep collected evidence and checklist data intact: only the operational status changes.
+app.MapPost("/api/inspecoes/{id}/voltar-nao-iniciada", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("Inspeção inválida."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil,ativo&id=eq.{Uri.EscapeDataString(userId)}&ativo=is.true&limit=1");
+        var (profile,authorized)=FirstRow(profileRows);
+        if(!authorized||profile!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor" or "inspetor"))
+            return Results.Json(Error("Sem permissão para mover a inspeção."),statusCode:403);
+        var rows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,status,grupo_inspecao_id&excluido_em=is.null&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inspection,found)=FirstRow(rows);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        if(inspection!.Value.GetProperty("status").GetString()!="em_andamento")
+            return Results.Json(Error("Somente inspeções em andamento podem voltar a Não iniciadas."),statusCode:409);
+        var groupId=inspection.Value.TryGetProperty("grupo_inspecao_id",out var groupVal)&&groupVal.ValueKind==JsonValueKind.String
+            ?groupVal.GetString():null;
+        if(string.IsNullOrWhiteSpace(groupId))
+            return Results.Json(Error("Inspeção sem grupo de trabalho."),statusCode:409);
+
+        // Compare-and-swap guards against another operator concluding the inspection meanwhile.
+        var updated=await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+            $"id=eq.{Uri.EscapeDataString(id)}&status=eq.em_andamento&excluido_em=is.null",
+            new {status="aberta",iniciada_em=(DateTimeOffset?)null},"return=representation");
+        if(updated is not {ValueKind:JsonValueKind.Array}||updated.Value.GetArrayLength()==0)
+            return Results.Json(Error("O status mudou em outra sessão. Atualize o Kanban."),statusCode:409);
+
+        // Other inspections may share the group. Only reset the group when none
+        // is in progress or complete. Never touch observations, measurements, or photos.
+        var siblings=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}&id=neq.{Uri.EscapeDataString(id)}&status=in.(em_andamento,concluida)&excluido_em=is.null&limit=1");
+        if(siblings is {ValueKind:JsonValueKind.Array} && siblings.Value.GetArrayLength()==0)
+            await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",
+                $"id=eq.{Uri.EscapeDataString(groupId)}",
+                new {status="planejado"},"return=minimal");
+        return Results.Ok(new{data=new{ok=true,status="aberta"},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível mover a inspeção.",e.Message),statusCode:500);}
+});
+
 app.MapGet("/api/amostragem/plano", (long lote, string? nivel) =>
 {
     var plan = SamplingPlan(lote, string.IsNullOrWhiteSpace(nivel) ? "I" : nivel);
@@ -2496,85 +2543,54 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
 {
     try
     {
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("Inspeção inválida."),statusCode:400);
         var token=Token(request);
         var client=factory.CreateClient("supabase");
-        var prepare=request.Query.TryGetValue("preparar",out var prepareRaw)
-            && string.Equals(prepareRaw.ToString(),"true",StringComparison.OrdinalIgnoreCase);
+        await CurrentUserId(client,token);
 
-        // Só reutiliza o Word quando a inspeção confirma que o documento atual está válido.
-        var inspectionRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=documento_gerado_em&id=eq.{Uri.EscapeDataString(id)}&limit=1");
-        var (inspection,inspectionFound)=FirstRow(inspectionRows);
-        var cacheValid=inspectionFound
-            && inspection!.Value.TryGetProperty("documento_gerado_em",out var generatedAt)
-            && generatedAt.ValueKind!=JsonValueKind.Null;
-
-        if(cacheValid)
-        {
-            var cachedRows=await RestAsync(client,token,HttpMethod.Get,"laudos",
-                $"select=numero,storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}&storage_path=not.is.null&limit=1");
-            var (cached,cachedFound)=FirstRow(cachedRows);
-            if(cachedFound)
-            {
-                var path=cached!.Value.TryGetProperty("storage_path",out var sp)&&sp.ValueKind==JsonValueKind.String?sp.GetString():null;
-                // Only the new formatted reports are safe to serve from cache.
-                // Older cached DOCX files have decimal quantities and old names.
-                if(!string.IsNullOrWhiteSpace(path) && path.Contains("/laudo-v2/",StringComparison.Ordinal))
-                {
-                    using var cachedMsg=new HttpRequestMessage(HttpMethod.Get,$"{supabaseUrl}/storage/v1/object/authenticated/laudos/{EncodedPath(path!)}");
-                    ApplyAuth(cachedMsg,token);
-                    var cachedRes=await client.SendAsync(cachedMsg);
-                    if(cachedRes.IsSuccessStatusCode)
-                    {
-                        if(prepare) return Results.Ok(new {data=new {prepared=true,cached=true},error=(object?)null});
-                        var cachedBytes=await cachedRes.Content.ReadAsByteArrayAsync();
-                        var cachedName=Uri.UnescapeDataString(Path.GetFileName(path));
-                        if(string.IsNullOrWhiteSpace(cachedName))cachedName=$"Inspecao-{id}.docx";
-                        return Results.File(cachedBytes,"application/vnd.openxmlformats-officedocument.wordprocessingml.document",cachedName);
-                    }
-                }
-            }
-        }
-
+        // Generate the official template on demand and send it straight to the browser.
+        // Supabase Storage is NOT required; do not re-use stale laudo records.
         HttpResponseMessage? res=null;
         byte[] bytes=[];
-        var delays=new[]{1500,2500,3500,5000,7000};
-
+        var delays=new[]{1200,2000,3500,5000};
         for(var attempt=0;attempt<delays.Length;attempt++)
         {
-            using var msg=new HttpRequestMessage(HttpMethod.Get,$"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}");
+            using var msg=new HttpRequestMessage(HttpMethod.Get,
+                $"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}");
             msg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
             res=await client.SendAsync(msg);
             bytes=await res.Content.ReadAsByteArrayAsync();
-
-            var transient=(int)res.StatusCode is 502 or 503 or 504;
-            if(!transient || attempt==delays.Length-1) break;
-
+            var retry=(int)res.StatusCode is 502 or 503 or 504;
+            if(!retry || attempt==delays.Length-1)break;
             res.Dispose();
             res=null;
             await Task.Delay(delays[attempt]);
         }
-
         if(res is null || !res.IsSuccessStatusCode)
         {
             if(res is not null && (int)res.StatusCode is not (502 or 503 or 504))
                 return Results.Text(Encoding.UTF8.GetString(bytes),"application/json",statusCode:(int)res.StatusCode);
             return Results.Json(Error("Não foi possível gerar o Word agora.","O serviço de documentos está indisponível."),statusCode:503);
         }
-
-        if(prepare) return Results.Ok(new {data=new {prepared=true,cached=false},error=(object?)null});
-
-        var contentType=res.Content.Headers.ContentType?.ToString()
-            ?? "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-        var fileName=res.Headers.TryGetValues("X-SGQ-File-Name",out var names)
-            ? Uri.UnescapeDataString(names.FirstOrDefault()??$"Inspecao-{id}.docx")
-            : $"Inspecao-{id}.docx";
-        return Results.File(bytes,contentType,fileName);
+        using(res)
+        {
+            if(bytes.Length<100 || bytes[0]!=0x50 || bytes[1]!=0x4B)
+                return Results.Json(Error("O serviço não retornou um Word válido."),statusCode:502);
+            var contentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            var fileName=res.Headers.TryGetValues("X-SGQ-File-Name",out var names)
+                ? Uri.UnescapeDataString(names.FirstOrDefault()??"")
+                : "";
+            if(string.IsNullOrWhiteSpace(fileName)||!fileName.EndsWith(".docx",StringComparison.OrdinalIgnoreCase))
+                fileName=$"Inspecao-{id}.docx";
+            return Results.File(bytes,contentType,fileName);
+        }
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao gerar Word pelo modelo oficial da IT.",e.Message),statusCode:500);}
 });
 
+// Optional Power Automate delivery generates fresh bytes on demand as well.
+// Neither ordinary downloads nor SharePoint uploads depend on a laudos storage object.
 // POST via SGQ: documento armazenado no Supabase -> Power Automate -> SharePoint.
 // A URL HTTP do fluxo deve ser cadastrada exclusivamente no Render (nunca no frontend).
 app.MapPost("/api/inspecoes/{id}/enviar-automate", async (string id,HttpRequest request,IHttpClientFactory factory) =>
@@ -2602,35 +2618,38 @@ app.MapPost("/api/inspecoes/{id}/enviar-automate", async (string id,HttpRequest 
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         if(ins!.Value.GetProperty("status").GetString()!="concluida")
             return Results.Json(Error("Conclua a inspeção antes de enviar o Word."),statusCode:409);
-        var documents=await RestAsync(client,token,HttpMethod.Get,"laudos",
-            $"select=id,numero,storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}&storage_path=not.is.null&order=criado_em.desc&limit=1");
-        var (doc,docFound)=FirstRow(documents);
-        if(!docFound) return Results.Json(Error("Gere o Word no SGQ antes do envio."),statusCode:404);
-        var path=doc!.Value.GetProperty("storage_path").GetString();
-        if(string.IsNullOrWhiteSpace(path)) return Results.Json(Error("Word não está armazenado."),statusCode:404);
-        if(!path.Contains("/laudo-v2/",StringComparison.Ordinal))
-            return Results.Json(Error("O Word está no formato antigo. Gere novamente o laudo antes de enviar."),statusCode:409);
+        byte[] bytes;
+        string fileName;
+        using(var generateMsg=new HttpRequestMessage(HttpMethod.Get,
+            $"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}"))
+        {
+            generateMsg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
+            using var documentRes=await client.SendAsync(generateMsg);
+            if(!documentRes.IsSuccessStatusCode)
+            {
+                var reason=await documentRes.Content.ReadAsStringAsync();
+                return Results.Json(Error("Não foi possível gerar o Word para envio.",reason[..Math.Min(reason.Length,250)]),statusCode:502);
+            }
+            bytes=await documentRes.Content.ReadAsByteArrayAsync();
+            fileName=documentRes.Headers.TryGetValues("X-SGQ-File-Name",out var names)
+                ? Uri.UnescapeDataString(names.FirstOrDefault()??"")
+                : $"Inspecao-{id}.docx";
+        }
+        if(bytes.Length<100 || bytes[0]!=0x50 || bytes[1]!=0x4B)
+            return Results.Json(Error("Documento Word inválido."),statusCode:502);
+        if(string.IsNullOrWhiteSpace(fileName)||!fileName.EndsWith(".docx",StringComparison.OrdinalIgnoreCase))
+            fileName=$"Inspecao-{id}.docx";
         var project=ins.Value.GetProperty("grupos_inspecao").GetProperty("processos");
         string? Field(JsonElement row,string key)=>row.TryGetProperty(key,out var v) && v.ValueKind==JsonValueKind.String?v.GetString():null;
         var fst=Field(project,"codigo")??"SEM-FST";
         var customer=Field(project,"cliente")??"Cliente";
-        var fileName=Uri.UnescapeDataString(Path.GetFileName(path));
-        if(string.IsNullOrWhiteSpace(fileName) || !fileName.EndsWith(".docx",StringComparison.OrdinalIgnoreCase))
-            return Results.Json(Error("Nome do laudo inválido."),statusCode:422);
-        using var fileReq=new HttpRequestMessage(HttpMethod.Get,$"{supabaseUrl}/storage/v1/object/authenticated/laudos/{EncodedPath(path)}");
-        ApplyAuth(fileReq,token);
-        using var fileRes=await client.SendAsync(fileReq);
-        if(!fileRes.IsSuccessStatusCode)
-            return Results.Json(Error("O documento não pôde ser lido do armazenamento."),statusCode:502);
-        var bytes=await fileRes.Content.ReadAsByteArrayAsync();
-        if(bytes.Length==0) return Results.Json(Error("Documento Word vazio."),statusCode:422);
         var idempotency=System.Security.Cryptography.SHA256.HashData(bytes);
         var exportKey=Convert.ToHexString(idempotency).ToLowerInvariant();
         using var send=new HttpRequestMessage(HttpMethod.Post,hookUri);
         send.Headers.TryAddWithoutValidation("X-SGQ-Event-ID",exportKey);
         send.Content=JsonContent.Create(new {
             eventId=exportKey, origem="sgq",tipoDocumento="relatorio_inspecao",
-            inspecaoId=id,laudoId=Field(doc.Value,"id"),numeroFst=fst,cliente=customer,
+            inspecaoId=id,laudoId=(string?)null,numeroFst=fst,cliente=customer,
             filename=fileName, contentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             contentBase64=Convert.ToBase64String(bytes),pastaAno=DateTime.UtcNow.Year.ToString()
         });
@@ -2644,7 +2663,7 @@ app.MapPost("/api/inspecoes/{id}/enviar-automate", async (string id,HttpRequest 
         }
         var confirmed=successful&&!string.IsNullOrWhiteSpace(documentUrl);
         await RestAsync(client,token,HttpMethod.Post,"sgq_documento_integracoes","",
-            new {inspecao_id=id,laudo_id=Field(doc.Value,"id"),storage_path=path,
+            new {inspecao_id=id,laudo_id=(string?)null,storage_path=(string?)null,
                 destino="power_automate_sharepoint",status=confirmed?"enviado":successful?"pendente":"erro",
                 documento_url=documentUrl,erro=successful?null:$"HTTP {(int)sent.StatusCode}: {raw[..Math.Min(raw.Length,200)]}",
                 tentativas=1,solicitado_por=userId,enviado_em=confirmed?DateTimeOffset.UtcNow:(DateTimeOffset?)null},

@@ -1,5 +1,5 @@
 import {useMemo,useState} from 'react'
-import {CheckCircle2,ChevronRight,ClipboardCheck,Copy,Edit3,MoreHorizontal,Play,Plus,Search,Trash2} from 'lucide-react'
+import {ArrowRightLeft,CheckCircle2,ChevronRight,ClipboardCheck,Copy,Edit3,MoreHorizontal,Play,Plus,Search,Trash2} from 'lucide-react'
 import './InspectionsKanban.css'
 
 type Process={
@@ -27,6 +27,11 @@ type Props={
   processes:Process[]
   canDelete:boolean
   deletingProcessId:string|null
+  canMove?:boolean
+  movingInspectionId?:string|null
+  onMove?:(id:string,target:'aberta'|'em_andamento')=>void
+  mode?:'page'|'panel'
+  onViewAll?:()=>void
   onOpen:(id:string)=>void
   onCreate:()=>void
   onReuseProcess:(id:string)=>void
@@ -38,8 +43,7 @@ type Props={
 const columns=[
   {status:'aberta',label:'Não iniciadas',tone:'queued'},
   {status:'em_andamento',label:'Em andamento',tone:'active'},
-  {status:'concluida',label:'Concluídas',tone:'done'},
-  {status:'cancelada',label:'Canceladas',tone:'cancelled'}
+  {status:'concluida',label:'Concluídas',tone:'done'}
 ] as const
 
 function normalized(value:unknown){
@@ -71,16 +75,20 @@ function InspectionMenu({inspection,process,canDelete,deletingProcessId,onReuseP
 }
 
 export default function InspectionsKanban({
-  inspections,processes,canDelete,deletingProcessId,onOpen,onCreate,onReuseProcess,onEditProcess,
+  inspections,processes,canDelete,deletingProcessId,canMove=false,movingInspectionId=null,onMove,
+  mode='page',onViewAll,onOpen,onCreate,onReuseProcess,onEditProcess,
   onDeleteProcess,onDeleteInspection,formatFst
 }:Props){
   const [query,setQuery]=useState('')
   const [shownByLane,setShownByLane]=useState<Record<string,number>>({})
-  const pageSize=24
+  const [draggingId,setDraggingId]=useState<string|null>(null)
+  const [overLane,setOverLane]=useState<string|null>(null)
+  const pageSize=mode==='panel'?8:24
   const search=normalized(query)
   const processById=useMemo(()=>new Map(processes.map(p=>[p.id,p])),[processes])
   const visible=useMemo(()=>{
-    const sorted=[...inspections].sort((a,b)=>
+    // Cancelled/archived records do not occupy an operational Kanban lane.
+    const sorted=inspections.filter(i=>i.status!=='cancelada').sort((a,b)=>
       String(b.criado_em||'').localeCompare(String(a.criado_em||'')))
     if(!search)return sorted
     return sorted.filter(item=>{
@@ -101,9 +109,18 @@ export default function InspectionsKanban({
   const emptyProcesses=processes.filter(p=>!activeProcessIds.has(p.id)&&
     (!search||normalized([p.codigo,p.cliente,p.nota_fiscal].join(' ')).includes(search)))
   const totalMatches=visible.length+emptyProcesses.length
-  return <section className="workspace sgq-kanban-page" aria-label="Inspeções">
+  const canMoveCard=(item:Inspection)=>Boolean(canMove&&onMove&&!movingInspectionId&&
+    (item.status==='aberta'||item.status==='em_andamento'))
+  const moveCard=(id:string,target:'aberta'|'em_andamento')=>{
+    const item=inspections.find(i=>i.id===id)
+    if(!item||!canMoveCard(item)||item.status===target)return
+    onMove?.(id,target)
+  }
+  return <section className={'workspace sgq-kanban-page '+(mode==='panel'?'sgq-kanban-embedded':'')} aria-label="Inspeções">
     <header className="sgq-kanban-toolbar">
-      <div className="sgq-kanban-title"><h1>Inspeções</h1><span className="sgq-kanban-total">{inspections.length}</span></div>
+      <div className="sgq-kanban-title">{mode==='panel'?<h2>Inspeções</h2>:<h1>Inspeções</h1>}
+        <span className="sgq-kanban-total">{inspections.filter(i=>i.status!=='cancelada').length}</span></div>
+      {mode==='panel'?<button type="button" className="secondary small" onClick={onViewAll}>Ver todas</button>:
       <div className="sgq-kanban-tools">
         <label className="sgq-kanban-search">
           <Search size={17} aria-hidden="true"/>
@@ -111,12 +128,30 @@ export default function InspectionsKanban({
             placeholder="Buscar FST ou cliente" aria-label="Buscar inspeções"/>
         </label>
         <button type="button" className="primary sgq-kanban-new" onClick={onCreate}><Plus size={17}/> Nova inspeção</button>
-      </div>
+      </div>}
     </header>
 
     <div className="sgq-kanban-board" aria-label="Quadro Kanban de inspeções">
       {columnsToShow.map(column=><section className={'sgq-kanban-lane tone-'+column.tone}
-        key={column.status} aria-label={column.label}>
+        key={column.status} aria-label={column.label}
+        data-drop-active={overLane===column.status}
+        onDragOver={e=>{
+          if(!draggingId||!canMove||movingInspectionId||
+            !['aberta','em_andamento'].includes(column.status))return
+          const item=inspections.find(i=>i.id===draggingId)
+          if(!item||item.status===column.status||!canMoveCard(item))return
+          e.preventDefault()
+          e.dataTransfer.dropEffect='move'
+          if(overLane!==column.status)setOverLane(column.status)
+        }}
+        onDrop={e=>{
+          const id=e.dataTransfer.getData('text/plain')||draggingId
+          setDraggingId(null);setOverLane(null)
+          if(id&&['aberta','em_andamento'].includes(column.status)){
+            e.preventDefault()
+            moveCard(id,column.status as 'aberta'|'em_andamento')
+          }
+        }}>
         <div className="sgq-kanban-lane-head">
           <span className="sgq-kanban-lane-dot" aria-hidden="true"/>
           <h2>{column.label}</h2>
@@ -135,7 +170,16 @@ export default function InspectionsKanban({
             const done=item.status==='concluida'
             const active=item.status==='em_andamento'
             const result=item.resultado==='aprovado'?'Aprovado':item.resultado==='reprovado'?'Reprovado':null
-            return <article className="sgq-kanban-card" key={item.id}>
+            return <article className="sgq-kanban-card" key={item.id}
+              draggable={canMoveCard(item)}
+              data-dragging={draggingId===item.id}
+              onDragStart={e=>{
+                if(!canMoveCard(item)){e.preventDefault();return}
+                e.dataTransfer.setData('text/plain',item.id)
+                e.dataTransfer.effectAllowed='move'
+                setDraggingId(item.id)
+              }}
+              onDragEnd={()=>{setDraggingId(null);setOverLane(null)}}>
               <div className="sgq-kanban-card-top">
                 <span className="sgq-kanban-fst">{fst}</span>
                 <InspectionMenu inspection={item} process={process} canDelete={canDelete} deletingProcessId={deletingProcessId}
@@ -155,6 +199,14 @@ export default function InspectionsKanban({
                 {result?<span className={'sgq-kanban-result '+(item.resultado==='aprovado'?'is-approved':'is-rejected')}>
                   {result}
                 </span>:<span className="sgq-kanban-card-spacer"/>}
+                {canMove&&onMove&&(active||item.status==='aberta')&&
+                  <button className="sgq-kanban-move" type="button"
+                    disabled={!!movingInspectionId}
+                    title={active?'Voltar para Não iniciadas':'Mover para Em andamento'}
+                    aria-label={(active?'Voltar para Não iniciadas':'Mover para Em andamento')+' · '+fst}
+                    onClick={()=>moveCard(item.id,active?'aberta':'em_andamento')}>
+                    <ArrowRightLeft size={15}/>
+                  </button>}
                 <button className="sgq-kanban-open" type="button" onClick={()=>onOpen(item.id)}>
                   {active?<Play size={14}/>:done?<CheckCircle2 size={15}/>:<ChevronRight size={16}/>}
                   {active?'Continuar':'Abrir'}
@@ -171,7 +223,7 @@ export default function InspectionsKanban({
         </div>
       </section>)}
     </div>
-    {emptyProcesses.length>0&&<section className="sgq-kanban-unassigned" aria-label="Processos sem inspeção">
+    {mode==='page'&&emptyProcesses.length>0&&<section className="sgq-kanban-unassigned" aria-label="Processos sem inspeção">
       <div className="sgq-kanban-unassigned-head"><ClipboardCheck size={17}/><h2>Processos sem inspeção</h2><span>{emptyProcesses.length}</span></div>
       <div className="sgq-kanban-unassigned-list">
         {emptyProcesses.map(process=><article className="sgq-kanban-unassigned-card" key={process.id}>
