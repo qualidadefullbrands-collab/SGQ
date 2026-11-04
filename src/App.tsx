@@ -1613,41 +1613,110 @@ export default function App() {
   }
 
   async function saveEditingInspectionData() {
-    if (!editingInspectionData || !selectedInspectionId) return
-    const itens=(editingInspectionData.itens ?? []).map((row:any)=>({
-      processoItemId:row.processoItemId,sku:String(row.sku ?? '').trim(),nome:String(row.nome ?? '').trim(),
-      quantidadePv:row.quantidadePv===''||row.quantidadePv==null?null:Number(row.quantidadePv),
-      numeroPedidoPv:String(row.numeroPedidoPv??'').trim()||null,fstPv:String(row.fstPv??'').trim()||null,
-      lote:String(row.lote ?? '').trim() || null,
-      material:String(row.material ?? '').trim() || null,capacidade:String(row.capacidade ?? '').trim() || null,quantidade:Number(row.quantidade)||0,
-      quantidadePorCaixa:Number(row.quantidadePorCaixa)||null,caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
-      unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,distribuicaoCaixas:boxGroupsFromRow(row),
-    }))
-    const editPayload={
-      codigo:String(editingInspectionData.codigo ?? '').trim(),cliente:String(editingInspectionData.cliente ?? '').trim() || null,
-      notaFiscal:String(editingInspectionData.notaFiscal ?? '').trim() || null,origem:String(editingInspectionData.origem ?? '').trim() || null,
-      transporte:String(editingInspectionData.transporte ?? '').trim() || null,chegadaCd:editingInspectionData.chegadaCd || null,
-      dataInspecao:editingInspectionData.dataInspecao || null,inspectionLevel:editingInspectionData.inspectionLevel || 'I',
-      observacaoInterna:String(editingInspectionData.observacaoInterna ?? '').trim() || null,itVersionId:editingInspectionData.itVersionId || null,itens,
-    }
-    if(!navigator.onLine){
-      try{await queueInspectionUpdate(selectedInspectionId,editPayload);setEditingInspectionData(null)}
-      catch(e:any){setError(String(e?.message||''))}
-      return
-    }
-    const saved=await apiPut<any>('/api/inspecoes/'+selectedInspectionId+'/dados',editPayload)
-    if(saved.error){
-      if(connectionFailure(saved.error.message)){
-        try{await queueInspectionUpdate(selectedInspectionId,editPayload);setEditingInspectionData(null)}
-        catch(e:any){setError(String(e?.message||''))}
-      }else setError(saved.error.message)
-      return
-    }
-    setEditingInspectionData(null)
-    const p=saved.data?.plano
-    setMessage(`Dados atualizados. Plano recalculado: ${p?.codigo ?? '—'} · ${p?.amostra ?? 0} un. · Ac/Re ${p?.ac ?? '—'}/${p?.re ?? '—'}.`)
-    void refreshLists()
-    await openInspection(selectedInspectionId)
+    if(!editingInspectionData||!selectedInspectionId||editSaving)return
+    const id=selectedInspectionId
+    setEditSaving(true);setError('')
+    try{
+      const itens=(editingInspectionData.itens??[]).map((row:any)=>({
+        processoItemId:row.processoItemId,sku:String(row.sku??'').trim(),nome:String(row.nome??'').trim(),
+        quantidadePv:row.quantidadePv===''||row.quantidadePv==null?null:Number(row.quantidadePv),
+        numeroPedidoPv:String(row.numeroPedidoPv??'').trim()||null,fstPv:String(row.fstPv??'').trim()||null,
+        lote:String(row.lote??'').trim()||null,material:String(row.material??'').trim()||null,
+        capacidade:String(row.capacidade??'').trim()||null,quantidade:Number(row.quantidade)||0,
+        quantidadePorCaixa:Number(row.unidadesPadrao||row.quantidadePorCaixa)||null,
+        caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
+        unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,distribuicaoCaixas:boxGroupsFromRow(row)
+      }))
+      if(itens.some((x:any)=>![x.quantidade,x.caixasRecebidas,x.caixasInspecionadas,
+        x.unidadesPorConjunto].every((n:number)=>Number.isFinite(n)&&n>=0)) ||
+        itens.some((x:any)=>x.unidadesPorConjunto<=0)){
+        setError('Confira os valores numéricos antes de salvar.');return
+      }
+      const editPayload={
+        codigo:String(editingInspectionData.codigo??'').trim(),cliente:String(editingInspectionData.cliente??'').trim()||null,
+        notaFiscal:String(editingInspectionData.notaFiscal??'').trim()||null,
+        origem:String(editingInspectionData.origem??'').trim()||null,
+        transporte:String(editingInspectionData.transporte??'').trim()||null,
+        chegadaCd:editingInspectionData.chegadaCd||null,
+        dataInspecao:editingInspectionData.dataInspecao||null,
+        inspectionLevel:editingInspectionData.inspectionLevel||'I',
+        observacaoInterna:String(editingInspectionData.observacaoInterna??'').trim()||null,
+        itVersionId:editingInspectionData.itVersionId||null,itens,
+      }
+      // Only quantities/warehouse distribution changed? Save without touching product,
+      // Omie, catalogue, or the rest of the process's general data.
+      const fastPath=editMetadataBaseline.current===editMetadataFingerprint(editingInspectionData)
+        && itens.length>0&&itens.every((item:any)=>!!item.processoItemId)
+      if(!navigator.onLine){
+        await queueInspectionUpdate(id,editPayload)
+        setMessage('Alterações guardadas no dispositivo. Serão sincronizadas ao voltar a conexão.')
+        return
+      }
+      const saved=await apiPut<any>(
+        '/api/inspecoes/'+encodeURIComponent(id)+(fastPath?'/quantidades':'/dados'),
+        fastPath?{itens}:editPayload
+      )
+      if(saved.error){
+        if(connectionFailure(saved.error.message)||!navigator.onLine){
+          await queueInspectionUpdate(id,editPayload)
+          setMessage('Alterações guardadas no dispositivo. Sincronização pendente.')
+        }else setError(saved.error.message)
+        return
+      }
+      const p=saved.data?.plano
+      editMetadataBaseline.current=editMetadataFingerprint(editingInspectionData)
+      // Refresh the visible inspection without loading another page or waiting for
+      // a second detail/bootstrap roundtrip. Keep the edit grid in place.
+      setDetail((current:any)=>{
+        if(!current||current.id!==id)return current
+        const updated=(current.items??[]).map((link:any)=>{
+          const item=itens.find((x:any)=>x.processoItemId===link.processo_itens?.id)
+          if(!item)return link
+          return {...link,
+            unidades_por_conjunto:item.unidadesPorConjunto,
+            quantidade_componente:item.quantidade,
+            processo_itens:{...link.processo_itens,quantidade:item.quantidade,
+              quantidade_por_caixa:item.quantidadePorCaixa,
+              caixas_recebidas:item.caixasRecebidas||null,
+              caixas_inspecionadas:item.caixasInspecionadas||null,
+              distribuicao_caixas:item.distribuicaoCaixas,
+              lote:item.lote,material:item.material,capacidade:item.capacidade,
+              produtos:{...link.processo_itens.produtos,sku:item.sku,nome:item.nome}}
+          }
+        })
+        return {...current,items:updated,
+          tamanho_lote:p?.lote??current.tamanho_lote,
+          tamanho_amostra:p?.amostra??current.tamanho_amostra,
+          codigo_amostragem:p?.codigo??current.codigo_amostragem,
+          limite_aceitacao:p?.ac??current.limite_aceitacao,
+          limite_rejeicao:p?.re??current.limite_rejeicao,
+          documento_gerado_em:null,
+          data_inspecao:editPayload.dataInspecao,
+          observacao_interna:editPayload.observacaoInterna,
+          grupos_inspecao:{...current.grupos_inspecao,processos:{
+            ...current.grupos_inspecao?.processos,
+            codigo:editPayload.codigo,cliente:editPayload.cliente,
+            nota_fiscal:editPayload.notaFiscal,origem:editPayload.origem,
+            transporte:editPayload.transporte,chegada_cd:editPayload.chegadaCd
+          }}
+        }
+      })
+      setInspections(current=>current.map(item=>item.id===id?{
+        ...item,tamanho_lote:p?.lote??item.tamanho_lote,
+        tamanho_amostra:p?.amostra??item.tamanho_amostra,
+        codigo_amostragem:p?.codigo??item.codigo_amostragem
+      }:item))
+      setMessage(fastPath?'Quantidades e caixas salvas.':'Dados da inspeção salvos.')
+      // Update the offline conflict baseline asynchronously; no forced navigation.
+      void apiGet<any>('/api/inspecoes/'+encodeURIComponent(id)+'/detalhe').then(r=>{
+        if(!r.error&&r.data?.inspecao){
+          editingBaseline.current=offlineInspectionVersion(r.data)
+          void saveOfflineDraft(userId||'','full:detail:'+id,r.data).catch(()=>undefined)
+        }
+      }).catch(()=>undefined)
+      if(!fastPath)void refreshLists()
+    }catch(e:any){setError(String(e?.message||'Não foi possível salvar.'))}
+    finally{setEditSaving(false)}
   }
   async function suggestApplicableIt(force=false){
     const products=skuRows.filter(row=>row.nome.trim()||row.sku.trim()).map(row=>({codigo:row.sku,descricao:row.nome}))
