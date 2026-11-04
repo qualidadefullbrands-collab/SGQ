@@ -2629,3 +2629,8 @@ body:has(.login-shell) {background:#f3f6fa!important;color:#20374a}
 .sgq-operational-shell .sgq-saved-photo-caption input{min-width:0;flex:1 1 150px;padding:9px 10px;font-size:13px}
 .sgq-operational-shell .sgq-saved-photo-caption strong{min-width:0;flex:1 1 150px;overflow-wrap:anywhere}
 .sgq-operational-shell .sgq-saved-photo-caption .secondary{padding:9px 11px;flex-shrink:0}
+
+
+.sgq-operational-shell .sgq-inline-save-status{
+ display:block;text-align:center;margin:9px 0 1px;font-size:12px;font-weight:750;color:#246c54;
+}
