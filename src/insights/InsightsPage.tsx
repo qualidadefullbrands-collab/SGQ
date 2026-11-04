@@ -38,6 +38,16 @@ export default function InsightsPage({onOpenInspection}:{onOpenInspection:(id:st
   const shortages=deviations.filter(r=>(r.difference||0)<0)
   const excess=deviations.filter(r=>(r.difference||0)>0)
   const totalAbs=deviations.reduce((sum,row)=>sum+Math.abs(row.difference||0),0)
+  const processCount=new Set((data?.inspections||[]).map(x=>x?.grupos_inspecao?.processos?.id).filter(Boolean)).size
+  const clientCount=new Set((data?.inspections||[]).map(x=>String(x?.grupos_inspecao?.processos?.cliente||'').trim().toUpperCase()).filter(Boolean)).size
+  const completed=(data?.inspections||[]).filter(x=>x.status==='concluida')
+  const inProgress=(data?.inspections||[]).filter(x=>x.status==='em_andamento').length
+  const inspectedPieces=(data?.inspections||[]).reduce((sum,x)=>sum+Number(x.total_inspecionado||0),0)
+  const nonConforming=(data?.inspections||[]).reduce((sum,x)=>sum+Number(x.total_nao_conforme||0),0)
+  const completedDuration=completed.map(x=>x.iniciada_em&&x.concluida_em?(Date.parse(x.concluida_em)-Date.parse(x.iniciada_em))/3600000:null).filter((x):x is number=>typeof x==='number'&&Number.isFinite(x)&&x>=0)
+  const avgDuration=completedDuration.length?completedDuration.reduce((a,b)=>a+b,0)/completedDuration.length:null
+  const conformity=inspectedPieces>0?100*(inspectedPieces-nonConforming)/inspectedPieces:null
+  const countedComponents=all.reduce((sum,x)=>sum+x.received,0)
   const recent=useMemo(()=>[...deviations].sort((a,b)=>Math.abs(b.difference||0)-Math.abs(a.difference||0)).slice(0,6),[data])
   const months=useMemo(()=>{
     const map=new Map<string,{total:number;delta:number}>()
@@ -63,6 +73,16 @@ export default function InsightsPage({onOpenInspection}:{onOpenInspection:(id:st
       <article><span>Divergências</span><strong>{fmt(deviations.length)}</strong><small>{withEvidence.length?fmt(100*deviations.length/withEvidence.length)+'% dos comparáveis':'Sem base comparável'}</small></article>
       <article><span>Recebido a menos</span><strong>{fmt(shortages.length)}</strong><small>SKUs abaixo do pedido</small></article>
       <article><span>Diferença absoluta</span><strong>{fmt(totalAbs)}</strong><small>Unidades dos SKUs divergentes</small></article>
+    </div>
+    <div className="insights-kpis insights-kpis-secondary">
+      <article><span>Processos</span><strong>{fmt(processCount)}</strong><small>Identificados no SGQ</small></article>
+      <article><span>Clientes</span><strong>{fmt(clientCount)}</strong><small>Com inspeções registradas</small></article>
+      <article><span>Peças inspecionadas</span><strong>{fmt(inspectedPieces)}</strong><small>{fmt(nonConforming)} unidades NC</small></article>
+      <article><span>Conformidade das amostras</span><strong>{conformity===null?'—':fmt(conformity)+'%'}</strong><small>Unidades conformes / inspecionadas</small></article>
+      <article><span>Inspeções concluídas</span><strong>{fmt(completed.length)}</strong><small>{fmt(inProgress)} em andamento</small></article>
+      <article><span>Tempo médio de inspeção</span><strong>{avgDuration===null?'—':fmt(avgDuration)+' h'}</strong><small>Início até conclusão ({completedDuration.length})</small></article>
+      <article><span>Componentes recebidos</span><strong>{fmt(countedComponents)}</strong><small>Soma dos SKUs nas inspeções</small></article>
+      <article><span>SKUs sem referência PV</span><strong>{fmt(all.filter(x=>x.evidence!=='verified').length)}</strong><small>Não comparados automaticamente</small></article>
     </div>
     <div className="insights-grid">
       <section className="panel insights-focus">
@@ -115,6 +135,7 @@ export default function InsightsPage({onOpenInspection}:{onOpenInspection:(id:st
           <td><span className="insights-status">{reportStatus(row.status)}</span></td>
         </tr>)}</tbody></table></div>}
       {filtered.length>200&&<p className="insights-footnote">Exibindo os 200 primeiros registros filtrados.</p>}
+      <p className="insights-footnote">Indicadores por registros atuais; o tempo considera somente inspeções concluídas com início e término válidos. Componentes não equivalem a produtos acabados. Histórico anterior ao registro do PV permanece sem referência. Limites atuais: 1.000 inspeções e 10.000 vínculos de itens por consulta.</p>
       <p className="insights-footnote">Referência: quantidade original por SKU no PV Omie vinculada à inspeção. Não estima valores ausentes nem compara SKUs com referências conflitantes. Atualização mediante consulta online.</p>
     </section>
   </section>
