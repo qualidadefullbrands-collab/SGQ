@@ -14,11 +14,11 @@ test('phone automatically opens a dedicated photo-only screen without QR codes',
  assert.match(app,/tab==='fotos-mobile'/)
  assert.match(app,/<MobileFotos processes=\{processes\} inspections=\{inspections\}/)
  assert.doesNotMatch(mobile,/QrCode|qr_token|scan QR/i)
- assert.match(mobile,/Processos em andamento/)
+ assert.match(mobile,/Processos com inspeções/)
  assert.doesNotMatch(mobile,/COLETA DE EVIDÊNCIAS/i)
 })
-test('mobile lists only in-progress inspections associated with operational processes',()=>{
- assert.match(mobile,/i\.status!=='em_andamento'/)
+test('mobile lists open and started inspections associated with operational processes',()=>{
+ assert.match(mobile,/\['aberta','em_andamento'\]\.includes\(i\.status\)/)
  assert.match(mobile,/const valid=new Set\(processes\.map\(p=>p\.id\)\)/)
  assert.match(mobile,/active:processes\.filter\(p=>map\.has\(p\.id\)\)/)
  assert.match(mobile,/selectProcess\(p\.id\)/)
@@ -42,11 +42,11 @@ test('mobile does not contain inspection completion or mutation of measurements'
 })
 test('API uses a lightweight read endpoint and rejects archived or finished inspections',()=>{
  assert.match(api,/MapGet\("\/api\/mobile\/fotos\/inspecoes\/\{id\}"/)
- assert.match(api,/Somente inspeções em andamento podem receber fotos/)
+ assert.match(api,/status is not \("aberta" or "em_andamento"\)/)
  assert.match(api,/Processo arquivado ou indisponível/)
  const upload=api.slice(api.indexOf('app.MapPost("/api/inspecoes/{id}/fotos/registrar"'),api.indexOf('app.MapPost("/api/inspecoes/{id}/laudo"'))
  assert.match(upload,/excluido_em=is\.null/)
- assert.match(upload,/record\.GetProperty\("status"\)\.GetString\(\)!="em_andamento"/)
+ assert.match(upload,/record\.GetProperty\("status"\)\.GetString\(\) is not \("aberta" or "em_andamento"\)/)
  assert.match(upload,/photo\.StoragePath\.StartsWith\(id\+"\/gerais\/"/)
  assert.match(upload,/storage_path=eq\./)
 })
@@ -61,4 +61,12 @@ test('mobile photo styles are scoped and responsive',()=>{
  assert.match(css,/@media\(max-width:360px\)/)
  assert.match(css,/grid-template-columns/)
  assert.match(css,/min-height:100dvh/)
+})
+
+test('photo cards visibly identify started versus not started inspections',()=>{
+ assert.match(mobile,/sgq-photo-started/)
+ assert.match(mobile,/sgq-photo-not-started/)
+ assert.match(mobile,/Não iniciada/)
+ assert.match(css,/\.sgq-mobile-process\.sgq-photo-started/)
+ assert.match(css,/\.sgq-mobile-process\.sgq-photo-not-started/)
 })
