@@ -46,7 +46,7 @@ export default function MobileFotos({processes,inspections,canWrite,onRefresh,on
   const map=new Map<string,Inspection[]>()
   for(const i of inspections){
    const id=i.grupos_inspecao?.processo_id
-   if(i.status!=='em_andamento'||!id||!valid.has(id))continue
+   if(!['aberta','em_andamento'].includes(i.status)||!id||!valid.has(id))continue
    const list=map.get(id)||[];list.push(i);map.set(id,list)
   }
   return {active:processes.filter(p=>map.has(p.id)),linked:map}
@@ -82,7 +82,7 @@ export default function MobileFotos({processes,inspections,canWrite,onRefresh,on
    ])
    if(request!==sequence.current)return
    if(details.error||!details.data){setContext(null);setError(details.error?.message||'Falha ao carregar fotos.');return}
-   if(details.data.inspecao.status!=='em_andamento'){setContext(null);setError('Esta inspeção não está mais em andamento.');void onRefresh();return}
+   if(!['aberta','em_andamento'].includes(details.data.inspecao.status)){setContext(null);setError('Esta inspeção não está disponível para fotos.');void onRefresh();return}
    setContext({...details.data,photos:(details.data.photos||[]).map(p=>({...p,signed_url:urls.data?.photoUrls?.[p.storage_path]||null}))})
   }catch{if(request===sequence.current)setError('Falha de conexão ao carregar fotos.')}
   finally{if(request===sequence.current)setLoading(false)}
@@ -142,21 +142,21 @@ export default function MobileFotos({processes,inspections,canWrite,onRefresh,on
   <div className="sgq-mobile-body">
    <div className="sgq-mobile-title">
     {(processId||inspectionId)&&<button className="sgq-mobile-back" type="button" disabled={busy} onClick={back} aria-label="Voltar"><ArrowLeft size={21}/></button>}
-    <div><h1>{inspectionId?'Fotos da inspeção':processId?'Inspeções do processo':'Processos em andamento'}</h1></div>
+    <div><h1>{inspectionId?'Fotos da inspeção':processId?'Inspeções do processo':'Processos com inspeções'}</h1></div>
     {!processId&&<button className="sgq-mobile-refresh" type="button" disabled={refreshing} onClick={()=>void refreshList()} aria-label="Atualizar processos"><RefreshCw size={19}/></button>}
    </div>
    {error&&<div role="alert" className="sgq-mobile-notice error">{error}</div>}
    {message&&<div role="status" className="sgq-mobile-notice success"><CheckCircle2 size={18}/>{message}</div>}
    {!processId&&<><p className="sgq-mobile-description">Escolha um processo para registrar fotos e legendas.</p>
     {active.map(p=><button type="button" className="sgq-mobile-process" key={p.id} onClick={()=>selectProcess(p.id)}>
-     <span className="sgq-mobile-process-header"><strong>{fst(p.codigo)}</strong><small>{(linked.get(p.id)||[]).length} em andamento</small></span>
+     <span className="sgq-mobile-process-header"><strong>{fst(p.codigo)}</strong><small>{(linked.get(p.id)||[]).length} inspeção(ões)</small></span>
      <span>{p.cliente||'Cliente não informado'}</span><b><Camera size={17}/> Adicionar fotos</b>
     </button>)}
-    {!active.length&&<div className="sgq-mobile-empty"><Camera size={27}/><strong>Nenhum processo em andamento</strong><span>Atualize após iniciar uma inspeção no computador.</span></div>}
+    {!active.length&&<div className="sgq-mobile-empty"><Camera size={27}/><strong>Nenhuma inspeção disponível</strong><span>Crie uma inspeção para registrar fotos.</span></div>}
    </>}
    {processId&&!inspectionId&&<><p className="sgq-mobile-description">{fst(selected?.codigo||'')} · {selected?.cliente||'Cliente não informado'}</p>
-    {childInspections.map(i=><button type="button" className="sgq-mobile-process" key={i.id} onClick={()=>selectInspection(i.id)}>
-     <strong>{i.grupos_inspecao?.nome||'Inspeção'}</strong><span>{i.numero||'Inspeção em andamento'}</span><b><Camera size={17}/> Fotografar</b>
+    {childInspections.map(i=><button type="button" className={'sgq-mobile-process '+(i.status==='em_andamento'?'sgq-photo-started':'sgq-photo-not-started')} key={i.id} onClick={()=>selectInspection(i.id)}>
+     <strong>{i.grupos_inspecao?.nome||'Inspeção'}</strong><span>{i.numero||'Inspeção'} · {i.status==='em_andamento'?'Iniciada':'Não iniciada'}</span><b><Camera size={17}/> Fotografar</b>
     </button>)}
    </>}
    {inspectionId&&<><p className="sgq-mobile-description">{fst(selected?.codigo||'')} · {selected?.cliente||'Cliente não informado'}</p>
