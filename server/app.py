@@ -413,7 +413,7 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
             headers={
                 "Content-Disposition":f"attachment; filename*=UTF-8''{safe_name}",
                 "X-SGQ-Storage-Path":storage_path,
-                "X-SGQ-File-Name":filename,
+                "X-SGQ-File-Name":safe_name,
             },
         )
 
