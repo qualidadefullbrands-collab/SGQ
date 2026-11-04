@@ -1598,6 +1598,10 @@ export default function App() {
 
   function startEditingInspectionData() {
     if (!detail) return
+    if(detail.status==='concluida'){
+      if(!navigator.onLine){setError('Conecte-se para retificar uma inspeção concluída com registro de auditoria.');return}
+      if(!window.confirm('Editar esta inspeção concluída? As alterações ficarão registradas no histórico.'))return
+    }
     const process=detail.grupos_inspecao?.processos ?? {}
     const rows=(detail.items ?? []).map((link:any)=>{
       const item=link.processo_itens
@@ -2640,18 +2644,34 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
     await loadStock()
   }
 
+  function askCollectionName():string|null {
+    const skus=new Set((detail?.items??[]).map((link:any)=>
+      String(link?.processo_itens?.produtos?.sku||link?.processo_itens?.codigo_cliente||'').trim())
+      .filter(Boolean))
+    if(skus.size<=1)return ''
+    const answer=window.prompt('Nome do conjunto para o laudo Word:')
+    if(answer===null)return null
+    const name=answer.trim()
+    if(!name){setPopupMessage('Informe o nome do conjunto para gerar o laudo.');return null}
+    if(name.length>100){setPopupMessage('O nome do conjunto deve ter até 100 caracteres.');return null}
+    return name
+  }
+
   async function downloadInspectionWord() {
     if(!detail||!selectedInspectionId||wordDownloading)return
     setError('')
     if(!detail.it_versao_id){
       return setError('Esta inspeção não possui IT vinculada. Vincule uma IT para gerar o Word oficial.')
     }
+    const collectionName=askCollectionName()
+    if(collectionName===null)return
     setWordDownloading(true)
     try{
       const session=await supabase.auth.getSession()
       const token=session.data.session?.access_token
       if(!token){setError('Sua sessão expirou. Entre novamente no SGQ.');return}
-      const response=await fetch(`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo`,{
+      const suffix=collectionName?'?nomeConjunto='+encodeURIComponent(collectionName):''
+      const response=await fetch(`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo${suffix}`,{
         method:'POST',headers:{Authorization:`Bearer ${token}`},
       })
       if(!response.ok){
@@ -2747,7 +2767,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <div className="sgq-side-brand"><ShieldCheck size={23}/><div><b>SGQ</b><small>Qualidade · Operações</small></div></div>
         <div className="sgq-side-caption">OPERAÇÃO</div>
         <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={18}/> Painel</button>
-        <button className={tab==='insights'?'selected':''} onClick={()=>setTab('insights')}><BarChart3 size={18}/> Insights</button>
         <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>setTab('inspecoes')}><ClipboardCheck size={18}/> Inspeções</button>
         <button className="" onClick={()=>setTab('fotos-mobile')}><Camera size={18}/> Modo Fotos</button>
         <button className={tab==='nova'?'selected':''} onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
@@ -2799,7 +2818,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       {offlineError && <div className="alert error" role="alert">{offlineError}</div>}
 
       {tab==='insights' && <Suspense fallback={<div className="center-screen">Carregando Insights…</div>}>
-        <InsightsPage onOpenInspection={id=>void openInspection(id)}/>
+        <InsightsPage onBack={()=>setTab('painel')} onOpenInspection={id=>void openInspection(id)}/>
       </Suspense>}
 
       {tab==='auditorias' && (
@@ -2814,7 +2833,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <section className="workspace">
           <div className="page-title">
             <div><span className="eyebrow">SGQ</span><h1>Painel</h1></div>
-            <button className="primary" onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
+            <div className="row-actions">
+              <button className="secondary small" type="button" onClick={()=>setTab('insights')} title="Ver Insights"><BarChart3 size={15}/> Insights</button>
+              <button className="primary" onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
+            </div>
           </div>
           <section className="metrics">
             <button type="button" className={'metric-button '+(dashboardView==='processos'?'selected':'')} onClick={()=>setDashboardView('processos')}><Metric icon={ClipboardCheck} label="Processos" value={processes.length}/></button>
@@ -3073,7 +3095,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
-              {detail.status!=='concluida' && canWrite && <button className="secondary" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados</button>}
+              {canWrite && <button className="secondary" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados</button>}
 
               {detail.status==='concluida' && <button className="secondary" disabled={wordDownloading} onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
               {detail.status==='concluida' && <button className="secondary" type="button" disabled={sharepointBusy} onClick={()=>void sendWordToPowerAutomate()}><FileText size={16}/>{sharepointBusy?'Enviando…':'Enviar ao SharePoint'}</button>}
@@ -3102,7 +3124,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
           <section id="sec-dados" className={'panel section-card internal-note-panel inspection-stage'+(activeStage==='dados'?'':' inspection-stage-hidden')}>
             <div className="section-title"><div><h2>Dados iniciais da inspeção</h2></div>
-              {canWrite && detail.status!=='concluida' && <button className="secondary small" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados e IT</button>}
+              {canWrite && <button className="secondary small" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados e IT</button>}
             </div>
             <div className="inspection-data-summary">
               <div><small>Processo</small><strong>{formatFst(detail.grupos_inspecao?.processos?.codigo)}</strong></div>

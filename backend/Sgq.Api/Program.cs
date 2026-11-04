@@ -1371,16 +1371,17 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
         if(!Guid.TryParse(id,out _))return Results.Json(Error("Inspeção inválida."),statusCode:400);
         var token=Token(request);
         var client=factory.CreateClient("supabase");
-        await CurrentUserId(client,token);
+        var userId=await CurrentUserId(client,token);
         var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
             $"select=grupo_inspecao_id,status,nivel_inspecao&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
         var (ins,found)=FirstRow(insRows);
         if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
-        if(ins!.Value.GetProperty("status").GetString() is "concluida" or "cancelada")
-            return Results.Json(Error("Esta inspeção não pode ser alterada."),statusCode:409);
+        var wasConcluded=ins!.Value.GetProperty("status").GetString()=="concluida";
+        if(ins.Value.GetProperty("status").GetString()=="cancelada")
+            return Results.Json(Error("Esta inspeção está cancelada."),statusCode:409);
         var groupId=ins.Value.GetProperty("grupo_inspecao_id").GetString()!;
         var groupItems=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
-            $"select=processo_item_id&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
+            $"select=processo_item_id,processo_itens(id,quantidade,quantidade_por_caixa,caixas_recebidas,caixas_inspecionadas,distribuicao_caixas)&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
         var allowed=groupItems is {ValueKind:JsonValueKind.Array}
             ? groupItems.Value.EnumerateArray()
                 .Where(x=>x.TryGetProperty("processo_item_id",out var p)&&p.ValueKind==JsonValueKind.String)
@@ -1442,6 +1443,20 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
                     documento_gerado_em=(DateTimeOffset?)null
                 },"return=minimal")
         );
+        if(wasConcluded)
+        {
+            try
+            {
+                await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+                    new {usuario_id=userId,entidade="inspecoes",entidade_id=id,
+                        acao="retificacao_pos_conclusao",dados=new {tipo="quantidades",
+                            antes=groupItems,depois=items,registrado_em=DateTimeOffset.UtcNow}},"return=minimal");
+            }
+            catch(Exception logError)
+            {
+                app.Logger.LogWarning(logError,"Audit log failed after changing completed inspection {InspectionId}",id);
+            }
+        }
         return Results.Ok(new {data=new {ok=true,plano=new {
             lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re,
         }},error=(object?)null});
@@ -1456,13 +1471,19 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
     {
         var token=Token(request);
         var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
         var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
             $"select=grupo_inspecao_id,status,it_versao_id,parametros_amostragem&id=eq.{Uri.EscapeDataString(id)}&limit=1");
         var (ins,found)=FirstRow(insRows);
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var groupId=ins!.Value.GetProperty("grupo_inspecao_id").GetString()!;
-        if(ins.Value.GetProperty("status").GetString() is "concluida" or "cancelada")
-            return Results.Json(Error("Esta inspeção não pode ser editada."),statusCode:409);
+        var wasConcluded=ins.Value.GetProperty("status").GetString()=="concluida";
+        if(ins.Value.GetProperty("status").GetString()=="cancelada")
+            return Results.Json(Error("Esta inspeção está cancelada."),statusCode:409);
+        var previousItems=wasConcluded
+            ? await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+                $"select=unidades_por_conjunto,processo_itens(*)&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}")
+            : null;
 
         var groupRows=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
             $"select=processo_id&id=eq.{Uri.EscapeDataString(groupId)}&limit=1");
@@ -1627,6 +1648,21 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 documento_gerado_em=(DateTimeOffset?)null
             },"return=minimal");
 
+        if(wasConcluded)
+        {
+            try
+            {
+                await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+                    new {usuario_id=userId,entidade="inspecoes",entidade_id=id,
+                        acao="retificacao_pos_conclusao",dados=new {tipo="dados",
+                            antes=new {inspecao=insRows,itens=previousItems},
+                            depois=input,registrado_em=DateTimeOffset.UtcNow}},"return=minimal");
+            }
+            catch(Exception logError)
+            {
+                app.Logger.LogWarning(logError,"Audit log failed after changing completed inspection {InspectionId}",id);
+            }
+        }
         return Results.Ok(new {data=new {ok=true,plano=new {lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re}},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -2576,6 +2612,10 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
         var client=factory.CreateClient("supabase");
         await CurrentUserId(client,token);
 
+        // Name supplied by the operator when the inspection has multiple SKUs.
+        var collectionName=request.Query["nomeConjunto"].ToString().Trim();
+        if(collectionName.Length>100)
+            return Results.Json(Error("O nome do conjunto deve ter até 100 caracteres."),statusCode:400);
         // Generate the official template on demand and send it straight to the browser.
         // Supabase Storage is NOT required; do not re-use stale laudo records.
         HttpResponseMessage? res=null;
@@ -2584,7 +2624,8 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
         for(var attempt=0;attempt<delays.Length;attempt++)
         {
             using var msg=new HttpRequestMessage(HttpMethod.Get,
-                $"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}");
+                $"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}"+
+                (string.IsNullOrWhiteSpace(collectionName)?"":$"?nome_conjunto={Uri.EscapeDataString(collectionName)}"));
             msg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
             res=await client.SendAsync(msg);
             bytes=await res.Content.ReadAsByteArrayAsync();
