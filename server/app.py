@@ -187,7 +187,7 @@ async def self_test():
                     box_tables+=1
                     box_marks+=selected(table)
             sample_shapes=[p for p in word.inline_shapes if
-                p.width==Inches(1.75) and p.height==Inches(1.25)]
+                abs(p.width-Inches(1.95))<100 and abs(p.height-Inches(1.95*750/1050))<100]
             centered_captions=sum(1 for c in cells for p in c.paragraphs
                 if "Legenda de teste" in p.text and p.alignment==WD_ALIGN_PARAGRAPH.CENTER)
             template_tests[path.stem]={
