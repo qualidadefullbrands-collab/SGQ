@@ -62,7 +62,7 @@ def photo_bytes(source):
     return source if isinstance(source,(bytes,bytearray)) else None
 
 def add_photo(cell,data:bytes,caption:str,width=1.75,fixed_frame=False):
-    im=Image.open(BytesIO(data)).convert("RGB")
+    im=ImageOps.exif_transpose(Image.open(BytesIO(data))).convert("RGB")
     if fixed_frame:
         # Fixed canvas prevents photos of different aspect ratios getting distorted,
         # while every report image occupies precisely the same rectangle.
@@ -289,8 +289,10 @@ def mark_cell(cell,fill=HIGHLIGHT_FILL):
 def _numeric_ranges(text):
     text=str(text or "").replace("\u00a0"," ")
     values=[]
-    for m in re.finditer(r"(?<!\d)(\d{1,8})\s*(?:a|até|ate|[-–—])\s*(\d{1,8})(?!\d)",text,re.I):
-        a,b=int(m.group(1)),int(m.group(2))
+    integer=r"(?:\d{1,3}(?:[., ]\d{3})+|\d{1,9})"
+    pattern=rf"(?<!\d)({integer})\s*(?:a|até|ate|[-–—])\s*({integer})(?!\d)"
+    for m in re.finditer(pattern,text,re.I):
+        a,b=int(re.sub(r"[., ]","",m.group(1))),int(re.sub(r"[., ]","",m.group(2)))
         if a<=b: values.append((a,b))
     return values
 
@@ -304,7 +306,14 @@ def _range_matches(celltext,value):
     if value is None: return False
     try: n=int(Decimal(str(value)))
     except (InvalidOperation,ValueError): return False
-    return any(a<=n<=b for a,b in _numeric_ranges(celltext))
+    raw=str(celltext or "")
+    ranges=_numeric_ranges(raw)
+    if ranges:return any(a<=n<=b for a,b in ranges)
+    maximum=re.search(r"\bat[eé]\s+(\d[\d., ]*)",raw,re.I)
+    if maximum and n<=int(re.sub(r"[., ]","",maximum.group(1))):return True
+    minimum=re.search(r"\b(\d[\d., ]*)\s+(?:ou mais|em diante)",raw,re.I)
+    if minimum and n>=int(re.sub(r"[., ]","",minimum.group(1))):return True
+    return False
 
 def emphasize_sampling_tables(doc,inspection):
     """Mark the statistical-lot row/code and selected box-sampling row in official IT tables.
