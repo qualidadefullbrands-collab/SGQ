@@ -2612,6 +2612,10 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
         var client=factory.CreateClient("supabase");
         await CurrentUserId(client,token);
 
+        // Name supplied by the operator when the inspection has multiple SKUs.
+        var collectionName=request.Query["nomeConjunto"].ToString().Trim();
+        if(collectionName.Length>100)
+            return Results.Json(Error("O nome do conjunto deve ter até 100 caracteres."),statusCode:400);
         // Generate the official template on demand and send it straight to the browser.
         // Supabase Storage is NOT required; do not re-use stale laudo records.
         HttpResponseMessage? res=null;
@@ -2620,7 +2624,8 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
         for(var attempt=0;attempt<delays.Length;attempt++)
         {
             using var msg=new HttpRequestMessage(HttpMethod.Get,
-                $"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}");
+                $"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}"+
+                (string.IsNullOrWhiteSpace(collectionName)?"":$"?nome_conjunto={Uri.EscapeDataString(collectionName)}"));
             msg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
             res=await client.SendAsync(msg);
             bytes=await res.Content.ReadAsByteArrayAsync();
