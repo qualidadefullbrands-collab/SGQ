@@ -88,7 +88,7 @@ test('server accepts captionless photos and supports safe later desktop editing'
  assert.match(upload,/if\(string\.IsNullOrWhiteSpace\(photo\.StoragePath\)\)continue/)
  assert.match(upload,/resolution=ignore-duplicates/)
  assert.doesNotMatch(upload,/string\.IsNullOrWhiteSpace\(photo\.Legenda\)\)continue/)
- assert.match(upload,/legenda=string\.IsNullOrWhiteSpace\(photo\.Legenda\)\?null:photo\.Legenda\.Trim\(\)/)
+ assert.match(upload,/legenda=string\.IsNullOrWhiteSpace\(p\.Legenda\)\?null:p\.Legenda\.Trim\(\)/)
  assert.match(api,/app\.MapPut\("\/api\/inspecoes\/\{id\}\/fotos\/\{photoId\}\/legenda"/)
  assert.match(api,/PhotoCaptionRequest/)
  assert.match(api,/photoId/)
