@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Boxes, Camera, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Edit3, RefreshCw, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, X } from 'lucide-react'
+import { Boxes, Camera, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Edit3, RefreshCw, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, BarChart3, CloudOff, CloudUpload, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/supabase'
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
+import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from './lib/offline'
+import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSync'
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
 const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
@@ -9,6 +11,7 @@ const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
 const RECOVERY_REDIRECT_URL = 'https://app-sgq.onrender.com/?auth=recovery'
 const ItEditorDemo=lazy(()=>import('./its/ItEditorDemo'))
 const MobileFotos=lazy(()=>import('./mobile/MobileFotos'))
+const InsightsPage=lazy(()=>import('./insights/InsightsPage'))
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
 type ItVersion = {
@@ -476,7 +479,7 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [tab, setTab] = useState<'painel' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile'>(()=>window.matchMedia('(max-width: 768px)').matches || new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'painel')
+  const [tab, setTab] = useState<'painel' | 'insights' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile'>(()=>window.matchMedia('(max-width: 768px)').matches || new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'painel')
   const [itDemoOpen,setItDemoOpen]=useState(false)
   const [dashboardView,setDashboardView]=useState<'processos'|'inspecoes'|'estoque'|'concluidas'>('inspecoes')
   const [popupMessage,setPopupMessage]=useState('')
@@ -510,6 +513,13 @@ export default function App() {
   const [counts, setCounts] = useState({ processos: 0, inspecoes: 0, amostras: 0, laudos: 0 })
   const [processes, setProcesses] = useState<ProcessRow[]>([])
   const [inspections, setInspections] = useState<InspectionRow[]>([])
+  const [isOnline,setIsOnline]=useState(navigator.onLine)
+  const [offlinePending,setOfflinePending]=useState(0)
+  const [offlineConflicts,setOfflineConflicts]=useState(0)
+  const [offlineDraftReady,setOfflineDraftReady]=useState(false)
+  const [offlineDraftStatus,setOfflineDraftStatus]=useState('')
+  const [offlineError,setOfflineError]=useState('')
+  const editingBaseline=useRef<string|null>(null)
   const [editingProcess, setEditingProcess] = useState<ProcessRow | null>(null)
   const [deletingProcessId,setDeletingProcessId]=useState<string|null>(null)
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null)
@@ -2300,7 +2310,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   if (!profile) return <div className="center-screen">{error || 'Carregando perfil…'}</div>
 
   if(tab==='fotos-mobile')return <Suspense fallback={<div className="center-screen">Carregando Modo Fotos…</div>}>
-    <MobileFotos processes={processes} inspections={inspections} canWrite={!!canWrite}
+    <MobileFotos processes={processes} inspections={inspections} canWrite={!!canWrite} userId={userId||''}
       onRefresh={refreshLists}
       onExit={()=>{setTab('painel');void loadCatalogs();void loadStock();void refreshEquipments()}}/>
   </Suspense>
@@ -2316,6 +2326,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <div className="sgq-side-brand"><ShieldCheck size={23}/><div><b>SGQ</b><small>Qualidade · Operações</small></div></div>
         <div className="sgq-side-caption">OPERAÇÃO</div>
         <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={18}/> Painel</button>
+        <button className={tab==='insights'?'selected':''} onClick={()=>setTab('insights')}><BarChart3 size={18}/> Insights</button>
         <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>setTab('inspecoes')}><ClipboardCheck size={18}/> Inspeções</button>
         <button className="" onClick={()=>setTab('fotos-mobile')}><Camera size={18}/> Modo Fotos</button>
         <button className={tab==='nova'?'selected':''} onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
@@ -2332,13 +2343,18 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <span>SGQ</span>
           <span className="sgq-topbar-separator" aria-hidden="true">/</span>
           <strong>{({
-            painel:'Painel',inspecoes:'Inspeções',nova:'Nova inspeção',
+            painel:'Painel',insights:'Insights',inspecoes:'Inspeções',nova:'Nova inspeção',
             execucao:'Execução da inspeção',estoque:'Estoque',
             auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos',
           } as Record<typeof tab,string>)[tab]}</strong>
         </div>
         <div className="userbox">
           <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
+          <button type="button" className="sgq-offline-indicator" data-pending={offlinePending>0||offlineConflicts>0} title={offlineError||'Sincronização do dispositivo'}
+            onClick={()=>{if(isOnline&&userId)void syncOfflineNow(userId);else setPopupMessage(offlineConflicts?'Existem registros com conflito. Seus dados permanecem salvos neste dispositivo.':'Os registros pendentes estão salvos neste dispositivo.')}}>
+            {isOnline?<CloudUpload size={15}/>:<CloudOff size={15}/>}
+            {offlineConflicts?'Revisar '+offlineConflicts:offlinePending?offlinePending+' pendente(s)':!isOnline?'Salvo offline':'Sincronizado'}
+          </button>
           <button type="button" aria-label="Sair do SGQ" title="Sair" onClick={()=>void supabase.auth.signOut()}><LogOut size={18}/></button>
         </div>
       </header>
@@ -2351,6 +2367,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </div>
       </div>}
       {message && <div className="alert success">{message}</div>}
+
+      {tab==='insights' && <Suspense fallback={<div className="center-screen">Carregando Insights…</div>}>
+        <InsightsPage onOpenInspection={id=>void openInspection(id)}/>
+      </Suspense>}
 
       {tab==='auditorias' && (
         <section className="workspace audit-workspace" aria-label="Inspeções Armazém">
@@ -2441,7 +2461,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   </div>
                   <div className="inspection-sublist">
                     {related.map((i)=>(
-                      <div className="inspection-row" key={i.id}>
+                      <div className="inspection-row sgq-inspection-card" key={i.id}>
                         <div>
                           <strong>{inspectionDisplay(i)}</strong>
                           <span>{statusLabel(i.status)} · {i.grupos_inspecao?.nome} · {i.total_inspecionado}/{i.tamanho_amostra ?? 0}</span>
@@ -3407,6 +3427,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <div className="form-grid">
                   <label>Código<input value={row.sku} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,sku:e.target.value}:x)})}/></label>
                   <label>Descrição<input value={row.nome} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,nome:e.target.value}:x)})}/></label>
+                  <label>Código do cliente<input value={row.codigoCliente||''} onChange={e=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,codigoCliente:e.target.value}:x)})}/></label>
+                  {row.numeroPedidoPv && <label>Quantidade original PV {row.numeroPedidoPv}<input type="number" readOnly value={row.quantidadePv||''}/></label>}
                   <label>Lote<input value={row.lote} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,lote:e.target.value}:x)})}/></label>
                   <label>Quantidade recebida<input type="number" step="0.01" value={row.quantidade} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,quantidade:e.target.value}:x)})}/></label>
                   <label>Caixas recebidas<input type="number" step="1" value={row.caixasRecebidas} onChange={(e)=>{
