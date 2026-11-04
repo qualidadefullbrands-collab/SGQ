@@ -1,0 +1,69 @@
+/* Operational Kanban: restrained base, status colors reserved for orientation. */
+.sgq-operational-shell .sgq-kanban-page{--kanban-ink:#223d51;--kanban-muted:#70869a;min-width:0}
+.sgq-operational-shell .sgq-kanban-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:22px}
+.sgq-operational-shell .sgq-kanban-title{display:flex;align-items:center;gap:11px;min-width:0}
+.sgq-operational-shell .sgq-kanban-title h1{font-size:clamp(25px,2.6vw,34px);letter-spacing:-.04em;line-height:1.16;margin:0;color:#193c55}
+.sgq-operational-shell .sgq-kanban-total{display:grid;place-items:center;min-width:30px;height:27px;padding:0 8px;border:1px solid #dce6ee;border-radius:9px;background:#f1f6fa;color:#476578;font-size:12px;font-weight:800;font-variant-numeric:tabular-nums}
+.sgq-operational-shell .sgq-kanban-tools{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap}
+.sgq-operational-shell .sgq-kanban-search{display:flex;align-items:center;gap:9px;width:min(290px,100%);height:41px;border:1px solid #d3dfe8;border-radius:10px;background:#fff;padding:0 12px;color:#71889a}
+.sgq-operational-shell .sgq-kanban-search:focus-within{outline:2px solid #b2d9ee;border-color:#469cc8}
+.sgq-operational-shell .sgq-kanban-search input{height:100%;min-width:0;flex:1;background:transparent;border:0!important;box-shadow:none!important;outline:0!important;padding:0!important;color:#233f51;font-size:13px}
+.sgq-operational-shell .sgq-kanban-new{min-height:41px;white-space:nowrap}
+.sgq-operational-shell .sgq-kanban-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;align-items:start}
+.sgq-operational-shell .sgq-kanban-lane{--lane:#728699;--lane-tint:#f3f6f9;--lane-border:#d5dfe8;min-width:0;border:1px solid #e1e8ed;border-radius:15px;background:var(--lane-tint);overflow:visible}
+.sgq-operational-shell .sgq-kanban-lane.tone-queued{--lane:#71859a;--lane-tint:#f3f6f9;--lane-border:#dbe3eb}
+.sgq-operational-shell .sgq-kanban-lane.tone-active{--lane:#147eaa;--lane-tint:#eef7fb;--lane-border:#c6e2ef}
+.sgq-operational-shell .sgq-kanban-lane.tone-done{--lane:#21866b;--lane-tint:#f0f8f5;--lane-border:#cce6dc}
+.sgq-operational-shell .sgq-kanban-lane.tone-cancelled{--lane:#a26a70;--lane-tint:#faf4f4;--lane-border:#ead8da}
+.sgq-operational-shell .sgq-kanban-lane.tone-other{--lane:#8a6aa7;--lane-tint:#f6f3fb;--lane-border:#e4d9ec}
+.sgq-operational-shell .sgq-kanban-lane-head{display:flex;align-items:center;gap:9px;min-height:56px;padding:0 14px;border-bottom:1px solid var(--lane-border)}
+.sgq-operational-shell .sgq-kanban-lane-dot{width:9px;height:9px;border-radius:50%;background:var(--lane);box-shadow:0 0 0 4px color-mix(in srgb,var(--lane) 11%,transparent);flex:none}
+.sgq-operational-shell .sgq-kanban-lane-head h2{margin:0;color:#25465a;font-size:13px;line-height:1.3;font-weight:800;flex:1;letter-spacing:-.01em}
+.sgq-operational-shell .sgq-kanban-lane-count{display:grid;place-items:center;min-width:27px;height:25px;border-radius:8px;background:#fff;color:var(--lane);font-size:12px;font-weight:850;font-variant-numeric:tabular-nums;border:1px solid var(--lane-border)}
+.sgq-operational-shell .sgq-kanban-lane-content{display:grid;align-content:start;gap:10px;padding:11px;min-height:100px}
+.sgq-operational-shell .sgq-kanban-card{position:relative;min-width:0;display:grid;gap:7px;background:#fff;border:1px solid #d8e4ed;border-left:3px solid var(--lane);border-radius:10px;padding:12px 12px 10px;box-shadow:0 2px 7px rgba(25,61,80,.045);transition:border-color .14s ease,box-shadow .14s ease}
+.sgq-operational-shell .sgq-kanban-card:hover,.sgq-operational-shell .sgq-kanban-card:focus-within{border-color:var(--lane);box-shadow:0 5px 16px rgba(23,66,92,.1)}
+.sgq-operational-shell .sgq-kanban-card-top{display:flex;align-items:center;justify-content:space-between;gap:7px;min-width:0}
+.sgq-operational-shell .sgq-kanban-fst{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:850;font-size:12px;letter-spacing:.025em;color:var(--lane)}
+.sgq-operational-shell .sgq-kanban-card h3{font-weight:800;color:#233f55;font-size:14px;line-height:1.35;letter-spacing:-.015em;margin:0;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-kanban-group{color:#71879a;font-size:12px;line-height:1.35;margin:0;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.sgq-operational-shell .sgq-kanban-card-bottom{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:29px;margin-top:4px}
+.sgq-operational-shell .sgq-kanban-card-spacer{min-width:0;flex:1}
+.sgq-operational-shell .sgq-kanban-result{display:inline-flex;align-items:center;padding:4px 7px;min-height:24px;font-size:10px;font-weight:850;border-radius:6px;white-space:nowrap}
+.sgq-operational-shell .sgq-kanban-result.is-approved{color:#167055;background:#e7f6ef}
+.sgq-operational-shell .sgq-kanban-result.is-rejected{color:#a53d3b;background:#fdeceb}
+.sgq-operational-shell .sgq-kanban-open{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--lane-border);background:var(--lane-tint);color:var(--lane);padding:7px 9px;border-radius:8px;line-height:1.1;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap}
+.sgq-operational-shell .sgq-kanban-open:hover{filter:brightness(.96)}
+.sgq-operational-shell .sgq-kanban-progress{display:grid;gap:5px;padding-top:3px}
+.sgq-operational-shell .sgq-kanban-progress-label{display:flex;align-items:center;justify-content:space-between;gap:6px;color:#8193a3;font-size:11px}
+.sgq-operational-shell .sgq-kanban-progress-label strong{font-weight:800;color:#405d71;font-variant-numeric:tabular-nums}
+.sgq-operational-shell .sgq-kanban-progress-track{width:100%;height:5px;background:#e8eff4;border-radius:99px;overflow:hidden}
+.sgq-operational-shell .sgq-kanban-progress-track span{display:block;height:100%;background:var(--lane);border-radius:inherit;transition:width .2s ease}
+.sgq-operational-shell .sgq-kanban-empty{display:flex;align-items:center;justify-content:center;min-height:74px;color:#98a8b5;font-size:12px;text-align:center;border:1px dashed var(--lane-border);border-radius:10px}
+.sgq-operational-shell .sgq-kanban-actions{position:relative;margin-right:-4px;flex-shrink:0}
+.sgq-operational-shell .sgq-kanban-actions summary{list-style:none;display:grid;place-items:center;width:28px;height:28px;cursor:pointer;color:#7b8c9b;border:1px solid transparent;border-radius:7px}
+.sgq-operational-shell .sgq-kanban-actions summary::-webkit-details-marker{display:none}
+.sgq-operational-shell .sgq-kanban-actions summary:hover,.sgq-operational-shell .sgq-kanban-actions[open] summary{background:#eef4f7;border-color:#d6e3ec}
+.sgq-operational-shell .sgq-kanban-actions-menu{position:absolute;z-index:25;right:0;top:31px;width:193px;background:#fff;border:1px solid #d5e1e8;box-shadow:0 9px 28px rgba(31,68,88,.16);border-radius:10px;padding:5px}
+.sgq-operational-shell .sgq-kanban-actions-menu button{display:flex;align-items:center;gap:9px;width:100%;padding:9px 8px;border:0;background:transparent;text-align:left;cursor:pointer;border-radius:6px;color:#3a596c;font-size:12px;font-weight:650}
+.sgq-operational-shell .sgq-kanban-actions-menu button:hover{background:#f1f6fa}
+.sgq-operational-shell .sgq-kanban-actions-menu button.danger-item{color:#ab4b50}
+.sgq-operational-shell .sgq-kanban-actions-menu button.danger-item:hover{background:#fff1f1}
+.sgq-operational-shell .sgq-kanban-unassigned{margin-top:19px;padding:13px 14px;border:1px solid #e1e8ee;border-radius:13px;background:#f8fafb}
+.sgq-operational-shell .sgq-kanban-unassigned-head{display:flex;gap:8px;align-items:center;color:#758da0;margin-bottom:10px}
+.sgq-operational-shell .sgq-kanban-unassigned-head h2{margin:0;flex:1;font-size:13px;font-weight:800;color:#405b70}
+.sgq-operational-shell .sgq-kanban-unassigned-head>span{font-size:12px;font-weight:800;background:#edf3f7;border-radius:7px;padding:3px 8px}
+.sgq-operational-shell .sgq-kanban-unassigned-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(245px,1fr));gap:8px}
+.sgq-operational-shell .sgq-kanban-unassigned-card{display:flex;align-items:center;justify-content:space-between;gap:9px;min-width:0;border:1px solid #dce6ec;border-radius:9px;background:#fff;padding:10px}
+.sgq-operational-shell .sgq-kanban-unassigned-card>div:first-child{display:grid;gap:3px;min-width:0}
+.sgq-operational-shell .sgq-kanban-unassigned-card strong{color:#36586e;font-size:12px}
+.sgq-operational-shell .sgq-kanban-unassigned-card span{color:#748b9a;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sgq-operational-shell .sgq-kanban-unassigned-actions{display:flex;flex:none;gap:4px}
+.sgq-operational-shell .sgq-kanban-unassigned-actions button{display:grid;place-items:center;width:31px;height:31px;border:1px solid #dae5ed;border-radius:7px;color:#54768c;background:#f6fafc;cursor:pointer}
+.sgq-operational-shell .sgq-kanban-unassigned-actions button:hover{background:#e8f3f9}
+.sgq-operational-shell .sgq-kanban-unassigned-actions button.danger-item{color:#a55359}
+.sgq-operational-shell .sgq-kanban-no-results{padding:20px;color:#8094a2;text-align:center;font-size:13px}
+@media(max-width:1250px){.sgq-operational-shell .sgq-kanban-board{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:720px){.sgq-operational-shell .sgq-kanban-toolbar{align-items:stretch}.sgq-operational-shell .sgq-kanban-tools{width:100%}.sgq-operational-shell .sgq-kanban-search{flex:1;width:auto}.sgq-operational-shell .sgq-kanban-board{grid-template-columns:minmax(0,1fr)}.sgq-operational-shell .sgq-kanban-lane-content{grid-template-columns:repeat(auto-fill,minmax(245px,1fr))}.sgq-operational-shell .sgq-kanban-lane-head{min-height:51px}}
+@media(max-width:410px){.sgq-operational-shell .sgq-kanban-tools{flex-direction:column;align-items:stretch}.sgq-operational-shell .sgq-kanban-search{width:100%;flex:auto}.sgq-operational-shell .sgq-kanban-new{width:100%;justify-content:center}.sgq-operational-shell .sgq-kanban-lane-content{grid-template-columns:minmax(0,1fr)}}
+@media(prefers-reduced-motion:reduce){.sgq-operational-shell .sgq-kanban-card,.sgq-operational-shell .sgq-kanban-progress-track span{transition:none}}
