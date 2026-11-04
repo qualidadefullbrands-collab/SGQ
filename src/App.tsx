@@ -1566,14 +1566,26 @@ export default function App() {
       quantidadePorCaixa:Number(row.quantidadePorCaixa)||null,caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
       unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,distribuicaoCaixas:boxGroupsFromRow(row),
     }))
-    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/dados`,{
+    const editPayload={
       codigo:String(editingInspectionData.codigo ?? '').trim(),cliente:String(editingInspectionData.cliente ?? '').trim() || null,
       notaFiscal:String(editingInspectionData.notaFiscal ?? '').trim() || null,origem:String(editingInspectionData.origem ?? '').trim() || null,
       transporte:String(editingInspectionData.transporte ?? '').trim() || null,chegadaCd:editingInspectionData.chegadaCd || null,
       dataInspecao:editingInspectionData.dataInspecao || null,inspectionLevel:editingInspectionData.inspectionLevel || 'I',
       observacaoInterna:String(editingInspectionData.observacaoInterna ?? '').trim() || null,itVersionId:editingInspectionData.itVersionId || null,itens,
-    })
-    if (saved.error) return setError(saved.error.message)
+    }
+    if(!navigator.onLine){
+      try{await queueInspectionUpdate(selectedInspectionId,editPayload);setEditingInspectionData(null)}
+      catch(e:any){setError(String(e?.message||''))}
+      return
+    }
+    const saved=await apiPut<any>('/api/inspecoes/'+selectedInspectionId+'/dados',editPayload)
+    if(saved.error){
+      if(connectionFailure(saved.error.message)){
+        try{await queueInspectionUpdate(selectedInspectionId,editPayload);setEditingInspectionData(null)}
+        catch(e:any){setError(String(e?.message||''))}
+      }else setError(saved.error.message)
+      return
+    }
     setEditingInspectionData(null)
     const p=saved.data?.plano
     setMessage(`Dados atualizados. Plano recalculado: ${p?.codigo ?? '—'} · ${p?.amostra ?? 0} un. · Ac/Re ${p?.ac ?? '—'}/${p?.re ?? '—'}.`)
@@ -1680,13 +1692,25 @@ export default function App() {
           caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
           unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,distribuicaoCaixas:boxGroupsFromRow(row)
         }))
-        const saved=await apiPut<any>(`/api/inspecoes/${id}/dados`,{
+        const editPayload={
           codigo:inspection.codigo,cliente:inspection.cliente,notaFiscal:inspection.notaFiscal,
           origem:inspection.origem,transporte:inspection.transporte,chegadaCd:inspection.chegadaCd||null,
           dataInspecao:inspection.dataInspecao||null,inspectionLevel:inspection.inspectionLevel,
           itVersionId:inspection.itVersionId||null,observacaoInterna:inspection.observacaoInterna,itens
-        })
-        if(saved.error){setPopupMessage(saved.error.message);return}
+        }
+        if(!navigator.onLine){
+          try{await queueInspectionUpdate(id,editPayload);resetNewInspection();setTab('painel')}
+          catch(e:any){setPopupMessage(String(e?.message||''))}
+          return
+        }
+        const saved=await apiPut<any>('/api/inspecoes/'+id+'/dados',editPayload)
+        if(saved.error){
+          if(connectionFailure(saved.error.message)){
+            try{await queueInspectionUpdate(id,editPayload);resetNewInspection();setTab('painel')}
+            catch(e:any){setPopupMessage(String(e?.message||''))}
+          }else setPopupMessage(saved.error.message)
+          return
+        }
         resetNewInspection();setTab('painel');setMessage('Inspeção salva.');void refreshLists();return
       }finally{setInspectionBusy(false)}
     }
