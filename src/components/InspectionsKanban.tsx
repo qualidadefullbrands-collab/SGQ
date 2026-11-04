@@ -73,6 +73,8 @@ export default function InspectionsKanban({
   onDeleteProcess,onDeleteInspection,formatFst
 }:Props){
   const [query,setQuery]=useState('')
+  const [shownByLane,setShownByLane]=useState<Record<string,number>>({})
+  const pageSize=24
   const search=normalized(query)
   const processById=useMemo(()=>new Map(processes.map(p=>[p.id,p])),[processes])
   const visible=useMemo(()=>{
@@ -103,7 +105,7 @@ export default function InspectionsKanban({
       <div className="sgq-kanban-tools">
         <label className="sgq-kanban-search">
           <Search size={17} aria-hidden="true"/>
-          <input type="search" value={query} onChange={e=>setQuery(e.target.value)}
+          <input type="search" value={query} onChange={e=>{setQuery(e.target.value);setShownByLane({})}}
             placeholder="Buscar FST ou cliente" aria-label="Buscar inspeções"/>
         </label>
         <button type="button" className="primary sgq-kanban-new" onClick={onCreate}><Plus size={17}/> Nova inspeção</button>
@@ -119,7 +121,7 @@ export default function InspectionsKanban({
           <span className="sgq-kanban-lane-count">{column.items.length}</span>
         </div>
         <div className="sgq-kanban-lane-content">
-          {column.items.map(item=>{
+          {column.items.slice(0,shownByLane[column.status]??pageSize).map(item=>{
             const group=item.grupos_inspecao
             const process=processById.get(group?.processo_id??'')
             const linked=group?.processos
@@ -158,6 +160,11 @@ export default function InspectionsKanban({
               </div>
             </article>
           })}
+          {column.items.length>(shownByLane[column.status]??pageSize)&&
+            <button type="button" className="sgq-kanban-loadmore"
+              onClick={()=>setShownByLane(current=>({...current,[column.status]:(current[column.status]??pageSize)+pageSize}))}>
+              Ver mais
+            </button>}
           {!column.items.length&&<div className="sgq-kanban-empty">Nenhuma inspeção</div>}
         </div>
       </section>)}
