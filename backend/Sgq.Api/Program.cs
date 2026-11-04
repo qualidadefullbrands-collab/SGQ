@@ -2613,6 +2613,7 @@ app.MapPost("/api/inspecoes/{id}/enviar-automate", async (string id,HttpRequest 
         var project=ins.Value.GetProperty("grupos_inspecao").GetProperty("processos");
         string? Field(JsonElement row,string key)=>row.TryGetProperty(key,out var v) && v.ValueKind==JsonValueKind.String?v.GetString():null;
         var fst=Field(project,"codigo")??"SEM-FST";
+        var customer=Field(project,"cliente")??"Cliente";
         var fileName=Uri.UnescapeDataString(Path.GetFileName(path));
         if(string.IsNullOrWhiteSpace(fileName) || !fileName.EndsWith(".docx",StringComparison.OrdinalIgnoreCase))
             return Results.Json(Error("Nome do laudo inválido."),statusCode:422);
