@@ -60,7 +60,7 @@ test('NF search is independently asynchronous and protects manually typed number
  assert.match(fn,/if\(error\|\|lookupId!==fstNfeRequest\.current\)return/)
  assert.match(fn,/data\?\.status!=='matched'/)
  assert.match(fn,/fstCode\(current\.codigo\)!==code \|\| current\.notaFiscal\.trim\(\)/)
- assert.match(app,/void lookupFstNfe\(code,requestId\)/)
+ assert.match(app,/void lookupFstNfe\(code,\+\+fstNfeRequest\.current\)/)
  assert.match(app,/autoNfeRef\.current=null;setInspection\(\{\.\.\.inspection,notaFiscal:e\.target\.value\}\)/)
  assert.match(app,/notaFiscal:clear\?'':current\.notaFiscal/)
 })
