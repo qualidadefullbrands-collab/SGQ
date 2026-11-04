@@ -7,7 +7,7 @@ const OPERATIONS = 'operations'
 export type OfflineOperation = {
   id:string
   userId:string
-  kind:'inspection-create'|'inspection-update'|'audit-answer'|'inspection-checklist'|'inspection-note'
+  kind:'inspection-create'|'inspection-update'|'audit-answer'|'inspection-checklist'|'inspection-note'|'inspection-photo'
   path:string
   body:any
   createdAt:number
