@@ -26,7 +26,7 @@ test('quantity edits are handled without Omie/catalog lookups and parallelism is
 })
 test('editing saves without leaving screen or synchronous detail reload',()=>{
  const save=segment(app,'async function saveEditingInspectionData()','async function suggestApplicableIt')
- assert.match(save,/fastPath\?\/quantidades/) // concatenate the path only for numerical edits
+ assert.match(save,/fastPath\?'\/quantidades'/) // concatenate the path only for numerical edits
  assert.match(save,/setEditSaving\(true\)/)
  assert.match(save,/setDetail\(/)
  assert.match(save,/setMessage\(fastPath/)
