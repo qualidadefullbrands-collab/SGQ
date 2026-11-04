@@ -1871,6 +1871,16 @@ export default function App() {
     })
   }
 
+
+  async function queueInspectionField(kind:'inspection-checklist'|'inspection-note',path:string,body:any,expected:string){
+    if(!userId)throw new Error('Sessão local indisponível.')
+    const id=userId+':'+kind+':'+path
+    const old=(await offlineOperations(userId)).find(x=>x.id===id)
+    await enqueueOfflineOperation({id,userId,kind,path,body,
+      expected:old?.expected??expected,createdAt:old?.createdAt??Date.now()})
+    await refreshOfflineCounts(userId)
+  }
+
   async function saveChecklist(checkId: string, result: string, quantityNc?:number) {
     if (!selectedInspectionId || !detail) return
     const item=detail.checklist?.find((x:any)=>x.id===checkId)
@@ -1893,11 +1903,21 @@ export default function App() {
       const others=(d.checklistResults ?? []).filter((x:any)=>x.checklist_id!==checkId)
       return {...d,checklistResults:[...others,optimistic]}
     })
-    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/checklist/${checkId}`,{
-      resultado:result,
-      quantidadeNc:ncQty,
-    })
+    const checklistPath='/api/inspecoes/'+selectedInspectionId+'/checklist/'+checkId
+    const checklistBody={resultado:result,quantidadeNc:ncQty}
+    const checklistExpected=JSON.stringify(previous?{resultado:previous.resultado,quantidade_nc:Number(previous.quantidade_nc||0)}:null)
+    if(!navigator.onLine){
+      try{await queueInspectionField('inspection-checklist',checklistPath,checklistBody,checklistExpected)}
+      catch(e:any){setError('Falha ao salvar offline: '+String(e?.message||''))}
+      return
+    }
+    const saved=await apiPut<any>(checklistPath,checklistBody)
     if (saved.error) {
+      if(connectionFailure(saved.error.message)){
+        try{await queueInspectionField('inspection-checklist',checklistPath,checklistBody,checklistExpected)}
+        catch(e:any){setError('Falha ao salvar offline: '+String(e?.message||''))}
+        return
+      }
       setDetail((d:any)=>{
         const others=(d.checklistResults ?? []).filter((x:any)=>x.checklist_id!==checkId)
         return {...d,checklistResults:previous?[...others,previous]:others}
@@ -1944,11 +1964,29 @@ export default function App() {
 
   async function saveInternalObservation() {
     if (!selectedInspectionId || !canWrite) return
-    const saved=await apiPut<any>(`/api/inspecoes/${selectedInspectionId}/observacao-interna`,{
-      texto:internalObservation.trim() || null,
-    })
-    if (saved.error) return setError(saved.error.message)
-    setDetail((d:any)=>d?{...d,observacao_interna:internalObservation.trim() || null}:d)
+    const path='/api/inspecoes/'+selectedInspectionId+'/observacao-interna'
+    const body={texto:internalObservation.trim()||null}
+    const expected=JSON.stringify(String(detail?.observacao_interna||''))
+    if(!navigator.onLine){
+      try{
+        await queueInspectionField('inspection-note',path,body,expected)
+        setDetail((d:any)=>d?{...d,observacao_interna:body.texto}:d)
+        setMessage('Observação salva neste dispositivo.')
+      }catch(e:any){setError(String(e?.message||''))}
+      return
+    }
+    const saved=await apiPut<any>(path,body)
+    if(saved.error){
+      if(connectionFailure(saved.error.message)){
+        try{
+          await queueInspectionField('inspection-note',path,body,expected)
+          setDetail((d:any)=>d?{...d,observacao_interna:body.texto}:d)
+          setMessage('Observação salva neste dispositivo.')
+        }catch(e:any){setError(String(e?.message||''))}
+      }else setError(saved.error.message)
+      return
+    }
+    setDetail((d:any)=>d?{...d,observacao_interna:body.texto}:d)
     setMessage('Observação salva.')
   }
 
