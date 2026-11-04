@@ -2905,6 +2905,141 @@ app.MapPost("/api/amostras/criar", async (CreateSampleRequest input,HttpRequest 
     catch(Exception e){return Results.Json(Error("Falha ao criar amostra.",e.Message),statusCode:500);}
 });
 
+
+async Task<bool> InventoryAuthorized(HttpClient client,string token,bool approval=false)
+{
+    var userId=await CurrentUserId(client,token);
+    var profiles=await RestAsync(client,token,HttpMethod.Get,"profiles",
+        $"select=perfil,ativo&id=eq.{Uri.EscapeDataString(userId)}&ativo=is.true&limit=1");
+    var (profile,found)=FirstRow(profiles);
+    var role=found&&profile!.Value.TryGetProperty("perfil",out var r)?r.GetString():"";
+    return approval?role is "administrador" or "gestor":
+        role is "administrador" or "gestor" or "inspetor";
+}
+string? StockText(JsonElement row,string field)=>
+    row.TryGetProperty(field,out var value)&&value.ValueKind==JsonValueKind.String?value.GetString():null;
+decimal StockNumber(JsonElement row,string field)=>
+    row.TryGetProperty(field,out var value)&&value.ValueKind==JsonValueKind.Number?value.GetDecimal():0m;
+
+app.MapGet("/api/estoque/inventarios",async(HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var client=factory.CreateClient("supabase");var token=Token(request);
+        await CurrentUserId(client,token);
+        var items=await RestAsync(client,token,HttpMethod.Get,"inventarios",
+            "select=id,codigo,status,endereco,observacao,criado_em,concluido_em,ajustado_em&order=criado_em.desc&limit=50");
+        return Results.Ok(new {data=new {inventarios=items},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao listar inventários.",e.Message),statusCode:500);}
+});
+app.MapPost("/api/estoque/inventarios",async(CreateInventoryRequest input,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var client=factory.CreateClient("supabase");var token=Token(request);
+        if(!await InventoryAuthorized(client,token))
+            return Results.Json(Error("Sem permissão para iniciar inventários."),statusCode:403);
+        var endereco=string.IsNullOrWhiteSpace(input.Endereco)?null:input.Endereco.Trim();
+        var query="select=id,sku,descricao,endereco,saldo,unidade_controle&status=eq.ativa&saldo=gt.0&limit=4000";
+        if(endereco!=null)query+="&endereco=eq."+Uri.EscapeDataString(endereco);
+        var snapshots=await RestAsync(client,token,HttpMethod.Get,"vw_saldo_amostras",query);
+        if(snapshots is not {ValueKind:JsonValueKind.Array} || snapshots.Value.GetArrayLength()==0)
+            return Results.Json(Error("Não há amostras com saldo para este inventário."),statusCode:400);
+        if(snapshots.Value.GetArrayLength()>=4000)
+            return Results.Json(Error("Inventário acima do limite por sessão; filtre por endereço."),statusCode:400);
+        var userId=await CurrentUserId(client,token);
+        var codigo=$"INV-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+        var newRow=await RestAsync(client,token,HttpMethod.Post,"inventarios","select=id,codigo",
+            new {codigo,status="aberto",endereco,criado_por=userId},"return=representation");
+        var (session,created)=FirstRow(newRow);
+        if(!created)return Results.Json(Error("Não foi possível abrir o inventário."),statusCode:500);
+        var invId=session!.Value.GetProperty("id").GetString()!;
+        var records=snapshots.Value.EnumerateArray().Select(row=>new{
+            inventario_id=invId,amostra_id=row.GetProperty("id").GetString(),
+            sku=StockText(row,"sku"),descricao=StockText(row,"descricao"),
+            endereco=StockText(row,"endereco"),
+            unidade_controle=StockText(row,"unidade_controle")??"unidade",
+            saldo_sistema=StockNumber(row,"saldo")
+        }).ToArray();
+        await RestAsync(client,token,HttpMethod.Post,"inventario_itens","",records,"return=minimal");
+        return Results.Ok(new {data=new {id=invId,codigo,itens=records.Length},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível criar inventário.",e.Message),statusCode:500);}
+});
+app.MapGet("/api/estoque/inventarios/{id}",async(string id,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("Inventário inválido."),statusCode:400);
+        var client=factory.CreateClient("supabase");var token=Token(request);
+        await CurrentUserId(client,token);
+        var list=await RestAsync(client,token,HttpMethod.Get,"inventarios",
+            $"select=*&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inv,found)=FirstRow(list);
+        if(!found)return Results.Json(Error("Inventário não encontrado."),statusCode:404);
+        var items=await RestAsync(client,token,HttpMethod.Get,"inventario_itens",
+            $"select=id,inventario_id,amostra_id,sku,descricao,endereco,unidade_controle,saldo_sistema,quantidade_contada,contado_em&inventario_id=eq.{Uri.EscapeDataString(id)}&order=sku.asc&limit=4000");
+        return Results.Ok(new {data=new {inventario=inv,itens=items},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar inventário.",e.Message),statusCode:500);}
+});
+app.MapPut("/api/estoque/inventarios/{id}/contar",async(string id,CountInventoryRequest input,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _)||!Guid.TryParse(input.AmostraId,out _))
+            return Results.Json(Error("Identificador inválido."),statusCode:400);
+        if(input.Quantidade.HasValue&&input.Quantidade.Value<0)
+            return Results.Json(Error("A contagem não pode ser negativa."),statusCode:400);
+        var client=factory.CreateClient("supabase");var token=Token(request);
+        if(!await InventoryAuthorized(client,token))
+            return Results.Json(Error("Sem permissão para realizar contagem."),statusCode:403);
+        var invRows=await RestAsync(client,token,HttpMethod.Get,"inventarios",
+            $"select=status&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inv,found)=FirstRow(invRows);
+        if(!found||StockText(inv!.Value,"status")!="aberto")
+            return Results.Json(Error("Este inventário não está aberto."),statusCode:409);
+        var updated=await RestAsync(client,token,HttpMethod.Patch,"inventario_itens",
+            $"inventario_id=eq.{Uri.EscapeDataString(id)}&amostra_id=eq.{Uri.EscapeDataString(input.AmostraId)}&select=id",
+            new {quantidade_contada=input.Quantidade,
+                contado_por=input.Quantidade.HasValue?await CurrentUserId(client,token):null,
+                contado_em=input.Quantidade.HasValue?DateTimeOffset.UtcNow:(DateTimeOffset?)null},
+            "return=representation");
+        var (_,saved)=FirstRow(updated);
+        if(!saved)return Results.Json(Error("Item não encontrado no inventário."),statusCode:404);
+        return Results.Ok(new {data=new {ok=true},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao salvar contagem.",e.Message),statusCode:500);}
+});
+app.MapPost("/api/estoque/inventarios/{id}/fechar",async(string id,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("Inventário inválido."),statusCode:400);
+        var client=factory.CreateClient("supabase");var token=Token(request);
+        if(!await InventoryAuthorized(client,token,approval:true))
+            return Results.Json(Error("Somente gestores e administradores podem fechar inventários."),statusCode:403);
+        var rows=await RestAsync(client,token,HttpMethod.Get,"inventario_itens",
+            $"select=saldo_sistema,quantidade_contada&inventario_id=eq.{Uri.EscapeDataString(id)}&limit=4000");
+        if(rows is not {ValueKind:JsonValueKind.Array}||rows.Value.GetArrayLength()==0)
+            return Results.Json(Error("Inventário sem itens."),statusCode:400);
+        if(rows.Value.EnumerateArray().Any(x=>!x.TryGetProperty("quantidade_contada",out var n)||n.ValueKind==JsonValueKind.Null))
+            return Results.Json(Error("Existem itens sem contagem. Informe inclusive o valor zero."),statusCode:409);
+        var divergencias=rows.Value.EnumerateArray().Count(x=>
+            StockNumber(x,"quantidade_contada")!=StockNumber(x,"saldo_sistema"));
+        var changed=await RestAsync(client,token,HttpMethod.Patch,"inventarios",
+            $"id=eq.{Uri.EscapeDataString(id)}&status=eq.aberto&select=id",
+            new {status="fechado",concluido_em=DateTimeOffset.UtcNow},"return=representation");
+        var (_,saved)=FirstRow(changed);
+        if(!saved)return Results.Json(Error("O inventário já foi fechado ou alterado."),statusCode:409);
+        return Results.Ok(new {data=new {ok=true,divergencias},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao fechar inventário.",e.Message),statusCode:500);}
+});
+app.MapPost("/api/estoque/inventarios/{id}/aplicar",async(string id,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("Inventário inválido."),statusCode:400);
+        var client=factory.CreateClient("supabase");var token=Token(request);
+        if(!await InventoryAuthorized(client,token,approval:true))
+            return Results.Json(Error("Somente gestores e administradores podem aprovar ajustes."),statusCode:403);
+        var applied=await RestAsync(client,token,HttpMethod.Post,"rpc/sgq_aplicar_inventario","",
+            new {p_inventario_id=id},"return=representation");
+        return Results.Ok(new {data=applied,error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao aplicar inventário. O saldo pode ter mudado; revise a contagem.",e.Message),statusCode:409);}
+});
+
 app.MapPost("/api/estoque/{sampleId}/movimentar", async (string sampleId,StockMoveRequest input,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -3399,3 +3534,9 @@ public sealed class BoxDistribution
     public decimal Unidades { get; set; }
 }
 public sealed class EditInspectionDataRequest : CreateInspectionRequest { }
+
+public sealed class CreateInventoryRequest { public string? Endereco { get; set; } }
+public sealed class CountInventoryRequest {
+    public string AmostraId { get; set; } = "";
+    public decimal? Quantidade { get; set; }
+}
