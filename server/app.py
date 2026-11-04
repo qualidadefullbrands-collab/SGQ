@@ -161,10 +161,26 @@ async def self_test():
             value_cells=[cell for cell in cells if cell.text in ("FST26169-A","SKU1234")]
             strong_navy=all(any(run.bold and run.font.color.rgb is not None
                 for par in cell.paragraphs for run in par.runs) for cell in value_cells)
+            def selected(t):
+                return sum(1 for row in t.rows for cell in row.cells
+                    if cell._tc.get_or_add_tcPr().find(qn("w:shd")) is not None
+                    and cell._tc.get_or_add_tcPr().find(qn("w:shd")).get(qn("w:fill")) in ("DDEBF7","BED9EF"))
+            sampling_marks=0
+            box_marks=0
+            box_tables=0
+            for table in word.tables:
+                content=" ".join(cell.text.lower() for row in table.rows for cell in row.cells)
+                if "tamanho do lote" in content or "tamanho lote" in content:
+                    sampling_marks+=selected(table)
+                if ("caixas" in content or "cx " in content) and (
+                    "avaliar" in content or "avaliadas" in content or "avaliad" in content):
+                    box_tables+=1
+                    box_marks+=selected(table)
             template_tests[path.stem]={
                 "ok":True,"bytes":len(generated),"fst":("FST26169-A" in rendered_text),
                 "sku":("SKU1234" in rendered_text),"navy_bold":strong_navy,
-                "selected_sampling_cells":markers
+                "selected_sampling_cells":markers,
+                "lot_marks":sampling_marks,"box_marks":box_marks,"box_tables":box_tables
             }
         except Exception as exc:
             template_tests[path.stem]={"ok":False,"error":str(exc)}
