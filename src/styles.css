@@ -2680,3 +2680,8 @@ body:has(.login-shell) {background:#f3f6fa!important;color:#20374a}
 @media(prefers-reduced-motion:reduce){.sgq-operational-shell .sgq-word-spinner{
  animation:none;border-top-color:#147eaa;border-right-color:#147eaa
 }}
+
+
+.sgq-operational-shell .sgq-stock-mode{display:flex;gap:8px;align-items:center;margin:6px 0 17px;padding:4px;width:max-content;border-radius:11px;background:#edf3f7}
+.sgq-operational-shell .sgq-stock-mode button{min-height:37px;padding:7px 17px;border-radius:8px;font-size:13px}
+@media(max-width:480px){.sgq-operational-shell .sgq-stock-mode{width:100%}.sgq-operational-shell .sgq-stock-mode button{flex:1}}
