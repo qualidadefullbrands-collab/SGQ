@@ -372,7 +372,7 @@ def emphasize_sampling_tables(doc,inspection):
             for col in range(1,len(table.columns)):
                 header=table.cell(0,col).text.strip()
                 if _range_matches(header,boxes) or (
-                    re.fullmatch(r"\\d+",header) and _contains_number(header,boxes)):
+                    re.fullmatch(r"\d+",header) and _contains_number(header,boxes)):
                     mark_cell(table.cell(0,col),"BED9EF")
                     mark_cell(table.cell(1,col),"BED9EF")
                     break
@@ -425,11 +425,11 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                     except InvalidOperation: pass
                 result=whole_number(sum(numbers)) if numbers else EMPTY
             lines.append(f"{sku} — {result}")
-        return "\\n".join(lines)
+        return "\n".join(lines)
 
     def sku_descriptions():
         if not multi_sku: return product.get("nome") or ""
-        return "\\n".join(f"{sku} — {(records[0].get('produto') or {}).get('nome') or EMPTY}"
+        return "\n".join(f"{sku} — {(records[0].get('produto') or {}).get('nome') or EMPTY}"
                          for sku,records in grouped.items())
     total_boxes=inspection.get("caixas_recebidas")
     if total_boxes is None: total_boxes=first_item.get("caixas_recebidas")
