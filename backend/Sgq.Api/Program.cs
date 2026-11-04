@@ -1074,6 +1074,18 @@ decimal? OperationalUnitsPerBox(CreateInspectionItem item)
         item.QuantidadePorCaixa is >0m?item.QuantidadePorCaixa:null;
 }
 
+bool InvalidOperationalUnits(IEnumerable<CreateInspectionItem>? rows)
+{
+    return (rows??[]).Any(item =>
+        item.CaixasRecebidas!=decimal.Truncate(item.CaixasRecebidas) ||
+        item.CaixasInspecionadas!=decimal.Truncate(item.CaixasInspecionadas) ||
+        item.Quantidade!=decimal.Truncate(item.Quantidade) ||
+        (item.QuantidadePorCaixa.HasValue && item.QuantidadePorCaixa.Value!=decimal.Truncate(item.QuantidadePorCaixa.Value)) ||
+        item.UnidadesPorConjunto!=decimal.Truncate(item.UnidadesPorConjunto) ||
+        (item.DistribuicaoCaixas?.Any(b => b.Caixas!=decimal.Truncate(b.Caixas) ||
+            b.Unidades!=decimal.Truncate(b.Unidades))??false));
+}
+
 app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRequest request, IHttpClientFactory factory) =>
 {
     try
@@ -1082,6 +1094,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         var client = factory.CreateClient("supabase");
         var userId = await CurrentUserId(client, token);
 
+        if(InvalidOperationalUnits(input.Itens))
+            return Results.Json(Error("Caixas, peças e unidades precisam ser números inteiros. Registre caixas fracionadas separadamente."),statusCode:400);
         var startNow=input.Iniciar;
         // Stable submission token allows a safe retry if the HTTP response is lost.
         var requestId=Guid.TryParse(input.RequestId,out var parsedRequestId)?parsedRequestId.ToString("N"):null;
@@ -1383,6 +1397,8 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
             (x.DistribuicaoCaixas?.Any(g=>g.Caixas<0||g.Unidades<0)??false)))
             return Results.Json(Error("As quantidades e caixas devem ser válidas e não negativas."),statusCode:400);
 
+        if(InvalidOperationalUnits(items))
+            return Results.Json(Error("Caixas e peças devem ser números inteiros; use a coluna de caixas fracionadas."),statusCode:400);
         // Parallelism is bounded to avoid saturating PostgREST on large kits.
         using var gate=new SemaphoreSlim(4);
         await Task.WhenAll(items.Select(async item=>{
@@ -1477,6 +1493,8 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         }
         await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(processId)}",processUpdate,"return=minimal");
 
+        if(InvalidOperationalUnits(input.Itens))
+            return Results.Json(Error("Caixas e peças devem ser números inteiros; use caixas fracionadas."),statusCode:400);
         foreach(var item in input.Itens ?? [])
         {
             if(string.IsNullOrWhiteSpace(item.ProcessoItemId))
