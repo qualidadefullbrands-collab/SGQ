@@ -57,13 +57,22 @@ test('NF search is independently asynchronous and protects manually typed number
  assert.ok(start>0&&end>start)
  const fn=app.slice(start,end)
  assert.match(fn,/body:\{codigo:code,modo:'nfe'\}/)
- assert.match(fn,/if\(error\|\|lookupId!==fstLookupRequest\.current\)return/)
+ assert.match(fn,/if\(error\|\|lookupId!==fstNfeRequest\.current\)return/)
  assert.match(fn,/data\?\.status!=='matched'/)
  assert.match(fn,/fstCode\(current\.codigo\)!==code \|\| current\.notaFiscal\.trim\(\)/)
  assert.match(app,/void lookupFstNfe\(code,requestId\)/)
  assert.match(app,/autoNfeRef\.current=null;setInspection\(\{\.\.\.inspection,notaFiscal:e\.target\.value\}\)/)
  assert.match(app,/notaFiscal:clear\?'':current\.notaFiscal/)
 })
+
+test('NF lookup is independent from selecting a second Omie order',()=>{
+ assert.match(app,/if\(!codigoPedido && Number\.isFinite\(Number\(data\.projectId\)\)/)
+ assert.match(app,/void lookupFstNfe\(code,\+\+fstNfeRequest\.current\)/)
+ assert.match(app,/fstNfeAttempt\.current\.get\(code\)/)
+ assert.match(edge,/const receiptInFlight=new Map<number,Promise<any>>\(\)/)
+ assert.match(edge,/if\(running\)return running/)
+})
+
 test('redundant review message and internal observation placeholder are absent',()=>{
  assert.doesNotMatch(app,/código\(s\) revisados do PV/)
  assert.doesNotMatch(app,/Quantidades atualizadas no formulário; clique em Salvar/)
