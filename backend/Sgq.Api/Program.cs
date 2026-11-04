@@ -1250,7 +1250,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 new {
                     processo_id = processId,
                     produto_id = productId,
-                    codigo_cliente = string.IsNullOrWhiteSpace(item.CodigoCliente)?null:item.CodigoCliente.Trim(),
+                    codigo_cliente = string.IsNullOrWhiteSpace(item.Sku)?null:item.Sku.Trim(),
                     quantidade_pv = item.QuantidadePv,
                     pv_numero = string.IsNullOrWhiteSpace(item.NumeroPedidoPv)?null:item.NumeroPedidoPv.Trim(),
                     pv_fst = string.IsNullOrWhiteSpace(item.FstPv)?null:item.FstPv.Trim(),
@@ -1348,6 +1348,91 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
     }
 });
 
+// Fast, authorized numeric-only save for the all-SKU operational grid.
+// Avoid Omie/catalog lookups and per-item product updates for unchanged SKUs.
+app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDataRequest input,
+    HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("Inspeção inválida."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=grupo_inspecao_id,status,nivel_inspecao&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+        var (ins,found)=FirstRow(insRows);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        if(ins!.Value.GetProperty("status").GetString() is "concluida" or "cancelada")
+            return Results.Json(Error("Esta inspeção não pode ser alterada."),statusCode:409);
+        var groupId=ins.Value.GetProperty("grupo_inspecao_id").GetString()!;
+        var groupItems=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+            $"select=processo_item_id&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
+        var allowed=groupItems is {ValueKind:JsonValueKind.Array}
+            ? groupItems.Value.EnumerateArray()
+                .Where(x=>x.TryGetProperty("processo_item_id",out var p)&&p.ValueKind==JsonValueKind.String)
+                .Select(x=>x.GetProperty("processo_item_id").GetString()!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var items=input.Itens??[];
+        if(items.Count!=allowed.Count || items.Count==0
+            || items.Any(x=>!Guid.TryParse(x.ProcessoItemId,out _) || !allowed.Contains(x.ProcessoItemId!))
+            || items.Select(x=>x.ProcessoItemId).Distinct(StringComparer.OrdinalIgnoreCase).Count()!=items.Count)
+            return Results.Json(Error("A lista de produtos mudou. Atualize a inspeção antes de salvar."),statusCode:409);
+        if(items.Any(x=>x.Quantidade<0 || x.CaixasRecebidas<0 || x.CaixasInspecionadas<0 ||
+            x.UnidadesPorConjunto<=0 || (x.QuantidadePorCaixa??0)<0 ||
+            (x.DistribuicaoCaixas?.Any(g=>g.Caixas<0||g.Unidades<0)??false)))
+            return Results.Json(Error("As quantidades e caixas devem ser válidas e não negativas."),statusCode:400);
+
+        // Parallelism is bounded to avoid saturating PostgREST on large kits.
+        using var gate=new SemaphoreSlim(4);
+        await Task.WhenAll(items.Select(async item=>{
+            await gate.WaitAsync();
+            try{
+                var effectiveQuantity=EffectiveReceived(item);
+                await Task.WhenAll(
+                    RestAsync(client,token,HttpMethod.Patch,"processo_itens",
+                        $"id=eq.{Uri.EscapeDataString(item.ProcessoItemId!)}",
+                        new {
+                            quantidade=effectiveQuantity,quantidade_por_caixa=OperationalUnitsPerBox(item),
+                            caixas_recebidas=item.CaixasRecebidas>0?(decimal?)item.CaixasRecebidas:null,
+                            caixas_inspecionadas=item.CaixasInspecionadas>0?(decimal?)item.CaixasInspecionadas:null,
+                            distribuicao_caixas=NormalizeComponentDistribution(item)
+                        },"return=minimal"),
+                    RestAsync(client,token,HttpMethod.Patch,"grupo_inspecao_itens",
+                        $"grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}&processo_item_id=eq.{Uri.EscapeDataString(item.ProcessoItemId!)}",
+                        new {unidades_por_conjunto=item.UnidadesPorConjunto,quantidade_componente=effectiveQuantity},"return=minimal")
+                );
+            }finally{gate.Release();}
+        }));
+        var lots=items.Select(x=>{
+            var per=x.UnidadesPorConjunto>0?x.UnidadesPorConjunto:1m;
+            return (long)Math.Floor(EffectiveReceived(x)/per);
+        }).Where(x=>x>0).ToArray();
+        var lot=lots.Length>0?lots.Min():1;
+        var level=ins.Value.GetProperty("nivel_inspecao").ValueKind==JsonValueKind.String
+            ? ins.Value.GetProperty("nivel_inspecao").GetString()??"I":"I";
+        var plan=SamplingPlan(lot,level);
+        var totalBoxes=items.Sum(x=>x.CaixasRecebidas);
+        var totalInspect=items.Sum(x=>x.CaixasInspecionadas);
+        await Task.WhenAll(
+            RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",$"id=eq.{Uri.EscapeDataString(groupId)}",
+                new {tamanho_lote_estatistico=lot},"return=minimal"),
+            RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+                new {
+                    tamanho_lote=lot,tamanho_amostra=plan.Sample,limite_aceitacao=plan.Ac,
+                    limite_rejeicao=plan.Re,codigo_amostragem=plan.Code,
+                    caixas_recebidas=totalBoxes>0?(decimal?)totalBoxes:null,
+                    caixas_avaliar=totalInspect>0?(decimal?)totalInspect:null,
+                    documento_gerado_em=(DateTimeOffset?)null
+                },"return=minimal")
+        );
+        return Results.Ok(new {data=new {ok=true,plano=new {
+            lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re,
+        }},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao salvar as quantidades da inspeção.",e.Message),statusCode:500);}
+});
+
 app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequest input, HttpRequest request, IHttpClientFactory factory) =>
 {
     try
@@ -1424,7 +1509,7 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 var createdItem=await RestAsync(client,token,HttpMethod.Post,"processo_itens","select=id",
                     new {
                         processo_id=processId,produto_id=newProductId,
-                        codigo_cliente=string.IsNullOrWhiteSpace(item.CodigoCliente)?null:item.CodigoCliente.Trim(),
+                        codigo_cliente=string.IsNullOrWhiteSpace(item.Sku)?null:item.Sku.Trim(),
                         quantidade_pv=item.QuantidadePv,
                         pv_numero=string.IsNullOrWhiteSpace(item.NumeroPedidoPv)?null:item.NumeroPedidoPv.Trim(),
                         pv_fst=string.IsNullOrWhiteSpace(item.FstPv)?null:item.FstPv.Trim(),
@@ -1470,7 +1555,7 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
 
             var patch=new Dictionary<string,object?> {
                 ["lote"]=string.IsNullOrWhiteSpace(item.Lote)?null:item.Lote.Trim(),
-                ["codigo_cliente"]=string.IsNullOrWhiteSpace(item.CodigoCliente)?null:item.CodigoCliente.Trim(),
+                ["codigo_cliente"]=string.IsNullOrWhiteSpace(item.Sku)?null:item.Sku.Trim(),
                 ["quantidade_pv"]=item.QuantidadePv,
                 ["pv_numero"]=string.IsNullOrWhiteSpace(item.NumeroPedidoPv)?null:item.NumeroPedidoPv.Trim(),
                 ["pv_fst"]=string.IsNullOrWhiteSpace(item.FstPv)?null:item.FstPv.Trim(),
@@ -2373,12 +2458,17 @@ app.MapPut("/api/inspecoes/{id}/fotos/{photoId}/legenda", async (
             return Results.Json(Error("Legenda com mais de 300 caracteres."),statusCode:400);
         var token=Token(request);
         var client=factory.CreateClient("supabase");
-        await CurrentUserId(client,token);
+        var userId=await CurrentUserId(client,token);
+        var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
+        var (profile,authorized)=FirstRow(profileRows);
+        if(!authorized || profile!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor" or "inspetor"))
+            return Results.Json(Error("Sem permissão para editar legendas."),statusCode:403);
         var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
             $"select=id,status,grupos_inspecao(processos(excluido_em))&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
         var (inspection,found)=FirstRow(insRows);
         if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
-        if(inspection!.Value.GetProperty("status").GetString() is not ("aberta" or "em_andamento"))
+        if(inspection!.Value.GetProperty("status").GetString() is "cancelada")
             return Results.Json(Error("Esta inspeção não permite editar fotos."),statusCode:409);
         var group=inspection.Value.GetProperty("grupos_inspecao");
         if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process)

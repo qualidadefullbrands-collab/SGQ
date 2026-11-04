@@ -46,7 +46,7 @@ test('all official Word inspection templates contain a client code field',()=>{
   assert.match(labels,/codigo\s+do\s+cliente/,file+' is missing Código do cliente')
  }
 })
-test('Word generator never confuses Omie SKU and actual client product code',()=>{
- assert.match(generator,/"código do cliente": first_item\.get\("codigo_cliente"\) or ""/)
- assert.doesNotMatch(generator,/"código do cliente": product\.get\("sku"\)/)
+test('Word generator maps Código do cliente to the SKU, as defined by the operation',()=>{
+ assert.match(generator,/"código do cliente": product\.get\("sku"\) or ""/)
+ assert.doesNotMatch(generator,/"código do cliente": first_item\.get\("codigo_cliente"\)/)
 })

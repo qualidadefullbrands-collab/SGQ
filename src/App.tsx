@@ -4,6 +4,7 @@ import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/sup
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from './lib/offline'
 import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSync'
+import SkuQuantityGrid from './components/SkuQuantityGrid'
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
 const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
@@ -102,7 +103,6 @@ type Sample = {
 const emptySku = () => ({
   sku: '',
   nome: '',
-  codigoCliente: '',
   quantidadePv: '',
   numeroPedidoPv: '',
   fstPv: '',
@@ -139,7 +139,7 @@ type OmieSkuImport={codigo:string;numeroPedido:string;itens:OmieOrderItem[]}
 type OmieSkuReviewLine={sku:string;descricao:string;quantidadePedido:number;quantidadeInformada:string}
 type OmieSkuReview={codigo:string;numeroPedido:string;itens:OmieSkuReviewLine[]}
 function skuRowHasData(row:ReturnType<typeof emptySku>){
-  return Boolean(row.sku.trim()||row.nome.trim()||row.codigoCliente.trim()||row.lote.trim()||row.material.trim()||
+  return Boolean(row.sku.trim()||row.nome.trim()||row.lote.trim()||row.material.trim()||
     row.capacidade.trim()||row.quantidade.trim()||row.quantidadePorCaixa.trim()||
     row.caixasRecebidas.trim()||row.caixasInspecionadas.trim()||row.caixasPadrao.trim()||
     row.caixasFracionadas.trim()||row.caixasLaboratorio.trim()||row.unidadesLaboratorio.trim()||
@@ -335,6 +335,27 @@ function setLaboratoryUnits(row:any,value:string) {
   return next
 }
 
+function editMetadataFingerprint(value:any) {
+  if(!value)return ''
+  const fields=['codigo','cliente','notaFiscal','origem','transporte','chegadaCd','dataInspecao',
+    'inspectionLevel','itVersionId','observacaoInterna']
+  const itemFields=['processoItemId','sku','nome','lote','material','capacidade',
+    'quantidadePv','numeroPedidoPv','fstPv']
+  return JSON.stringify({
+    inspection:fields.map(k=>String(value[k]??'')),
+    items:(value.itens??[]).map((item:any)=>itemFields.map(k=>String(item[k]??'')))
+  })
+}
+function patchOperationalSkuRow(row:any,key:string,value:string){
+  if(key==='unidadesPadrao')return updateBoxDistributionField(row,key,value)
+  if(key==='unidadesLaboratorio')return setLaboratoryUnits(row,value)
+  if(key==='caixasRecebidas')return {
+    ...row,caixasRecebidas:value,
+    caixasInspecionadas:value?String(boxesToInspect(Number(value))):''
+  }
+  return {...row,[key]:value}
+}
+
 function applyBoxGroupsToSku(base:any, groups:any[]|null|undefined) {
   const next={...base}
   for (const g of groups ?? []) {
@@ -494,7 +515,10 @@ export default function App() {
   const createRequestId=useRef(crypto.randomUUID())
   const [activeProductIndex,setActiveProductIndex]=useState(0)
   const [expandedSkuIndex,setExpandedSkuIndex]=useState<number|null>(0)
-  const [expandedEditSkuIndex,setExpandedEditSkuIndex]=useState<number|null>(0)
+  const [editSaving,setEditSaving]=useState(false)
+  const [editFeedback,setEditFeedback]=useState('')
+  const editLastSavedFingerprint=useRef<string|null>(null)
+  const editMetadataBaseline=useRef<string|null>(null)
   const [itSuggestBusy,setItSuggestBusy]=useState(false)
   const [itSuggestionNote,setItSuggestionNote]=useState('')
   const lastItSuggested=useRef('')
@@ -1137,20 +1161,26 @@ export default function App() {
     const items=(data.items??[]).map((link:any)=>{
       const x=link.processo_itens
       return applyBoxGroupsToSku({...emptySku(),processoItemId:x.id,sku:x.produtos?.sku??'',
-        nome:x.produtos?.nome??'',codigoCliente:x.codigo_cliente??'',quantidadePv:x.quantidade_pv==null?'':String(x.quantidade_pv),
+        nome:x.produtos?.nome??'',quantidadePv:x.quantidade_pv==null?'':String(x.quantidade_pv),
         numeroPedidoPv:x.pv_numero??'',fstPv:x.pv_fst??'',lote:x.lote??'',material:x.material??'',capacidade:x.capacidade??'',
         quantidade:String(x.quantidade??''),quantidadePorCaixa:String(x.quantidade_por_caixa??''),
         caixasRecebidas:String(x.caixas_recebidas??''),caixasInspecionadas:String(x.caixas_inspecionadas??''),
         unidadesPorConjunto:String(link.unidades_por_conjunto??1)},x.distribuicao_caixas)
     })
-    setEditingInspectionId(data.id);setEditingProcessId(null)
-    setInspection({processoId:data.grupos_inspecao?.processo_id??'',codigo:fstCode(process.codigo),
-      cliente:process.cliente??'',notaFiscal:process.nota_fiscal??'',origem:process.origem??'',
-      transporte:process.transporte??'',chegadaCd:process.chegada_cd??'',
-      dataInspecao:String(data.data_inspecao??'').slice(0,10),
-      itVersionId:data.it_versao_id??'',inspectionLevel:data.nivel_inspecao??'I',
-      observacaoInterna:data.observacao_interna??''})
-    setSkuRows(items.length?items:[emptySku()]);setExpandedSkuIndex(items.length>1?null:0);setActiveProductIndex(0);setTab('nova');setMessage('')
+    const form={
+      codigo:fstCode(process.codigo),cliente:process.cliente??'',notaFiscal:process.nota_fiscal??'',
+      origem:process.origem??'',transporte:process.transporte??'',chegadaCd:process.chegada_cd??'',
+      dataInspecao:String(data.data_inspecao??'').slice(0,10),itVersionId:data.it_versao_id??'',
+      inspectionLevel:data.nivel_inspecao??'I',observacaoInterna:data.observacao_interna??'',
+      itens:items.length?items:[emptySku()]
+    }
+    editMetadataBaseline.current=editMetadataFingerprint(form)
+    setSelectedInspectionId(data.id)
+    setEditingInspectionId(null);setEditingProcessId(null)
+    setEditFeedback('')
+    editLastSavedFingerprint.current=null
+    setEditingInspectionData(form)
+    setMessage('')
   }
   function editProcessFull(p:ProcessRow){
     const candidate=inspections.find(x=>x.grupos_inspecao?.processo_id===p.id&&x.status!=='concluida')
@@ -1573,55 +1603,132 @@ export default function App() {
     const rows=(detail.items ?? []).map((link:any)=>{
       const item=link.processo_itens
       const base={...emptySku(),processoItemId:item.id,sku:item.produtos?.sku ?? '',nome:item.produtos?.nome ?? '',
-        codigoCliente:item.codigo_cliente??'',quantidadePv:item.quantidade_pv==null?'':String(item.quantidade_pv),
+        quantidadePv:item.quantidade_pv==null?'':String(item.quantidade_pv),
         numeroPedidoPv:item.pv_numero??'',fstPv:item.pv_fst??'',lote:item.lote ?? '',material:item.material ?? '',capacidade:item.capacidade ?? '',quantidade:String(item.quantidade ?? ''),quantidadePorCaixa:String(item.quantidade_por_caixa ?? ''),caixasRecebidas:String(item.caixas_recebidas ?? ''),caixasInspecionadas:String(item.caixas_inspecionadas ?? ''),unidadesPorConjunto:String(link.unidades_por_conjunto ?? 1)}
       return applyBoxGroupsToSku(base,item.distribuicao_caixas)
     })
-    setExpandedEditSkuIndex(rows.length>1?null:0)
-    setEditingInspectionData({
+    const form={
       codigo:fstCode(process.codigo),cliente:process.cliente ?? '',notaFiscal:process.nota_fiscal ?? '',origem:process.origem ?? '',transporte:process.transporte ?? '',
       chegadaCd:process.chegada_cd ?? '',dataInspecao:String(detail.data_inspecao ?? '').slice(0,10),inspectionLevel:detail.nivel_inspecao ?? 'I',
       observacaoInterna:detail.observacao_interna ?? '',itVersionId:detail.it_versao_id ?? '',itens:rows,
-    })
+    }
+    editMetadataBaseline.current=editMetadataFingerprint(form)
+    setEditFeedback('')
+    editLastSavedFingerprint.current=null
+    setEditingInspectionData(form)
   }
 
   async function saveEditingInspectionData() {
-    if (!editingInspectionData || !selectedInspectionId) return
-    const itens=(editingInspectionData.itens ?? []).map((row:any)=>({
-      processoItemId:row.processoItemId,sku:String(row.sku ?? '').trim(),nome:String(row.nome ?? '').trim(),
-      codigoCliente:String(row.codigoCliente??'').trim()||null,
-      quantidadePv:row.quantidadePv===''||row.quantidadePv==null?null:Number(row.quantidadePv),
-      numeroPedidoPv:String(row.numeroPedidoPv??'').trim()||null,fstPv:String(row.fstPv??'').trim()||null,
-      lote:String(row.lote ?? '').trim() || null,
-      material:String(row.material ?? '').trim() || null,capacidade:String(row.capacidade ?? '').trim() || null,quantidade:Number(row.quantidade)||0,
-      quantidadePorCaixa:Number(row.quantidadePorCaixa)||null,caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
-      unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,distribuicaoCaixas:boxGroupsFromRow(row),
-    }))
-    const editPayload={
-      codigo:String(editingInspectionData.codigo ?? '').trim(),cliente:String(editingInspectionData.cliente ?? '').trim() || null,
-      notaFiscal:String(editingInspectionData.notaFiscal ?? '').trim() || null,origem:String(editingInspectionData.origem ?? '').trim() || null,
-      transporte:String(editingInspectionData.transporte ?? '').trim() || null,chegadaCd:editingInspectionData.chegadaCd || null,
-      dataInspecao:editingInspectionData.dataInspecao || null,inspectionLevel:editingInspectionData.inspectionLevel || 'I',
-      observacaoInterna:String(editingInspectionData.observacaoInterna ?? '').trim() || null,itVersionId:editingInspectionData.itVersionId || null,itens,
-    }
-    if(!navigator.onLine){
-      try{await queueInspectionUpdate(selectedInspectionId,editPayload);setEditingInspectionData(null)}
-      catch(e:any){setError(String(e?.message||''))}
-      return
-    }
-    const saved=await apiPut<any>('/api/inspecoes/'+selectedInspectionId+'/dados',editPayload)
-    if(saved.error){
-      if(connectionFailure(saved.error.message)){
-        try{await queueInspectionUpdate(selectedInspectionId,editPayload);setEditingInspectionData(null)}
-        catch(e:any){setError(String(e?.message||''))}
-      }else setError(saved.error.message)
-      return
-    }
-    setEditingInspectionData(null)
-    const p=saved.data?.plano
-    setMessage(`Dados atualizados. Plano recalculado: ${p?.codigo ?? '—'} · ${p?.amostra ?? 0} un. · Ac/Re ${p?.ac ?? '—'}/${p?.re ?? '—'}.`)
-    void refreshLists()
-    await openInspection(selectedInspectionId)
+    if(!editingInspectionData||!selectedInspectionId||editSaving)return
+    const id=selectedInspectionId
+    setEditSaving(true);setError('')
+    try{
+      const itens=(editingInspectionData.itens??[]).map((row:any)=>({
+        processoItemId:row.processoItemId,sku:String(row.sku??'').trim(),nome:String(row.nome??'').trim(),
+        quantidadePv:row.quantidadePv===''||row.quantidadePv==null?null:Number(row.quantidadePv),
+        numeroPedidoPv:String(row.numeroPedidoPv??'').trim()||null,fstPv:String(row.fstPv??'').trim()||null,
+        lote:String(row.lote??'').trim()||null,material:String(row.material??'').trim()||null,
+        capacidade:String(row.capacidade??'').trim()||null,quantidade:Number(row.quantidade)||0,
+        quantidadePorCaixa:Number(row.unidadesPadrao||row.quantidadePorCaixa)||null,
+        caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
+        unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,distribuicaoCaixas:boxGroupsFromRow(row)
+      }))
+      if(itens.some((x:any)=>![x.quantidade,x.caixasRecebidas,x.caixasInspecionadas,
+        x.unidadesPorConjunto].every((n:number)=>Number.isFinite(n)&&n>=0)) ||
+        itens.some((x:any)=>x.unidadesPorConjunto<=0)){
+        setError('Confira os valores numéricos antes de salvar.');return
+      }
+      const editPayload={
+        codigo:String(editingInspectionData.codigo??'').trim(),cliente:String(editingInspectionData.cliente??'').trim()||null,
+        notaFiscal:String(editingInspectionData.notaFiscal??'').trim()||null,
+        origem:String(editingInspectionData.origem??'').trim()||null,
+        transporte:String(editingInspectionData.transporte??'').trim()||null,
+        chegadaCd:editingInspectionData.chegadaCd||null,
+        dataInspecao:editingInspectionData.dataInspecao||null,
+        inspectionLevel:editingInspectionData.inspectionLevel||'I',
+        observacaoInterna:String(editingInspectionData.observacaoInterna??'').trim()||null,
+        itVersionId:editingInspectionData.itVersionId||null,itens,
+      }
+      // Only quantities/warehouse distribution changed? Save without touching product,
+      // Omie, catalogue, or the rest of the process's general data.
+      const fastPath=editMetadataBaseline.current===editMetadataFingerprint(editingInspectionData)
+        && itens.length>0&&itens.every((item:any)=>!!item.processoItemId)
+      if(!navigator.onLine){
+        await queueInspectionUpdate(id,editPayload)
+        setMessage('Alterações guardadas no dispositivo. Serão sincronizadas ao voltar a conexão.')
+        editLastSavedFingerprint.current=JSON.stringify(editingInspectionData)
+        setEditFeedback('Salvo no dispositivo · aguardando sincronização')
+        return
+      }
+      const saved=await apiPut<any>(
+        '/api/inspecoes/'+encodeURIComponent(id)+(fastPath?'/quantidades':'/dados'),
+        fastPath?{itens}:editPayload
+      )
+      if(saved.error){
+        if(connectionFailure(saved.error.message)||!navigator.onLine){
+          await queueInspectionUpdate(id,editPayload)
+          setMessage('Alterações guardadas no dispositivo. Sincronização pendente.')
+          editLastSavedFingerprint.current=JSON.stringify(editingInspectionData)
+          setEditFeedback('Salvo no dispositivo · aguardando sincronização')
+        }else setError(saved.error.message)
+        return
+      }
+      const p=saved.data?.plano
+      editMetadataBaseline.current=editMetadataFingerprint(editingInspectionData)
+      // Refresh the visible inspection without loading another page or waiting for
+      // a second detail/bootstrap roundtrip. Keep the edit grid in place.
+      setDetail((current:any)=>{
+        if(!current||current.id!==id)return current
+        const updated=(current.items??[]).map((link:any)=>{
+          const item=itens.find((x:any)=>x.processoItemId===link.processo_itens?.id)
+          if(!item)return link
+          return {...link,
+            unidades_por_conjunto:item.unidadesPorConjunto,
+            quantidade_componente:item.quantidade,
+            processo_itens:{...link.processo_itens,quantidade:item.quantidade,
+              quantidade_por_caixa:item.quantidadePorCaixa,
+              caixas_recebidas:item.caixasRecebidas||null,
+              caixas_inspecionadas:item.caixasInspecionadas||null,
+              distribuicao_caixas:item.distribuicaoCaixas,
+              lote:item.lote,material:item.material,capacidade:item.capacidade,
+              produtos:{...link.processo_itens.produtos,sku:item.sku,nome:item.nome}}
+          }
+        })
+        return {...current,items:updated,
+          tamanho_lote:p?.lote??current.tamanho_lote,
+          tamanho_amostra:p?.amostra??current.tamanho_amostra,
+          codigo_amostragem:p?.codigo??current.codigo_amostragem,
+          limite_aceitacao:p?.ac??current.limite_aceitacao,
+          limite_rejeicao:p?.re??current.limite_rejeicao,
+          documento_gerado_em:null,
+          data_inspecao:editPayload.dataInspecao,
+          observacao_interna:editPayload.observacaoInterna,
+          grupos_inspecao:{...current.grupos_inspecao,processos:{
+            ...current.grupos_inspecao?.processos,
+            codigo:editPayload.codigo,cliente:editPayload.cliente,
+            nota_fiscal:editPayload.notaFiscal,origem:editPayload.origem,
+            transporte:editPayload.transporte,chegada_cd:editPayload.chegadaCd
+          }}
+        }
+      })
+      setInspections(current=>current.map(item=>item.id===id?{
+        ...item,tamanho_lote:p?.lote??item.tamanho_lote,
+        tamanho_amostra:p?.amostra??item.tamanho_amostra,
+        codigo_amostragem:p?.codigo??item.codigo_amostragem
+      }:item))
+      setMessage(fastPath?'Quantidades e caixas salvas.':'Dados da inspeção salvos.')
+      editLastSavedFingerprint.current=JSON.stringify(editingInspectionData)
+      setEditFeedback('Alterações salvas')
+      // Update the offline conflict baseline asynchronously; no forced navigation.
+      void apiGet<any>('/api/inspecoes/'+encodeURIComponent(id)+'/detalhe').then(r=>{
+        if(!r.error&&r.data?.inspecao){
+          editingBaseline.current=offlineInspectionVersion(r.data)
+          void saveOfflineDraft(userId||'','full:detail:'+id,r.data).catch(()=>undefined)
+        }
+      }).catch(()=>undefined)
+      if(!fastPath)void refreshLists()
+    }catch(e:any){setError(String(e?.message||'Não foi possível salvar.'))}
+    finally{setEditSaving(false)}
   }
   async function suggestApplicableIt(force=false){
     const products=skuRows.filter(row=>row.nome.trim()||row.sku.trim()).map(row=>({codigo:row.sku,descricao:row.nome}))
@@ -1657,7 +1764,7 @@ export default function App() {
     const itens=rows.map(row=>{
       const dist=boxDistributionTotals(row)
       return {
-        sku:row.sku.trim(),nome:row.nome.trim(),codigoCliente:row.codigoCliente.trim()||null,
+        sku:row.sku.trim(),nome:row.nome.trim(),
         quantidadePv:row.quantidadePv.trim()===''?null:Number(row.quantidadePv),
         numeroPedidoPv:row.numeroPedidoPv||null,fstPv:row.fstPv||null,
         lote:row.lote.trim()||null,material:row.material.trim()||null,capacidade:row.capacidade.trim()||null,
@@ -1715,7 +1822,6 @@ export default function App() {
         const id=editingInspectionId!
         const itens=skuRows.map(row=>({
           processoItemId:(row as any).processoItemId??null,sku:row.sku.trim(),nome:row.nome.trim(),
-          codigoCliente:row.codigoCliente.trim()||null,
           quantidadePv:row.quantidadePv.trim()===''?null:Number(row.quantidadePv),
           numeroPedidoPv:row.numeroPedidoPv||null,fstPv:row.fstPv||null,
           lote:row.lote.trim()||null,material:row.material.trim()||null,capacidade:row.capacidade.trim()||null,
@@ -1788,7 +1894,6 @@ export default function App() {
       itens.push({
         sku:row.sku.trim(),
         nome:row.nome.trim(),
-        codigoCliente:row.codigoCliente.trim()||null,
         quantidadePv:row.quantidadePv.trim()===''?null:Number(row.quantidadePv),
         numeroPedidoPv:row.numeroPedidoPv||null,fstPv:row.fstPv||null,
         lote:row.lote.trim() || null,
@@ -2797,7 +2902,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <button type="button" className="secondary" onClick={()=>{setExpandedSkuIndex(skuRows.length);setSkuRows([...skuRows,emptySku()])}}><Plus size={16}/> Adicionar código</button>
                 </div>
               </div>
-              <div className="sku-editor">
+              {editingInspectionId && <SkuQuantityGrid rows={skuRows}
+                onChange={(i,key,value)=>setSkuRows(current=>current.map((row,j)=>j===i?patchOperationalSkuRow(row,key,value):row))}/>}
+              {!editingInspectionId && <div className="sku-editor">
                 {skuRows.map((row,i)=>{
                   const boxes=Number(row.caixasRecebidas) || 0
                   const inspect=Number(row.caixasInspecionadas) || 0
@@ -2836,7 +2943,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                           {row.omieStatus==='not_configured' && <small className="field-status warn">{row.omieMessage || 'Integração OMIE não configurada'}</small>}
                           {row.omieStatus==='error' && <small className="field-status bad">{row.omieMessage || 'Falha ao consultar o OMIE'}</small>}
                         </label>
-                        <label>Código do cliente<input value={row.codigoCliente} onChange={e=>setSkuRows(rows=>rows.map((r,j)=>j===i?{...r,codigoCliente:e.target.value}:r))} placeholder="Código informado pelo cliente"/></label>
                         <label>Lote<input value={row.lote} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,lote:e.target.value}:r))}/></label>
                         <label>Material<input value={row.material} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,material:e.target.value}:r))}/></label>
                         <label>Capacidade<input value={row.capacidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,capacidade:e.target.value}:r))}/></label>
@@ -2884,7 +2990,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     </article>
                   )
                 })}
-              </div>
+              </div>}
             </section>
 
             <section className="panel section-card inspection-it-choice">
@@ -2927,7 +3033,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
-              {detail.status!=='concluida' && canWrite && <button className="secondary" type="button" onClick={()=>void editInspectionFull(detail.id)}><Edit3 size={16}/> Editar dados</button>}
+              {detail.status!=='concluida' && canWrite && <button className="secondary" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados</button>}
 
               {detail.status==='concluida' && <button className="secondary" onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
               {detail.status==='concluida' && <button className="secondary" type="button" disabled={sharepointBusy} onClick={()=>void sendWordToPowerAutomate()}><FileText size={16}/>{sharepointBusy?'Enviando…':'Enviar ao SharePoint'}</button>}
@@ -2956,7 +3062,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
           <section id="sec-dados" className={'panel section-card internal-note-panel inspection-stage'+(activeStage==='dados'?'':' inspection-stage-hidden')}>
             <div className="section-title"><div><h2>Dados iniciais da inspeção</h2></div>
-              {canWrite && detail.status!=='concluida' && <button className="secondary small" type="button" onClick={()=>void editInspectionFull(detail.id)}><Edit3 size={16}/> Editar dados e IT</button>}
+              {canWrite && detail.status!=='concluida' && <button className="secondary small" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados e IT</button>}
             </div>
             <div className="inspection-data-summary">
               <div><small>Processo</small><strong>{formatFst(detail.grupos_inspecao?.processos?.codigo)}</strong></div>
@@ -3262,7 +3368,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {(detail.photos ?? []).map((p:any)=>(
                 <article className="photo-card saved" key={p.id}>
                   {p.signed_url ? <img src={p.signed_url} alt={p.legenda || 'Foto da inspeção'}/> : <div className="photo-placeholder"><Camera size={22}/></div>}
-                  {canWrite&&detail.status!=='concluida'&&(!p.legenda||editingPhotoCaptionId===p.id)?(
+                  {canWrite&&detail.status!=='cancelada'&&(!p.legenda||editingPhotoCaptionId===p.id)?(
                     <div className="sgq-saved-photo-caption">
                       <input type="text" maxLength={300} aria-label={'Legenda da foto '+p.id}
                         value={photoCaptionDrafts[p.id]??p.legenda??''}
@@ -3277,7 +3383,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   ):(
                     <div className="sgq-saved-photo-caption">
                       <strong>{p.legenda || 'Sem legenda'}</strong>
-                      {canWrite&&detail.status!=='concluida'&&<button type="button" className="secondary small"
+                      {canWrite&&detail.status!=='cancelada'&&<button type="button" className="secondary small"
                         onClick={()=>{setEditingPhotoCaptionId(p.id);setPhotoCaptionDrafts(previous=>({...previous,[p.id]:p.legenda||''}))}}>Editar</button>}
                     </div>
                   )}
@@ -3673,55 +3779,17 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <label>IT aplicável<select value={editingInspectionData.itVersionId ?? ''} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}><option value="">Selecionar IT</option>{itVersions.map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}</select></label>
                   <label className="span-2">Observação interna<textarea rows={3} value={editingInspectionData.observacaoInterna ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,observacaoInterna:e.target.value})}/></label>
             </div>
-            <div className="edit-items-list">
-              {(editingInspectionData.itens ?? []).map((row:any,i:number)=>{ const d=boxDistributionTotals(row); return <article className="sku-card compact" key={row.processoItemId || i}>
-                <div className="sku-card-head">
-                  <button type="button" className="sgq-sku-toggle"
-                    aria-expanded={expandedEditSkuIndex===i} aria-controls={'sgq-edit-sku-body-'+i}
-                    onClick={()=>setExpandedEditSkuIndex(current=>current===i?null:i)}>
-                    <ChevronDown className={'sgq-sku-chevron '+(expandedEditSkuIndex===i?'open':'')} size={19}/>
-                    <span className="sgq-sku-summary">
-                      <strong>{row.sku||'Novo código'}</strong>
-                      <small>{row.nome||'Em preenchimento'}{row.quantidade?' · '+Number(row.quantidade).toLocaleString('pt-BR')+' un':''}</small>
-                    </span>
-                  </button>
-                </div>
-                <div id={'sgq-edit-sku-body-'+i} className="sgq-sku-collapsible" hidden={expandedEditSkuIndex!==i}>
-                <div className="form-grid">
-                  <label>Código<input value={row.sku} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,sku:e.target.value}:x)})}/></label>
-                  <label>Descrição<input value={row.nome} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,nome:e.target.value}:x)})}/></label>
-                  <label>Código do cliente<input value={row.codigoCliente||''} onChange={e=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,codigoCliente:e.target.value}:x)})}/></label>
-                  {row.numeroPedidoPv && <label>Quantidade original PV {row.numeroPedidoPv}<input type="number" readOnly value={row.quantidadePv||''}/></label>}
-                  <label>Lote<input value={row.lote} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,lote:e.target.value}:x)})}/></label>
-                  <label>Quantidade recebida<input type="number" step="0.01" value={row.quantidade} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,quantidade:e.target.value}:x)})}/></label>
-                  <label>Caixas recebidas<input type="number" step="1" value={row.caixasRecebidas} onChange={(e)=>{
-                    const received=e.target.value
-                    const suggested=received ? String(boxesToInspect(Number(received))) : ''
-                    setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasRecebidas:received,caixasInspecionadas:suggested}:x)})
-                  }}/></label>
-                  <label>Caixas inspecionadas<input type="number" step="1" value={row.caixasInspecionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasInspecionadas:e.target.value}:x)})}/></label>
-                </div>
-                <div className="field-label"><span>Distribuição para armazenagem · {row.sku || 'Componente '+(i+1)}</span></div>
-                <div className="distribution-grid compact">
-                  <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasPadrao} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'caixasPadrao',e.target.value):x)})}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesPadrao||row.quantidadePorCaixa} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'unidadesPadrao',e.target.value):x)})}/></label></div>
-                  <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'caixasFracionadas',e.target.value):x)})}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'unidadesFracionadas',e.target.value):x)})}/></label></div>
-                </div>
-                <div className="lab-withdrawal">
-                  <label>Retirada para laboratório (unidades)
-                    <input type="number" min="0" step="1" value={row.unidadesLaboratorio} onChange={e=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?setLaboratoryUnits(x,e.target.value):x)})}/>
-                  </label>
-                  <small>Não acrescenta caixas à armazenagem.</small>
-                </div>
-                {!!d.groups.length && <small className={'field-status '+((Math.abs(d.totalUnits-Number(row.quantidade))>0.0001)?'bad':'ok')}>
-                  Armazenagem {d.units.toLocaleString('pt-BR')} un ({d.boxes} caixa(s))
-                  {' + '}laboratório {d.labUnits.toLocaleString('pt-BR')} un
-                  {' = '}{d.totalUnits.toLocaleString('pt-BR')} un recebidas
-                </small>}
-                </div>
-              </article>})}
-            </div>
-            <button className="secondary" type="button" onClick={()=>{setExpandedEditSkuIndex((editingInspectionData.itens??[]).length);setEditingInspectionData({...editingInspectionData,itens:[...(editingInspectionData.itens ?? []),{...emptySku(),processoItemId:null}]})}}><Plus size={16}/> Adicionar produto à inspeção</button>
-            <button className="primary wide" type="button" onClick={saveEditingInspectionData}>Salvar</button>
+            <SkuQuantityGrid rows={editingInspectionData.itens??[]}
+              onChange={(i,key,value)=>setEditingInspectionData((current:any)=>current?{
+                ...current,itens:current.itens.map((row:any,j:number)=>j===i?patchOperationalSkuRow(row,key,value):row)
+              }:current)}
+              onAdd={()=>setEditingInspectionData((current:any)=>current?{
+                ...current,itens:[...(current.itens??[]),{...emptySku(),processoItemId:null}]
+              }:current)}/>
+            <button className="primary wide" type="button" disabled={editSaving} onClick={()=>void saveEditingInspectionData()}>{editSaving?'Salvando…':'Salvar alterações'}</button>
+            {editFeedback&&<span className="sgq-inline-save-status" role="status">
+              {editLastSavedFingerprint.current===JSON.stringify(editingInspectionData)?editFeedback:'Alterações pendentes de salvamento'}
+            </span>}
           </article>
         </div>
       )}

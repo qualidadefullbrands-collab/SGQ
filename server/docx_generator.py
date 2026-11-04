@@ -236,8 +236,8 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
     product=first_item.get("produto") or {}
     identification={
         "produto / descrição": product.get("nome") or "",
-        # Code of the customer's product is distinct from our product SKU and Omie customer ID.
-        "código do cliente": first_item.get("codigo_cliente") or "",
+        # In SGQ the customer's product code is the registered SKU.
+        "código do cliente": product.get("sku") or "",
         "cliente": process.get("cliente") or "",
         "processo fst": process.get("codigo") or "",
         "nota fiscal": process.get("nota_fiscal") or "",
