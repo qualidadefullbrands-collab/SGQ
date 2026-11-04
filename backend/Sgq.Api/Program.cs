@@ -610,7 +610,7 @@ app.MapGet("/api/app/insights",async(HttpRequest request,IHttpClientFactory fact
         var client=factory.CreateClient("supabase");
         await CurrentUserId(client,token);
         var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            "select=id,numero,status,resultado,criado_em,grupo_inspecao_id,grupos_inspecao(id,processo_id,processos(id,codigo,cliente,excluido_em))&excluido_em=is.null&order=criado_em.desc&limit=1000");
+            "select=id,numero,status,resultado,criado_em,iniciada_em,concluida_em,total_inspecionado,total_nao_conforme,tamanho_amostra,grupo_inspecao_id,grupos_inspecao(id,processo_id,processos(id,codigo,cliente,excluido_em))&excluido_em=is.null&order=criado_em.desc&limit=1000");
         var linksTask=RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
             "select=grupo_inspecao_id,processo_itens(id,codigo_cliente,quantidade,quantidade_pv,pv_numero,pv_fst,produtos(sku,nome))&limit=10000");
         await Task.WhenAll(inspectionsTask,linksTask);
@@ -2288,7 +2288,7 @@ app.MapGet("/api/mobile/fotos/inspecoes/{id}", async (string id,HttpRequest requ
         if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var record=ins!.Value;
         var status=record.GetProperty("status").GetString();
-        if(status!="em_andamento")return Results.Json(Error("Somente inspeções em andamento podem receber fotos."),statusCode:409);
+        if(status is not ("aberta" or "em_andamento"))return Results.Json(Error("Esta inspeção não pode receber fotos."),statusCode:409);
         var group=record.GetProperty("grupos_inspecao");
         if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process)
            || process.ValueKind!=JsonValueKind.Object ||
@@ -2317,7 +2317,7 @@ app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInsp
         var (ins,found)=FirstRow(inspectionRows);
         if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var record=ins!.Value;
-        if(record.GetProperty("status").GetString()!="em_andamento")return Results.Json(Error("Inspeção não está em andamento."),statusCode:409);
+        if(record.GetProperty("status").GetString() is not ("aberta" or "em_andamento"))return Results.Json(Error("Esta inspeção não pode receber fotos."),statusCode:409);
         var group=record.GetProperty("grupos_inspecao");
         if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process) ||
            process.ValueKind!=JsonValueKind.Object ||
