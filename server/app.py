@@ -363,9 +363,12 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
             "inspector_name":inspector_name,
         }
         docx=generate_inspection(template_bytes,payload)
-        filename=inspection_file_name(process.get("codigo"),inspection.get("numero"))
-        storage_filename=storage_safe_filename(filename,"laudo-inspecao.docx")
-        storage_path=f"{inspection_id}/{storage_filename}"
+        first_product=(items[0].get("produto") or {}) if items else {}
+        filename=inspection_file_name(process.get("codigo"),first_product.get("sku"),first_product.get("nome"))
+        # Versioned key forces an old cached Word to be regenerated with the new
+        # formatting; percent-encoding preserves the exact download filename.
+        storage_filename=urllib.parse.quote(filename,safe="")
+        storage_path=f"{inspection_id}/laudo-v2/{storage_filename}"
         await storage_upload(
             client,token,"laudos",storage_path,docx,
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
