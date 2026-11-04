@@ -2855,6 +2855,75 @@ app.MapGet("/api/amostras/{id}/detalhe", async (string id,HttpRequest request,IH
     catch(Exception e){return Results.Json(Error("Falha ao carregar amostra.",e.Message),statusCode:500);}
 });
 
+// Stock SKU identity is the code validated by Omie, never the free-text description.
+async Task<(bool Found,string? Name,string Error)> OmieStockProduct(
+    HttpClient client,string token,string code)
+{
+    if(string.IsNullOrWhiteSpace(code))return (false,null,"SKU obrigatório.");
+    using var fn=new HttpRequestMessage(HttpMethod.Post,$"{supabaseUrl}/functions/v1/omie-produto");
+    ApplyAuth(fn,token);
+    fn.Content=JsonContent.Create(new {codigo=code.Trim()});
+    try{
+        using var res=await client.SendAsync(fn);
+        if(!res.IsSuccessStatusCode)return (false,null,"Não foi possível validar o SKU no Omie.");
+        using var doc=JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var root=doc.RootElement;
+        var found=root.TryGetProperty("found",out var status)&&status.ValueKind==JsonValueKind.True;
+        var name=root.TryGetProperty("descricao",out var d)&&d.ValueKind==JsonValueKind.String?d.GetString():null;
+        return found&&!string.IsNullOrWhiteSpace(name)
+            ?(true,name!.Trim(),""):(false,null,"SKU não localizado ou sem descrição no Omie.");
+    }catch{return (false,null,"Integração Omie indisponível; cadastro bloqueado até validação.");}
+}
+async Task<string?> StockDuplicateDescription(HttpClient client,string token,string sku,string name)
+{
+    var results=await RestAsync(client,token,HttpMethod.Get,"produtos",
+        $"select=sku,nome&nome=ilike.{Uri.EscapeDataString(name)}&limit=500");
+    if(results is not {ValueKind:JsonValueKind.Array})return null;
+    foreach(var product in results.Value.EnumerateArray()){
+        var other=StockText(product,"sku");
+        var otherName=StockText(product,"nome");
+        if(!string.IsNullOrWhiteSpace(other)&&
+           !string.Equals(other,sku,StringComparison.OrdinalIgnoreCase)&&
+           string.Equals(otherName?.Trim(),name.Trim(),StringComparison.OrdinalIgnoreCase))
+            return other;
+    }
+    return null;
+}
+app.MapGet("/api/estoque/conflitos-sku",async(HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var token=Token(request);var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var rows=await RestAsync(client,token,HttpMethod.Get,"vw_saldo_amostras",
+            "select=sku,descricao&status=eq.ativa&limit=4000");
+        var issues=new List<object>();
+        if(rows is {ValueKind:JsonValueKind.Array}){
+            foreach(var group in rows.Value.EnumerateArray()
+                .Where(x=>!string.IsNullOrWhiteSpace(StockText(x,"sku"))&&
+                          !string.IsNullOrWhiteSpace(StockText(x,"descricao")))
+                .GroupBy(x=>StockText(x,"descricao")!.Trim().ToUpperInvariant())){
+                var codes=group.Select(x=>StockText(x,"sku")!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToArray();
+                if(codes.Length>1)
+                    issues.Add(new{descricao=StockText(group.First(),"descricao"),skus=codes,registros=group.Count()});
+            }
+        }
+        return Results.Ok(new {data=new {conflitos=issues},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao verificar SKUs de estoque.",e.Message),statusCode:500);}
+});
+app.MapPost("/api/estoque/validar-sku",async(ProductLookupRequest input,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var token=Token(request);var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var sku=(input.Codigo??"").Trim();
+        var result=await OmieStockProduct(client,token,sku);
+        if(!result.Found)return Results.Json(Error(result.Error),statusCode:422);
+        var other=await StockDuplicateDescription(client,token,sku,result.Name!);
+        return Results.Ok(new{data=new{sku,descricao=result.Name,found=true,
+            conflito=other==null?null:other},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao validar SKU no Omie.",e.Message),statusCode:502);}
+});
+
 app.MapPost("/api/amostras/criar", async (CreateSampleRequest input,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -3415,6 +3484,7 @@ public sealed class RetentionItemRequest
 }
 public sealed class CreateSampleRequest
 {
+    public string Sku { get; set; } = "";
     public string GroupId { get; set; } = "";
     public string? Descricao { get; set; }
     public string? Lote { get; set; }
