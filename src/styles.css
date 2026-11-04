@@ -2665,3 +2665,18 @@ body:has(.login-shell) {background:#f3f6fa!important;color:#20374a}
   .sgq-operational-shell .photo-gallery .sgq-saved-photo-caption{grid-template-columns:1fr}
   .sgq-operational-shell .photo-gallery .sgq-saved-photo-caption .sgq-caption-save{width:100%}
 }
+
+
+/* Blocking document generation feedback; modal is removed only when download resolves. */
+.sgq-operational-shell .sgq-word-loading{z-index:1300;cursor:progress}
+.sgq-operational-shell .sgq-word-loading-content{display:grid;justify-items:center;gap:13px;text-align:center;max-width:295px}
+.sgq-operational-shell .sgq-word-loading-content h2{margin:0;color:#1e425d;font-size:18px}
+.sgq-operational-shell .sgq-word-loading-content p{margin:0;color:#748798;font-size:12px}
+.sgq-operational-shell .sgq-word-spinner{
+ width:41px;height:41px;border:4px solid #e2eff7;border-top-color:#147eaa;
+ border-radius:50%;animation:sgq-word-spin .85s linear infinite
+}
+@keyframes sgq-word-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.sgq-operational-shell .sgq-word-spinner{
+ animation:none;border-top-color:#147eaa;border-right-color:#147eaa
+}}
