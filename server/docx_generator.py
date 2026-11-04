@@ -274,17 +274,35 @@ def inspection_cell(cell,value,size=8,center=False,whole=False):
             run.font.color.rgb=NAVY
     return cell
 
+def labeled_cell(cell,label,value,size=7.5):
+    # Keep fixed template labels black; style only data supplied by SGQ.
+    p=cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+    clear_paragraph(p)
+    fixed=p.add_run(str(label)+": ");set_font(fixed,size)
+    content=p.add_run(filled(value));set_font(content,size,bold=True);content.font.color.rgb=NAVY
+    for extra in list(cell.paragraphs[1:]):extra._element.getparent().remove(extra._element)
+
+def choice_cell(cell,selected,size=8):
+    """Only the user-selected mark is blue; the official text remains black."""
+    raw=_fill_choice_text(cell.text,selected)
+    p=cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+    clear_paragraph(p)
+    segments=re.split(r"(\( X \))",raw)
+    for segment in segments:
+        if not segment:continue
+        run=p.add_run(segment)
+        set_font(run,size,bold=(segment=="( X )"))
+        if segment=="( X )":run.font.color.rgb=NAVY
+    for extra in list(cell.paragraphs[1:]):extra._element.getparent().remove(extra._element)
+
 def mark_cell(cell,fill=HIGHLIGHT_FILL):
+    # Highlight the chosen sampling row without recoloring preprinted template text.
     tcPr=cell._tc.get_or_add_tcPr()
     shd=tcPr.find(qn("w:shd"))
     if shd is None:
         shd=OxmlElement("w:shd")
         tcPr.append(shd)
     shd.set(qn("w:fill"),fill)
-    for p in cell.paragraphs:
-        for run in p.runs:
-            run.bold=True
-            run.font.color.rgb=NAVY
 
 def _numeric_ranges(text):
     text=str(text or "").replace("\u00a0"," ")
@@ -385,12 +403,14 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
 
     first_item=items[0] if items else {}
     product=first_item.get("produto") or {}
+    all_skus=list(dict.fromkeys(str((item.get("produto") or {}).get("sku") or "").strip()
+        for item in items if str((item.get("produto") or {}).get("sku") or "").strip()))
     total_boxes=inspection.get("caixas_recebidas")
     if total_boxes is None: total_boxes=first_item.get("caixas_recebidas")
     identification={
         "produto / descrição": product.get("nome") or "",
         # In SGQ the customer's product code is the registered SKU.
-        "código do cliente": product.get("sku") or "",
+        "código do cliente": "\n".join(all_skus),
         "cliente": process.get("cliente") or "",
         "processo fst": fst_code(process.get("codigo")),
         "nota fiscal": process.get("nota_fiscal") or "",
@@ -423,7 +443,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                 level=str(inspection.get("nivel_inspecao") or "")
                 for cell in cells:
                     if "Nível" in cell.text or "Especial" in cell.text:
-                        inspection_cell(cell,_fill_choice_text(cell.text,{"I":"Nível I","II":"Nível II","III":"Nível III","S1":"Especial S1","S2":"Especial S2","S3":"Especial S3","S4":"Especial S4"}.get(level,level)),8)
+                        choice_cell(cell,{"I":"Nível I","II":"Nível II","III":"Nível III","S1":"Especial S1","S2":"Especial S2","S3":"Especial S3","S4":"Especial S4"}.get(level,level),8)
             if len(cells)>=2 and _norm(cells[0].text) in ("quantidade amostrada","quantidade avaliada","qtd avaliada","qnt avaliada","quantidade inspecionada"):
                 sampled=inspection.get("total_inspecionado")
                 if sampled is None:
@@ -473,14 +493,14 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             vals=result_key.get((first_item_id,pid),[])
             if len(row.cells)>1:
                 base=row.cells[1].text.split(":")[0].strip()
-                inspection_cell(row.cells[1],f"{base}: {filled(cfg.get('equipamento'))}",7.5)
+                labeled_cell(row.cells[1],base,cfg.get("equipamento"),7.5)
             if len(row.cells)>2:
                 base=row.cells[2].text.split(":")[0].strip()
-                inspection_cell(row.cells[2],f"{base}: {filled(cfg.get('codigo_equipamento'))}",7.5)
+                labeled_cell(row.cells[2],base,cfg.get("codigo_equipamento"),7.5)
             if len(row.cells)>3:
                 base=row.cells[3].text.split(":")[0].strip()
                 spec=cfg.get("especificacao_desvio") or ""
-                inspection_cell(row.cells[3],f"{base}: {filled(spec)}",7.5)
+                labeled_cell(row.cells[3],base,spec,7.5)
             for rr in table.rows[ridx+1:min(ridx+3,len(table.rows))]:
                 for cell in rr.cells:
                     m=re.match(r"\s*(\d+)\.",cell.text)
@@ -490,7 +510,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                     if hit:
                         value=hit.get("valor")
                         unit=hit.get("unidade") or cfg.get("unidade") or param.get("unidade") or ""
-                        inspection_cell(cell,f"{seq}. {filled(value)} {unit}".strip(),7.5)
+                        labeled_cell(cell,str(seq),f"{filled(value)} {unit}".strip(),7.5)
 
     evaluated_dim=[x for x in dim_results if x.get("conforme") is not None]
     dim_choice=""
@@ -500,7 +520,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
         for row in table.rows:
             if row.cells and _norm(row.cells[0].text)=="resultado dimensional":
                 for cell in row.cells[1:]:
-                    inspection_cell(cell,_fill_choice_text(cell.text,dim_choice),8)
+                    choice_cell(cell,dim_choice,8)
 
     final_result=str(inspection.get("resultado") or "").lower()
     final_choice="APROVADO" if final_result=="aprovado" else "REPROVADO" if final_result=="reprovado" else ""
@@ -510,12 +530,12 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             label=_norm(row.cells[0].text)
             if label=="resultado final":
                 for cell in row.cells[1:]:
-                    inspection_cell(cell,_fill_choice_text(cell.text,final_choice),8)
+                    choice_cell(cell,final_choice,8)
             elif label=="inspecionado por" and len(row.cells)>=2:
                 inspection_cell(row.cells[1],inspector,8)
                 if len(row.cells)>=4: inspection_cell(row.cells[3],fmt_date(inspection.get("data_inspecao")),8)
             elif label.startswith("responsável técnico") and len(row.cells)>=2:
-                inspection_cell(row.cells[1],"Vanessa T. Casarin – Responsável Técnica – CRF 22864",8)
+                set_cell(row.cells[1],"Vanessa T. Casarin – Responsável Técnica – CRF 22864",8)
             elif label.startswith("observação / conclusão") and len(row.cells)>=2:
                 inspection_cell(row.cells[1],inspection.get("observacoes"),8)
 
@@ -531,7 +551,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
         for idx,item in enumerate(photos[:len(cells)]):
             data=photo_bytes(item.get("bytes"))
             if data:
-                add_photo(cells[idx],data,item.get("caption") or "",width=1.75,fixed_frame=True)
+                add_photo(cells[idx],data,item.get("caption") or "",width=1.95,fixed_frame=True)
 
     out=BytesIO(); doc.save(out); return out.getvalue()
 
