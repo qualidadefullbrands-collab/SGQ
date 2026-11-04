@@ -2458,12 +2458,17 @@ app.MapPut("/api/inspecoes/{id}/fotos/{photoId}/legenda", async (
             return Results.Json(Error("Legenda com mais de 300 caracteres."),statusCode:400);
         var token=Token(request);
         var client=factory.CreateClient("supabase");
-        await CurrentUserId(client,token);
+        var userId=await CurrentUserId(client,token);
+        var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
+        var (profile,authorized)=FirstRow(profileRows);
+        if(!authorized || profile!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor" or "inspetor"))
+            return Results.Json(Error("Sem permissão para editar legendas."),statusCode:403);
         var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
             $"select=id,status,grupos_inspecao(processos(excluido_em))&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
         var (inspection,found)=FirstRow(insRows);
         if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
-        if(inspection!.Value.GetProperty("status").GetString() is not ("aberta" or "em_andamento"))
+        if(inspection!.Value.GetProperty("status").GetString() is "cancelada")
             return Results.Json(Error("Esta inspeção não permite editar fotos."),statusCode:409);
         var group=inspection.Value.GetProperty("grupos_inspecao");
         if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process)
