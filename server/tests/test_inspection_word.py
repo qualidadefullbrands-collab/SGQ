@@ -104,6 +104,20 @@ class InspectionWordTests(unittest.TestCase):
         self.assertEqual(pics[0].width,pics[1].width)
         self.assertEqual(pics[0].height,pics[1].height)
 
+    def test_multi_sku_client_codes_are_one_per_line(self):
+        payload=sample_payload()
+        payload["items"].extend([
+            {"id":"item-2","produto":{"sku":"SKU5678","nome":"PEÇA B"},"quantidade":28},
+            {"id":"item-3","produto":{"sku":"SKU1234","nome":"MESMA REFERÊNCIA"},"quantidade":10}
+        ])
+        for name in ("IT001.docx","IT008.docx"):
+            with self.subTest(name=name):
+                word=generate_inspection((ROOT/"templates"/name).read_bytes(),payload)
+                document=Document(io.BytesIO(word))
+                values=[c.text for t in document.tables for r in t.rows for c in r.cells]
+                self.assertIn("SKU1234\nSKU5678",values)
+                self.assertNotIn("SKU1234\nSKU5678\nSKU1234",values)
+
     def test_all_official_it_templates_remain_generatable(self):
         paths=list((ROOT/"templates").glob("IT*.docx"))
         self.assertGreaterEqual(len(paths),8)
