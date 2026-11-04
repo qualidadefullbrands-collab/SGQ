@@ -171,10 +171,10 @@ class InspectionWordTests(unittest.TestCase):
                 document=Document(io.BytesIO(word))
                 values=[c.text for t in document.tables for r in t.rows for c in r.cells]
                 self.assertIn("SKU1234\nSKU5678",values)
-                self.assertNotIn("SKU1234\\nSKU5678\\nSKU1234",values)
-                self.assertIn("SKU1234 — 1035\\nSKU5678 — 28",values)
-                self.assertIn("SKU1234 — PÓ COMPACTO\\nSKU5678 — PEÇA B",values)
-                self.assertIn("SKU1234 — 1000\\nSKU5678 — –",values)
+                self.assertNotIn("SKU1234\nSKU5678\nSKU1234",values)
+                self.assertIn("SKU1234 — 1035\nSKU5678 — 28",values)
+                self.assertIn("SKU1234 — PÓ COMPACTO\nSKU5678 — PEÇA B",values)
+                self.assertIn("SKU1234 — 1000\nSKU5678 — –",values)
 
     def test_all_official_it_templates_remain_generatable(self):
         paths=list((ROOT/"templates").glob("IT*.docx"))
