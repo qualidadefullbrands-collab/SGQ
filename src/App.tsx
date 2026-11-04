@@ -533,6 +533,9 @@ export default function App() {
   const [retentionReason, setRetentionReason] = useState('')
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
   const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string;productId:string;isProductId:boolean}>>([])
+  const [photoCaptionDrafts,setPhotoCaptionDrafts]=useState<Record<string,string>>({})
+  const [editingPhotoCaptionId,setEditingPhotoCaptionId]=useState<string|null>(null)
+  const [savingPhotoCaptionId,setSavingPhotoCaptionId]=useState<string|null>(null)
   const [pendingModal, setPendingModal] = useState<string[]>([])
   const [sampleNcDraft, setSampleNcDraft] = useState('0')
   const [itVersions, setItVersions] = useState<ItVersion[]>([])
@@ -1467,6 +1470,32 @@ export default function App() {
     void refreshLists()
   }
 
+  async function savePhotoCaption(photoId:string,currentCaption:string) {
+    if(!selectedInspectionId||!canWrite||savingPhotoCaptionId)return
+    const caption=String(photoCaptionDrafts[photoId]??currentCaption??'').trim()
+    if(caption.length>300){setError('A legenda deve ter no máximo 300 caracteres.');return}
+    setSavingPhotoCaptionId(photoId)
+    setError('')
+    try{
+      const saved=await apiPut<any>(
+        '/api/inspecoes/'+encodeURIComponent(selectedInspectionId)+'/fotos/'+encodeURIComponent(photoId)+'/legenda',
+        {legenda:caption}
+      )
+      if(saved.error){setError(saved.error.message);return}
+      setDetail((current:any)=>current?{...current,photos:(current.photos??[]).map((p:any)=>
+        p.id===photoId?{...p,legenda:caption}:p)}:current)
+      setPhotoCaptionDrafts(previous=>{
+        const copy={...previous}
+        delete copy[photoId]
+        return copy
+      })
+      setEditingPhotoCaptionId(null)
+      setMessage('Legenda salva.')
+    }catch(e:any){
+      setError('Não foi possível salvar a legenda: '+String(e?.message||'erro de conexão'))
+    }finally{setSavingPhotoCaptionId(null)}
+  }
+
   async function refreshInspectionPhotoEvidence() {
     if(!selectedInspectionId) return
     const id=selectedInspectionId
@@ -1849,7 +1878,7 @@ export default function App() {
   }
 
   function selectInspectionStage(stage:typeof activeStage) {
-    if(detail?.status==='aberta'&&stage!=='dados'){void startSavedInspection(stage);return}
+    if(detail?.status==='aberta'&&stage!=='dados'&&stage!=='fotos'){void startSavedInspection(stage);return}
     setActiveStage(stage)
     if(stage==='fotos'&&selectedInspectionId)void loadPhotoLinks(selectedInspectionId)
     const nav=document.getElementById('inspection-stage-nav')
@@ -2921,7 +2950,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </button>
             ))}
           </nav>
-          {detail.status==='aberta' && activeStage!=='dados' && (
+          {detail.status==='aberta' && activeStage!=='dados' && activeStage!=='fotos' && (
             <div className="inspection-not-started-hint">Esta inspeção ainda não foi iniciada. Revise os dados, selecione uma IT e clique em <strong>Iniciar inspeção</strong> antes de registrar verificações.</div>
           )}
 
@@ -3197,7 +3226,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             {!!detail.tests?.length && !detail.testes_finalizados && detail.status!=='concluida' && <div className="actions"><button className="secondary" type="button" onClick={()=>void completeTests()}><CheckCircle2 size={16}/> Concluir testes</button></div>}
           </section>
 
-          <section id="sec-fotos" className={'panel section-card inspection-stage'+(activeStage==='fotos' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
+          <section id="sec-fotos" className={'panel section-card inspection-stage'+(activeStage==='fotos'?'':' inspection-stage-hidden')}>
             <div className="section-title">
               <div><h2>Fotos da inspeção</h2><span className="section-note">Fotografias e identificação visual do produto.</span></div>
               <div className="row-actions"><span className="pill">{detail.photos?.length ?? 0} enviada(s)</span>
@@ -3233,7 +3262,25 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {(detail.photos ?? []).map((p:any)=>(
                 <article className="photo-card saved" key={p.id}>
                   {p.signed_url ? <img src={p.signed_url} alt={p.legenda || 'Foto da inspeção'}/> : <div className="photo-placeholder"><Camera size={22}/></div>}
-                  <strong>{p.legenda || 'Sem legenda'}</strong>
+                  {canWrite&&detail.status!=='concluida'&&(!p.legenda||editingPhotoCaptionId===p.id)?(
+                    <div className="sgq-saved-photo-caption">
+                      <input type="text" maxLength={300} aria-label={'Legenda da foto '+p.id}
+                        value={photoCaptionDrafts[p.id]??p.legenda??''}
+                        onChange={e=>setPhotoCaptionDrafts(previous=>({...previous,[p.id]:e.target.value}))}
+                        placeholder="Adicionar legenda"/>
+                      <button type="button" className="secondary small"
+                        disabled={!!savingPhotoCaptionId}
+                        onClick={()=>void savePhotoCaption(p.id,p.legenda||'')}>
+                        {savingPhotoCaptionId===p.id?'Salvando…':'Salvar'}
+                      </button>
+                    </div>
+                  ):(
+                    <div className="sgq-saved-photo-caption">
+                      <strong>{p.legenda || 'Sem legenda'}</strong>
+                      {canWrite&&detail.status!=='concluida'&&<button type="button" className="secondary small"
+                        onClick={()=>{setEditingPhotoCaptionId(p.id);setPhotoCaptionDrafts(previous=>({...previous,[p.id]:p.legenda||''}))}}>Editar</button>}
+                    </div>
+                  )}
                   {p.nc_id && <span className="nc-photo-tag">Foto de NC</span>}
                 </article>
               ))}
