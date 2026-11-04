@@ -127,9 +127,14 @@ async def self_test():
     bundled=sorted(TEMPLATE_DIR.glob("IT*.docx")) if TEMPLATE_DIR.exists() else []
     template_tests={}
     minimal={
-        "inspection":{"numero":"SELF-TEST","status":"em_andamento","resultado":"pendente","nivel_inspecao":"I","tamanho_amostra":1,"total_inspecionado":0,"total_nao_conforme":0},
-        "process":{"codigo":"FST00000","cliente":"Teste técnico"},
-        "items":[],
+        "inspection":{"numero":"SELF-TEST","status":"concluida","resultado":"aprovado",
+            "nivel_inspecao":"II","tamanho_lote":1025,"tamanho_amostra":32,
+            "total_inspecionado":32,"total_nao_conforme":0,
+            "codigo_amostragem":"J","caixas_recebidas":1,"caixas_avaliar":1},
+        "process":{"codigo":"26169-A","cliente":"Teste técnico"},
+        "items":[{"id":"selftest-item","produto":{"sku":"SKU1234","nome":"PRODUTO TESTE"},
+                  "quantidade":1025.0,"quantidade_por_caixa":1000.0,
+                  "caixas_recebidas":1.0,"capacidade":"8,5 g"}],
         "checklist":[],
         "check_results":[],
         "dim_params":[],
@@ -145,9 +150,22 @@ async def self_test():
             generated=generate_inspection(path.read_bytes(),minimal)
             # Abre novamente o resultado para validar que o pacote DOCX gerado é íntegro.
             from docx import Document
+            from docx.oxml.ns import qn
             from io import BytesIO
-            Document(BytesIO(generated))
-            template_tests[path.stem]={"ok":True,"bytes":len(generated)}
+            word=Document(BytesIO(generated))
+            cells=[cell for table in word.tables for row in table.rows for cell in row.cells]
+            rendered_text=[cell.text for cell in cells]
+            markers=sum(1 for cell in cells
+                if cell._tc.get_or_add_tcPr().find(qn("w:shd")) is not None
+                and cell._tc.get_or_add_tcPr().find(qn("w:shd")).get(qn("w:fill")) in ("DDEBF7","BED9EF"))
+            value_cells=[cell for cell in cells if cell.text in ("FST26169-A","SKU1234")]
+            strong_navy=all(any(run.bold and run.font.color.rgb is not None
+                for par in cell.paragraphs for run in par.runs) for cell in value_cells)
+            template_tests[path.stem]={
+                "ok":True,"bytes":len(generated),"fst":("FST26169-A" in rendered_text),
+                "sku":("SKU1234" in rendered_text),"navy_bold":strong_navy,
+                "selected_sampling_cells":markers
+            }
         except Exception as exc:
             template_tests[path.stem]={"ok":False,"error":str(exc)}
     safe_example=storage_safe_filename("498206 - INS-2026-7AF23981 - Laudo de Inspeção.docx","laudo-inspecao.docx")
@@ -357,9 +375,10 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
             "inspector_name":inspector_name,
         }
         docx=generate_inspection(template_bytes,payload)
-        filename=inspection_file_name(process.get("codigo"),inspection.get("numero"))
-        storage_filename=storage_safe_filename(filename,"laudo-inspecao.docx")
-        storage_path=f"{inspection_id}/{storage_filename}"
+        first_product=(items[0].get("produto") or {}) if items else {}
+        filename=inspection_file_name(process.get("codigo"),first_product.get("sku"),first_product.get("nome"))
+        storage_filename=urllib.parse.quote(filename,safe="")
+        storage_path=f"{inspection_id}/laudo-v2/{storage_filename}"
         await storage_upload(
             client,token,"laudos",storage_path,docx,
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -404,7 +423,7 @@ async def generate_inspection_document(inspection_id:str,authorization:str|None=
             headers={
                 "Content-Disposition":f"attachment; filename*=UTF-8''{safe_name}",
                 "X-SGQ-Storage-Path":storage_path,
-                "X-SGQ-File-Name":filename,
+                "X-SGQ-File-Name":safe_name,
             },
         )
 
