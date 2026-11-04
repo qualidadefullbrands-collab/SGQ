@@ -131,8 +131,7 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
  function selectProcess(id:string){
   if(!clearDraft())return
   setProcessId(id);setInspectionId(null);setContext(null);setError('');setMessage('')
-  const list=linked.get(id)||[]
-  if(list.length===1){setInspectionId(list[0].id);void load(list[0].id)}
+  // Always show the inspection cards so the started/unstarted color is visible.
  }
  function selectInspection(id:string){
   if(!clearDraft())return
