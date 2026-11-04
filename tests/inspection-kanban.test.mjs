@@ -10,11 +10,13 @@ test('inspection screen uses actual status Kanban lanes, not the old process acc
  const section=app.split("{tab==='inspecoes' &&")[1]?.split("{tab==='nova' &&")[0]??''
  assert.match(section,/<InspectionsKanban/)
  assert.doesNotMatch(section,/className="process-list"|className="process-card"/)
- for(const [status,label] of [['aberta','Não iniciadas'],['em_andamento','Em andamento'],['concluida','Concluídas'],['cancelada','Canceladas']]){
+ for(const [status,label] of [['aberta','Não iniciadas'],['em_andamento','Em andamento'],['concluida','Concluídas']]){
   assert.ok(board.includes("status:'"+status+"'"))
   assert.ok(board.includes("label:'"+label+"'"))
  }
  assert.match(board,/others=visible\.filter/)
+ assert.match(board,/i\.status!=='cancelada'/)
+ assert.doesNotMatch(board,/label:'Canceladas'/)
  assert.match(board,/column\.items\.slice\(/)
  assert.match(board,/shownByLane/)
  assert.match(board,/Ver mais/)
@@ -43,13 +45,19 @@ test('search covers FST client and invoice, and no processes are hidden without 
  assert.match(board,/Nenhum resultado para/)
 })
 test('Kanban has purposeful tone-based color system and usable responsive layout',()=>{
- for(const tone of ['queued','active','done','cancelled'])assert.match(css,new RegExp('tone-'+tone))
- assert.match(css,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/)
+ for(const tone of ['queued','active','done'])assert.match(css,new RegExp('tone-'+tone))
+ assert.match(css,/grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/)
  assert.match(css,/max-width:1250px/)
  assert.match(css,/max-width:720px/)
  assert.match(css,/max-width:410px/)
  assert.match(css,/prefers-reduced-motion/)
  assert.match(board,/role="progressbar"/)
  assert.match(board,/aria-label=\{'Ações da inspeção '/)
- assert.doesNotMatch(board,/draggable|onDragStart|setStatus/)
+ assert.match(board,/draggable=\{canMoveCard\(item\)\}/)
+ assert.match(board,/onDragStart=/)
+ assert.match(board,/onDragOver=/)
+ assert.match(board,/onDrop=/)
+ assert.match(board,/onMove\?\.\(id,target\)/)
+ assert.match(board,/aria-label=\{\(active\?/)
+ assert.doesNotMatch(board,/setStatus\(/)
 })
