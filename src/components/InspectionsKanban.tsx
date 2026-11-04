@@ -26,6 +26,7 @@ type Props={
   inspections:Inspection[]
   processes:Process[]
   canDelete:boolean
+  deletingProcessId:string|null
   onOpen:(id:string)=>void
   onCreate:()=>void
   onReuseProcess:(id:string)=>void
@@ -47,10 +48,11 @@ function normalized(value:unknown){
 function formatQuantity(value:number){
   return Math.max(0,Math.floor(Number(value)||0)).toLocaleString('pt-BR')
 }
-function InspectionMenu({inspection,process,canDelete,onReuseProcess,onEditProcess,onDeleteProcess,onDeleteInspection}:{
+function InspectionMenu({inspection,process,canDelete,deletingProcessId,onReuseProcess,onEditProcess,onDeleteProcess,onDeleteInspection}:{
   inspection:Inspection
   process:Process|undefined
   canDelete:boolean
+  deletingProcessId:string|null
   onReuseProcess:(id:string)=>void
   onEditProcess:(id:string)=>void
   onDeleteProcess:(id:string)=>void
@@ -63,13 +65,13 @@ function InspectionMenu({inspection,process,canDelete,onReuseProcess,onEditProce
       {process&&<button type="button" onClick={()=>onReuseProcess(process.id)}><Copy size={15}/> Nova neste processo</button>}
       {process&&<button type="button" onClick={()=>onEditProcess(process.id)}><Edit3 size={15}/> Editar processo</button>}
       {canDelete&&<button type="button" className="danger-item" onClick={()=>onDeleteInspection(inspection.id)}><Trash2 size={15}/> Excluir inspeção</button>}
-      {canDelete&&process&&<button type="button" className="danger-item" onClick={()=>onDeleteProcess(process.id)}><Trash2 size={15}/> Excluir processo</button>}
+      {canDelete&&process&&<button type="button" className="danger-item" disabled={deletingProcessId!==null} onClick={()=>onDeleteProcess(process.id)}><Trash2 size={15}/> {deletingProcessId===process.id?'Excluindo…':'Excluir processo'}</button>}
     </div>
   </details>
 }
 
 export default function InspectionsKanban({
-  inspections,processes,canDelete,onOpen,onCreate,onReuseProcess,onEditProcess,
+  inspections,processes,canDelete,deletingProcessId,onOpen,onCreate,onReuseProcess,onEditProcess,
   onDeleteProcess,onDeleteInspection,formatFst
 }:Props){
   const [query,setQuery]=useState('')
@@ -136,7 +138,7 @@ export default function InspectionsKanban({
             return <article className="sgq-kanban-card" key={item.id}>
               <div className="sgq-kanban-card-top">
                 <span className="sgq-kanban-fst">{fst}</span>
-                <InspectionMenu inspection={item} process={process} canDelete={canDelete}
+                <InspectionMenu inspection={item} process={process} canDelete={canDelete} deletingProcessId={deletingProcessId}
                   onReuseProcess={onReuseProcess} onEditProcess={onEditProcess}
                   onDeleteProcess={onDeleteProcess} onDeleteInspection={onDeleteInspection}/>
               </div>
@@ -177,7 +179,7 @@ export default function InspectionsKanban({
           <div className="sgq-kanban-unassigned-actions">
             <button type="button" onClick={()=>onReuseProcess(process.id)} title="Nova inspeção neste processo" aria-label={'Nova inspeção em '+formatFst(process.codigo)}><Plus size={16}/></button>
             <button type="button" onClick={()=>onEditProcess(process.id)} title="Editar processo" aria-label={'Editar '+formatFst(process.codigo)}><Edit3 size={16}/></button>
-            {canDelete&&<button type="button" onClick={()=>onDeleteProcess(process.id)} className="danger-item" title="Excluir processo" aria-label={'Excluir '+formatFst(process.codigo)}><Trash2 size={15}/></button>}
+            {canDelete&&<button type="button" onClick={()=>onDeleteProcess(process.id)} className="danger-item" disabled={deletingProcessId!==null} title="Excluir processo" aria-label={'Excluir '+formatFst(process.codigo)}><Trash2 size={15}/></button>}
           </div>
         </article>)}
       </div>
