@@ -2764,9 +2764,17 @@ app.MapPost("/api/inspecoes/{id}/retencao", async (string id,RetentionRequest in
             if(already) continue;
 
             var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
-                $"select=nome,foto_principal_path&id=eq.{Uri.EscapeDataString(productId)}&limit=1");
+                $"select=sku,nome,foto_principal_path&id=eq.{Uri.EscapeDataString(productId)}&limit=1");
             var (product,pf)=FirstRow(productRows);
-            var productName=pf && product!.Value.TryGetProperty("nome",out var pn)&&pn.ValueKind==JsonValueKind.String?pn.GetString():null;
+            var productSku=pf?StockText(product!.Value,"sku"):null;
+            if(string.IsNullOrWhiteSpace(productSku))
+                return Results.Json(Error("SKU ausente no estoque. Vincule o produto Omie antes de reter."),statusCode:409);
+            var omie=await OmieStockProduct(client,token,productSku);
+            if(!omie.Found)return Results.Json(Error(omie.Error),statusCode:422);
+            var conflict=await StockDuplicateDescription(client,token,productSku,omie.Name!);
+            if(conflict!=null)return Results.Json(Error(
+                $"Descrição duplicada nos SKUs {productSku} e {conflict}. Retenção bloqueada até revisão."),statusCode:409);
+            var productName=omie.Name;
             var principalPhoto=pf && product!.Value.TryGetProperty("foto_principal_path",out var pp)&&pp.ValueKind==JsonValueKind.String?pp.GetString():null;
             var retentionPhoto=string.IsNullOrWhiteSpace(item.FotoCadastroPath)?principalPhoto:item.FotoCadastroPath;
             var lote=processItem.Value.TryGetProperty("lote",out var lt)&&lt.ValueKind==JsonValueKind.String?lt.GetString():null;
@@ -2938,16 +2946,33 @@ app.MapPost("/api/amostras/criar", async (CreateSampleRequest input,HttpRequest 
             $"select=id,nome,processo_id&id=eq.{Uri.EscapeDataString(input.GroupId)}&limit=1");
         var (group,found)=FirstRow(groupRows);
         if(!found) return Results.Json(Error("Grupo de inspeção não encontrado."),statusCode:404);
+        var sku=(input.Sku??"").Trim();
+        var omie=await OmieStockProduct(client,token,sku);
+        if(!omie.Found)return Results.Json(Error(omie.Error),statusCode:422);
+        var conflict=await StockDuplicateDescription(client,token,sku,omie.Name!);
+        if(conflict!=null)return Results.Json(Error(
+            $"A descrição do Omie também está vinculada ao SKU {conflict}. Resolva o conflito antes de cadastrar."),statusCode:409);
+        var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
+            $"select=id&sku=ilike.{Uri.EscapeDataString(sku)}&limit=1");
+        var (product,pf)=FirstRow(productRows);
+        string productId;
+        if(pf)productId=product!.Value.GetProperty("id").GetString()!;
+        else{
+            var createdProduct=await RestAsync(client,token,HttpMethod.Post,"produtos","select=id",
+                new {sku,nome=omie.Name},"return=representation");
+            var (cp,cf)=FirstRow(createdProduct);
+            if(!cf)return Results.Json(Error("Não foi possível vincular o produto Omie."),statusCode:500);
+            productId=cp!.Value.GetProperty("id").GetString()!;
+        }
         var code=$"AMO-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
-        var description=!string.IsNullOrWhiteSpace(input.Descricao)?input.Descricao.Trim():
-            (group!.Value.TryGetProperty("nome",out var gn)&&gn.ValueKind==JsonValueKind.String?gn.GetString():null);
+        var description=omie.Name;
 
         var created=await RestAsync(client,token,HttpMethod.Post,"amostras","select=id",
             new {
                 codigo=code,
                 processo_id=group!.Value.GetProperty("processo_id").GetString(),
                 grupo_inspecao_id=input.GroupId,
-                produto_id=(string?)null,
+                produto_id=productId,
                 descricao=description,
                 lote=string.IsNullOrWhiteSpace(input.Lote)?null:input.Lote.Trim(),
                 quantidade_inicial=input.Quantidade,
