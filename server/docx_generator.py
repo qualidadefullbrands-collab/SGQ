@@ -278,7 +278,8 @@ def labeled_cell(cell,label,value,size=7.5):
     # Keep fixed template labels black; style only data supplied by SGQ.
     p=cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
     clear_paragraph(p)
-    fixed=p.add_run(str(label)+": ");set_font(fixed,size)
+    prefix=str(label)+(". " if str(label).isdigit() else ": ")
+    fixed=p.add_run(prefix);set_font(fixed,size)
     content=p.add_run(filled(value));set_font(content,size,bold=True);content.font.color.rgb=NAVY
     for extra in list(cell.paragraphs[1:]):extra._element.getparent().remove(extra._element)
 
