@@ -260,7 +260,7 @@ def whole_number(value):
 
 def fst_code(value):
     raw=str(value or "").strip().upper()
-    if not raw: return "FST-"
+    if not raw: return EMPTY
     raw=re.sub(r"\s+","",raw)
     return raw if raw.startswith("FST") else "FST"+raw
 
@@ -525,7 +525,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
     out=BytesIO(); doc.save(out); return out.getvalue()
 
 def inspection_file_name(process_code:str|None,sku:str|None,product_name:str|None=None)->str:
-    process=fst_code(process_code)
+    process=fst_code(process_code) if process_code else "FST-SEM-NUMERO"
     sku=str(sku or "SEM-SKU").strip()
     product=str(product_name or "PRODUTO").strip()
     # The visible Word filename is separate from the safe storage object key.
