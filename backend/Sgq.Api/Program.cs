@@ -2474,31 +2474,40 @@ app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInsp
            process.ValueKind!=JsonValueKind.Object ||
            (process.TryGetProperty("excluido_em",out var archived)&&archived.ValueKind!=JsonValueKind.Null))
             return Results.Json(Error("Processo arquivado ou indisponível."),statusCode:409);
-        var saved=0;
-        foreach(var photo in input.Fotos ?? [])
+        var incoming=input.Fotos??[];
+        if(incoming.Count>80)return Results.Json(Error("Envie no máximo 80 fotos por lote."),statusCode:400);
+        var valid=new List<RegisterInspectionPhotoItem>();
+        var paths=new HashSet<string>(StringComparer.Ordinal);
+        foreach(var photo in incoming)
         {
             if(string.IsNullOrWhiteSpace(photo.StoragePath))continue;
             if(photo.Legenda?.Trim().Length>300)
                 return Results.Json(Error("Legenda com mais de 300 caracteres."),statusCode:400);
             if(!photo.StoragePath.StartsWith(id+"/gerais/",StringComparison.Ordinal))
                 return Results.Json(Error("A foto não pertence a esta inspeção."),statusCode:400);
-            // A repeat request after mobile network failure must not create duplicate evidence.
-            var existing=await RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
-                $"select=id&inspecao_id=eq.{Uri.EscapeDataString(id)}&storage_path=eq.{Uri.EscapeDataString(photo.StoragePath)}&limit=1");
-            var (_,alreadySaved)=FirstRow(existing);
-            if(!alreadySaved)
-            {
-                await RestAsync(client,token,HttpMethod.Post,"inspecao_fotos","",
-                    new {inspecao_id=id,storage_path=photo.StoragePath,legenda=string.IsNullOrWhiteSpace(photo.Legenda)?null:photo.Legenda.Trim()},"return=minimal");
-                if(!string.IsNullOrWhiteSpace(photo.ProductId)&&!string.IsNullOrWhiteSpace(photo.ProductPhotoPath))
-                {
-                    await RestAsync(client,token,HttpMethod.Patch,"produtos",
-                        $"id=eq.{Uri.EscapeDataString(photo.ProductId)}",
-                        new {foto_principal_path=photo.ProductPhotoPath,atualizado_em=DateTimeOffset.UtcNow},"return=minimal");
-                }
-            }
-            saved++;
+            if(paths.Add(photo.StoragePath))valid.Add(photo);
         }
+        // DB unique index (inspecao_id,storage_path) + ignore-duplicates makes batch
+        // upload idempotent, including client retry after a lost network response.
+        if(valid.Count>0)
+        {
+            var rows=valid.Select(p=>new {
+                inspecao_id=id,storage_path=p.StoragePath,
+                legenda=string.IsNullOrWhiteSpace(p.Legenda)?null:p.Legenda.Trim()
+            }).ToArray();
+            await RestAsync(client,token,HttpMethod.Post,"inspecao_fotos",
+                "on_conflict=inspecao_id,storage_path",rows,
+                "resolution=ignore-duplicates,return=minimal");
+            foreach(var photo in valid.Where(p=>!string.IsNullOrWhiteSpace(p.ProductId) &&
+                !string.IsNullOrWhiteSpace(p.ProductPhotoPath)))
+            {
+                await RestAsync(client,token,HttpMethod.Patch,"produtos",
+                    $"id=eq.{Uri.EscapeDataString(photo.ProductId!)}",
+                    new {foto_principal_path=photo.ProductPhotoPath,atualizado_em=DateTimeOffset.UtcNow},
+                    "return=minimal");
+            }
+        }
+        var saved=valid.Count;
         if(saved>0)
         {
             // Newly uploaded evidence must appear in the next generated Word.
