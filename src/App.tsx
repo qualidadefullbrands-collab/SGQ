@@ -1124,6 +1124,8 @@ export default function App() {
     setError('')
     const res=await apiGet<any>(`/api/inspecoes/${id}/detalhe`)
     if(res.error||!res.data?.inspecao){setPopupMessage(res.error?.message||'Falha ao abrir inspeção.');return}
+    editingBaseline.current=offlineInspectionVersion(res.data)
+    void saveOfflineDraft(userId||'','full:detail:'+id,res.data).catch(()=>undefined)
     const data={...res.data.inspecao,items:res.data.items??[]}
     const process=data.grupos_inspecao?.processos??{}
     const items=(data.items??[]).map((link:any)=>{
@@ -1491,6 +1493,8 @@ export default function App() {
     }
 
     const data=loaded.data
+    editingBaseline.current=offlineInspectionVersion(data)
+    void saveOfflineDraft(userId||'','full:detail:'+id,data).catch(()=>undefined)
     const photoUrls=data.photoUrls ?? {}
     const photosWithUrls=(data.photos ?? []).map((p:any)=>({
       ...p,
@@ -1604,6 +1608,51 @@ export default function App() {
     return()=>window.clearTimeout(timer)
   },[aiItFingerprint,itVersions,userId,inspection.itVersionId])
 
+  async function queueInspectionCreate(iniciar:boolean){
+    if(!userId)throw new Error('Usuário não identificado.')
+    const rows=skuRows.filter(row=>skuRowHasData(row))
+    const itens=rows.map(row=>{
+      const dist=boxDistributionTotals(row)
+      return {
+        sku:row.sku.trim(),nome:row.nome.trim(),codigoCliente:row.codigoCliente.trim()||null,
+        quantidadePv:row.quantidadePv.trim()===''?null:Number(row.quantidadePv),
+        numeroPedidoPv:row.numeroPedidoPv||null,fstPv:row.fstPv||null,
+        lote:row.lote.trim()||null,material:row.material.trim()||null,capacidade:row.capacidade.trim()||null,
+        quantidade:Number(row.quantidade)||0,quantidadePorCaixa:Number(row.quantidadePorCaixa)||null,
+        caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
+        unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,
+        distribuicaoCaixas:dist.groups.length?dist.groups:null,
+        fotoPrincipalPath:row.fotoPrincipalPath||null,
+      }
+    })
+    const photos=rows.map((row,index)=>row.fotoFile?{index,file:row.fotoFile}:null).filter(Boolean)
+    const payload={
+      codigo:inspection.codigo.trim(),requestId:createRequestId.current,
+      cliente:inspection.cliente.trim()||null,notaFiscal:inspection.notaFiscal.trim()||null,
+      origem:inspection.origem.trim()||null,transporte:inspection.transporte.trim()||null,
+      chegadaCd:inspection.chegadaCd||null,dataInspecao:inspection.dataInspecao||null,
+      itVersionId:inspection.itVersionId||null,iniciar,inspectionLevel:inspection.inspectionLevel,
+      observacaoInterna:inspection.observacaoInterna.trim()||null,itens,
+    }
+    await enqueueOfflineOperation({
+      id:userId+':inspection-create:'+createRequestId.current,userId,
+      kind:'inspection-create',path:'/api/inspecoes/criar',body:{payload,photos},createdAt:Date.now()
+    })
+    await clearOfflineDraft(userId,'full:new')
+    await refreshOfflineCounts(userId)
+    setOfflineDraftStatus('')
+    setMessage('Inspeção salva no dispositivo. Sincronização automática quando houver internet.')
+    resetNewInspection()
+    setTab('painel')
+  }
+  async function queueInspectionUpdate(id:string,payload:any){
+    if(!userId||!editingBaseline.current)throw new Error('Não há versão original verificada para sincronizar esta inspeção.')
+    await enqueueOfflineOperation({id:userId+':inspection-update:'+id,userId,
+      kind:'inspection-update',path:'/api/inspecoes/'+encodeURIComponent(id)+'/dados',body:payload,
+      expected:editingBaseline.current,createdAt:Date.now()})
+    await refreshOfflineCounts(userId)
+    setMessage('Alterações salvas neste dispositivo; sincronização pendente.')
+  }
   async function createInspection(e: React.FormEvent, iniciar:boolean) {
     e.preventDefault()
     if(!canWrite||!userId||inspectionBusy||submitLock.current)return
@@ -1646,6 +1695,11 @@ export default function App() {
 
     if (iniciar && !inspection.itVersionId) {setPopupMessage('Selecione a IT para iniciar a inspeção.');return}
     setInspectionBusy(true)
+    if(!navigator.onLine){
+      try{await queueInspectionCreate(iniciar)}
+      catch(e:any){setError('Não foi possível salvar offline: '+String(e?.message||''))}
+      return
+    }
 
     const itens:any[]=[]
     for (const row of skuRows) {
@@ -1665,7 +1719,14 @@ export default function App() {
         const folder=row.sku.trim() || 'temporario'
         const photoPath=`${folder}/${Date.now()}-${safe}`
         const upload=await supabase.storage.from('produto-fotos').upload(photoPath,row.fotoFile,{contentType:row.fotoFile.type||undefined})
-        if (upload.error){setInspectionBusy(false);return setError('Falha ao salvar foto principal do produto: '+upload.error.message)}
+        if (upload.error){
+          setInspectionBusy(false)
+          if(connectionFailure(upload.error.message)||!navigator.onLine){
+            try{await queueInspectionCreate(iniciar)}catch(e:any){setError(String(e?.message||''))}
+            return
+          }
+          return setError('Falha ao salvar foto principal do produto: '+upload.error.message)
+        }
         fotoPrincipalPath=photoPath
       }
 
@@ -1706,6 +1767,10 @@ export default function App() {
 
     if (created.error || !created.data?.id) {
       setInspectionBusy(false)
+      if(created.error && (connectionFailure(created.error.message)||!navigator.onLine)){
+        try{await queueInspectionCreate(iniciar)}catch(e:any){setError(String(e?.message||''))}
+        return
+      }
       return setError(created.error?.message || 'Falha ao criar inspeção.')
     }
 
@@ -1733,6 +1798,7 @@ export default function App() {
     }
     setInspections(old=>[provisional,...old.filter(x=>x.id!==provisional.id)])
     setMessage(iniciar?'Inspeção iniciada.':'Inspeção salva.')
+    if(userId)await clearOfflineDraft(userId,'full:new')
     resetNewInspection()
     loadSequence.current++
     if(iniciar){await openInspection(created.data.id);setActiveStage('amostragem')}
