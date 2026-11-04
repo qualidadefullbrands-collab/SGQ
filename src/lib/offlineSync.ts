@@ -77,8 +77,7 @@ async function send(operation:OfflineOperation){
     observacao:operation.body.observacao,confianca:operation.body.confianca,
     progressoTotalEsperado:operation.body.progressoTotalEsperado
   }:operation.body
-  const res=operation.kind==='inspection-create'?
-    await apiPost(operation.path,body):await apiPut(operation.path,body)
+  const res=await apiPut(operation.path,body)
   if(res.error)throw new Error(res.error.message)
 }
 export async function replayOfflineOperations(userId:string,afterEach?:()=>void){
