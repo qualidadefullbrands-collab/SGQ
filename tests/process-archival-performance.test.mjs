@@ -5,6 +5,7 @@ import {readFileSync} from 'node:fs'
 const src=(path)=>readFileSync(new URL('../'+path,import.meta.url),'utf8')
 const app=src('src/App.tsx')
 const api=src('backend/Sgq.Api/Program.cs')
+const kanban=src('src/components/InspectionsKanban.tsx')
 const get=(source,start,end)=>source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)))
 const deletionUI=get(app,'async function deleteProcess(', 'async function deleteInspection(')
 const refreshUI=get(app,'async function refreshLists(', 'async function lookupFstClient(')
@@ -18,7 +19,8 @@ test('process deletion is single-flight and disables duplicate clicks',()=>{
  assert.match(deletionUI,/if \(!canDelete \|\| processDeletionLock\.current\) return/)
  assert.match(deletionUI,/processDeletionLock\.current=p\.id/)
  assert.match(deletionUI,/finally \{\s*processDeletionLock\.current=null/)
- assert.match(app,/disabled=\{deletingProcessId!==null\}/)
+ assert.match(kanban,/disabled=\{deletingProcessId!==null\}/)
+ assert.match(app,/deletingProcessId=\{deletingProcessId\}/)
  assert.match(deletionUI,/setDeletingProcessId\(p\.id\)/)
 })
 test('process deletion immediately removes its cards, linked inspections, and related group from UI',()=>{
@@ -69,8 +71,11 @@ test('database migration archives process, linked inspections and groups atomica
  assert.match(migration,/GRANT EXECUTE ON FUNCTION public\.sgq_archive_process\(uuid\) TO authenticated/)
  assert.match(migration,/regularizacao_exclusao_logica/)
 })
-test('grouping inspector cards is linear instead of per-process repeated array scans',()=>{
- assert.match(app,/const inspectionsByProcess=useMemo\(/)
- assert.match(app,/new Map<string,InspectionRow\[\]>\(\)/)
- assert.match(app,/inspectionsByProcess\.get\(p\.id\)\?\?\[\]/)
+test('Kanban grouping remains linear for a fixed number of status columns',()=>{
+ assert.match(kanban,/const processById=useMemo\(/)
+ assert.match(kanban,/new Map\(processes\.map\(/)
+ assert.match(kanban,/const visible=useMemo\(/)
+ assert.match(kanban,/const base=columns\.map\(/)
+ assert.match(kanban,/items:visible\.filter\(i=>i\.status===c\.status\)/)
+ assert.doesNotMatch(kanban,/processes\.map\([^)]*inspections\.filter/)
 })
