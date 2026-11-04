@@ -2567,7 +2567,7 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
         var contentType=res.Content.Headers.ContentType?.ToString()
             ?? "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
         var fileName=res.Headers.TryGetValues("X-SGQ-File-Name",out var names)
-            ? names.FirstOrDefault()
+            ? Uri.UnescapeDataString(names.FirstOrDefault()??$"Inspecao-{id}.docx")
             : $"Inspecao-{id}.docx";
         return Results.File(bytes,contentType,fileName);
     }
