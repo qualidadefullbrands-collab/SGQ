@@ -28,6 +28,8 @@ test('API Word download bypasses cached Storage key and verifies genuine DOCX by
  assert.match(download,/ReadAsByteArrayAsync\(\)/)
  assert.match(download,/bytes\[0\]!=0x50/)
  assert.match(download,/Results\.File\(bytes,contentType,fileName\)/)
+ assert.match(api,/\.WithExposedHeaders\("Content-Disposition"\)/)
+ assert.match(app,/response\.headers\.get\('content-disposition'\)/)
  assert.doesNotMatch(download,/storage\/v1\/object|\/laudos\//)
  assert.doesNotMatch(download,/documento_gerado_em/)
  const send=part(api,'app.MapPost("/api/inspecoes/{id}/enviar-automate"','app.MapPost("/api/inspecoes/{id}/retencao"')

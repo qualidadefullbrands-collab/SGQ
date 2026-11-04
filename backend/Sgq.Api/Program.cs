@@ -18,6 +18,7 @@ builder.Services.AddHttpClient("supabase", c => c.Timeout = TimeSpan.FromSeconds
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
     .WithOrigins("https://app-sgq.onrender.com", "http://localhost:5173", "http://127.0.0.1:5173")
     .AllowAnyHeader().AllowAnyMethod().AllowCredentials()
+    .WithExposedHeaders("Content-Disposition")
     .SetPreflightMaxAge(TimeSpan.FromHours(12))));
 
 var app = builder.Build();
