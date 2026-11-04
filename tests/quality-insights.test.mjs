@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs'
 import ts from 'typescript'
 
 const source=readFileSync(new URL('../src/insights/insightsData.ts',import.meta.url),'utf8')
-const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText.replace(/^export /gm,'')
+const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText.replace(/^export /gm,'')
 const {inspectionInsightRows}=new Function(compiled+'\nreturn {inspectionInsightRows}')()
 const i=(id,group,fst,client='Cliente')=>({
  id,numero:'INS-'+id,status:'concluida',criado_em:'2026-11-04T09:00:00Z',
