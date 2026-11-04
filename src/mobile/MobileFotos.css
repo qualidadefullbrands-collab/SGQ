@@ -58,3 +58,17 @@
 .sgq-mobile-process.sgq-photo-started{border:2px solid #39837c!important;background:#e5f3f0!important}
 .sgq-mobile-process.sgq-photo-not-started{border:2px solid #ba944d!important;background:#fff6e6!important}
 .sgq-mobile-process.sgq-photo-started strong,.sgq-mobile-process.sgq-photo-not-started strong{color:#243a47}
+
+
+/* Mobile collection: quick image-only batch review; captions are completed on desktop. */
+.sgq-mobile-batch{border-top:1px solid #e3edf2;padding-top:12px}
+.sgq-mobile-batch-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px}
+.sgq-mobile-batch-title strong{font-size:14px;color:#173f58}
+.sgq-mobile-batch-title small{font-size:12px;color:#698393}
+.sgq-mobile-batch-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.sgq-mobile-batch-photo{position:relative;min-width:0;aspect-ratio:1;overflow:hidden;border-radius:11px;border:1px solid #cddce5;background:#e7eff3}
+.sgq-mobile-batch-photo img{display:block;width:100%;height:100%;object-fit:cover}
+.sgq-mobile-batch-photo button{position:absolute;top:5px;right:5px;display:grid;place-items:center;background:#102c3dcc;color:#fff;border:0;border-radius:8px;width:29px;height:29px}
+.sgq-mobile-batch-photo .sgq-mobile-error{position:absolute;bottom:0;left:0;right:0;padding:4px;background:#fce5e2;font-size:10px}
+.sgq-mobile-batch .sgq-mobile-save{margin-top:14px}
+@media(min-width:600px){.sgq-mobile-batch-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
