@@ -5,6 +5,7 @@ import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from './lib/offline'
 import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSync'
 import SkuQuantityGrid from './components/SkuQuantityGrid'
+import InventoryPanel from './stock/InventoryPanel'
 import InspectionsKanban from './components/InspectionsKanban'
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
@@ -561,6 +562,7 @@ export default function App() {
   }>>({})
   const [retentionReason, setRetentionReason] = useState('')
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
+  const [stockMode,setStockMode]=useState<'posicoes'|'inventario'>('posicoes')
   const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string;productId:string;isProductId:boolean}>>([])
   const [photoCaptionDrafts,setPhotoCaptionDrafts]=useState<Record<string,string>>({})
   const [lastSavedPhotoCaptionId,setLastSavedPhotoCaptionId]=useState<string|null>(null)
@@ -3594,6 +3596,14 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
+          <div className="sgq-stock-mode">
+            <button type="button" className={stockMode==='posicoes'?'primary':'secondary'} onClick={()=>setStockMode('posicoes')}>Posições</button>
+            <button type="button" className={stockMode==='inventario'?'primary':'secondary'} onClick={()=>{setStockMode('inventario');setSelectedSample(null)}}>Inventário</button>
+          </div>
+          {stockMode==='inventario'&&<InventoryPanel samples={samples} canWrite={!!canWrite}
+            canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}
+            onRefreshStock={loadStock}/>}
+          {stockMode==='posicoes'&&<>
           <section className="stock-summary">
             <article><span>Saldo total</span><strong>{stockStats.unidades.toLocaleString('pt-BR')}</strong><small>unidades</small></article>
             <article><span>Registros</span><strong>{stockStats.registros}</strong><small>posições de estoque</small></article>
@@ -3775,6 +3785,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </article>
             </div>
           )}
+          </>}
         </section>
       )}
 
