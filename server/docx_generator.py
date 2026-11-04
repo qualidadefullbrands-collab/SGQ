@@ -374,6 +374,8 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
 
     first_item=items[0] if items else {}
     product=first_item.get("produto") or {}
+    total_boxes=inspection.get("caixas_recebidas")
+    if total_boxes is None: total_boxes=first_item.get("caixas_recebidas")
     identification={
         "produto / descrição": product.get("nome") or "",
         # In SGQ the customer's product code is the registered SKU.
@@ -388,11 +390,11 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
         "transporte": process.get("transporte") or "",
         "quantidade recebida": whole_number(first_item.get("quantidade")),
         "quantidade por caixa": whole_number(first_item.get("quantidade_por_caixa")),
-        "nº de caixas recebidas": whole_number(first_item.get("caixas_recebidas")),
-        "n° de caixas recebidas": whole_number(first_item.get("caixas_recebidas")),
-        "caixas recebidas": whole_number(first_item.get("caixas_recebidas")),
-        "nº caixas recebidas": whole_number(first_item.get("caixas_recebidas")),
-        "total de caixas recebidas": whole_number(first_item.get("caixas_recebidas")),
+        "nº de caixas recebidas": whole_number(total_boxes),
+        "n° de caixas recebidas": whole_number(total_boxes),
+        "caixas recebidas": whole_number(total_boxes),
+        "nº caixas recebidas": whole_number(total_boxes),
+        "total de caixas recebidas": whole_number(total_boxes),
         "chegada no cd": fmt_date(process.get("chegada_cd")),
         "data da inspeção": fmt_date(inspection.get("data_inspecao")),
     }
@@ -402,7 +404,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             cells=row.cells
             if len(cells)>=2:
                 for idx in range(0,len(cells)-1):
-                    label=_norm(cells[idx].text)
+                    label=_norm(cells[idx].text).rstrip(" :")
                     if label in identification:
                         inspection_cell(cells[idx+1],identification[label],8)
             joined=" ".join(c.text for c in cells)
