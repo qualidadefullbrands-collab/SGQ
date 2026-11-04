@@ -516,6 +516,8 @@ export default function App() {
   const [activeProductIndex,setActiveProductIndex]=useState(0)
   const [expandedSkuIndex,setExpandedSkuIndex]=useState<number|null>(0)
   const [editSaving,setEditSaving]=useState(false)
+  const [editFeedback,setEditFeedback]=useState('')
+  const editLastSavedFingerprint=useRef<string|null>(null)
   const editMetadataBaseline=useRef<string|null>(null)
   const [itSuggestBusy,setItSuggestBusy]=useState(false)
   const [itSuggestionNote,setItSuggestionNote]=useState('')
@@ -1175,6 +1177,8 @@ export default function App() {
     editMetadataBaseline.current=editMetadataFingerprint(form)
     setSelectedInspectionId(data.id)
     setEditingInspectionId(null);setEditingProcessId(null)
+    setEditFeedback('')
+    editLastSavedFingerprint.current=null
     setEditingInspectionData(form)
     setMessage('')
   }
@@ -1609,6 +1613,8 @@ export default function App() {
       observacaoInterna:detail.observacao_interna ?? '',itVersionId:detail.it_versao_id ?? '',itens:rows,
     }
     editMetadataBaseline.current=editMetadataFingerprint(form)
+    setEditFeedback('')
+    editLastSavedFingerprint.current=null
     setEditingInspectionData(form)
   }
 
@@ -1650,6 +1656,8 @@ export default function App() {
       if(!navigator.onLine){
         await queueInspectionUpdate(id,editPayload)
         setMessage('Alterações guardadas no dispositivo. Serão sincronizadas ao voltar a conexão.')
+        editLastSavedFingerprint.current=JSON.stringify(editingInspectionData)
+        setEditFeedback('Salvo no dispositivo · aguardando sincronização')
         return
       }
       const saved=await apiPut<any>(
@@ -1660,6 +1668,8 @@ export default function App() {
         if(connectionFailure(saved.error.message)||!navigator.onLine){
           await queueInspectionUpdate(id,editPayload)
           setMessage('Alterações guardadas no dispositivo. Sincronização pendente.')
+          editLastSavedFingerprint.current=JSON.stringify(editingInspectionData)
+          setEditFeedback('Salvo no dispositivo · aguardando sincronização')
         }else setError(saved.error.message)
         return
       }
@@ -1707,6 +1717,8 @@ export default function App() {
         codigo_amostragem:p?.codigo??item.codigo_amostragem
       }:item))
       setMessage(fastPath?'Quantidades e caixas salvas.':'Dados da inspeção salvos.')
+      editLastSavedFingerprint.current=JSON.stringify(editingInspectionData)
+      setEditFeedback('Alterações salvas')
       // Update the offline conflict baseline asynchronously; no forced navigation.
       void apiGet<any>('/api/inspecoes/'+encodeURIComponent(id)+'/detalhe').then(r=>{
         if(!r.error&&r.data?.inspecao){
@@ -3775,6 +3787,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 ...current,itens:[...(current.itens??[]),{...emptySku(),processoItemId:null}]
               }:current)}/>
             <button className="primary wide" type="button" disabled={editSaving} onClick={()=>void saveEditingInspectionData()}>{editSaving?'Salvando…':'Salvar alterações'}</button>
+            {editFeedback&&<span className="sgq-inline-save-status" role="status">
+              {editLastSavedFingerprint.current===JSON.stringify(editingInspectionData)?editFeedback:'Alterações pendentes de salvamento'}
+            </span>}
           </article>
         </div>
       )}
