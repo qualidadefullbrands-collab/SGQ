@@ -125,5 +125,9 @@ class InspectionWordTests(unittest.TestCase):
                 ))
                 self.assertNotIn("32.0"," ".join(values))
                 self.assertNotIn("1000.0"," ".join(values))
+                # Official documents can be reopened as a normal Word package.
+                reloaded=io.BytesIO()
+                doc.save(reloaded)
+                self.assertGreater(len(reloaded.getvalue()),1500)
 
 if __name__=="__main__": unittest.main()
