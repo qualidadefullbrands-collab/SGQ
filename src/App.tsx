@@ -99,6 +99,10 @@ type Sample = {
 const emptySku = () => ({
   sku: '',
   nome: '',
+  codigoCliente: '',
+  quantidadePv: '',
+  numeroPedidoPv: '',
+  fstPv: '',
   lote: '',
   material: '',
   capacidade: '',
@@ -132,7 +136,7 @@ type OmieSkuImport={codigo:string;numeroPedido:string;itens:OmieOrderItem[]}
 type OmieSkuReviewLine={sku:string;descricao:string;quantidadePedido:number;quantidadeInformada:string}
 type OmieSkuReview={codigo:string;numeroPedido:string;itens:OmieSkuReviewLine[]}
 function skuRowHasData(row:ReturnType<typeof emptySku>){
-  return Boolean(row.sku.trim()||row.nome.trim()||row.lote.trim()||row.material.trim()||
+  return Boolean(row.sku.trim()||row.nome.trim()||row.codigoCliente.trim()||row.lote.trim()||row.material.trim()||
     row.capacidade.trim()||row.quantidade.trim()||row.quantidadePorCaixa.trim()||
     row.caixasRecebidas.trim()||row.caixasInspecionadas.trim()||row.caixasPadrao.trim()||
     row.caixasFracionadas.trim()||row.caixasLaboratorio.trim()||row.unidadesLaboratorio.trim()||
@@ -179,15 +183,24 @@ function applyOmieReviewedRows(rows:ReturnType<typeof emptySku>[],review:OmieSku
     const code=item.sku.trim().toUpperCase()
     const indices=matches.get(code)||[]
     // Never overwrite multiple lot rows with one order total (which would duplicate units).
-    if(indices.length>1)continue
+    if(indices.length>1){
+      // Lot quantities must not change, but the original PV snapshot belongs
+      // to the SKU as a whole and is retained on one of its lot records.
+      const first=result[indices[0]]
+      result[indices[0]]={...first,quantidadePv:String(item.quantidadePedido),
+        numeroPedidoPv:review.numeroPedido,fstPv:review.codigo}
+      continue
+    }
     const amount=item.quantidadeInformada.trim()
     if(indices.length===1){
       const i=indices[0],old=result[i]
       result[i]={...old,quantidade:amount,nome:old.nome.trim()||item.descricao,
+        quantidadePv:String(item.quantidadePedido),numeroPedidoPv:review.numeroPedido,fstPv:review.codigo,
         omieSourceFst:review.codigo,omieSourcePedido:review.numeroPedido}
     }else{
       const i=result.length
       result.push({...emptySku(),sku:code,nome:item.descricao,quantidade:amount,
+        quantidadePv:String(item.quantidadePedido),numeroPedidoPv:review.numeroPedido,fstPv:review.codigo,
         omieSourceFst:review.codigo,omieSourcePedido:review.numeroPedido,
         omieStatus:'found',omieMessage:'PV '+review.numeroPedido+' · confirme o recebimento físico.'})
       matches.set(code,[i])
@@ -1022,7 +1035,8 @@ export default function App() {
     const items=(data.items??[]).map((link:any)=>{
       const x=link.processo_itens
       return applyBoxGroupsToSku({...emptySku(),processoItemId:x.id,sku:x.produtos?.sku??'',
-        nome:x.produtos?.nome??'',lote:x.lote??'',material:x.material??'',capacidade:x.capacidade??'',
+        nome:x.produtos?.nome??'',codigoCliente:x.codigo_cliente??'',quantidadePv:x.quantidade_pv==null?'':String(x.quantidade_pv),
+        numeroPedidoPv:x.pv_numero??'',fstPv:x.pv_fst??'',lote:x.lote??'',material:x.material??'',capacidade:x.capacidade??'',
         quantidade:String(x.quantidade??''),quantidadePorCaixa:String(x.quantidade_por_caixa??''),
         caixasRecebidas:String(x.caixas_recebidas??''),caixasInspecionadas:String(x.caixas_inspecionadas??''),
         unidadesPorConjunto:String(link.unidades_por_conjunto??1)},x.distribuicao_caixas)
@@ -1429,7 +1443,9 @@ export default function App() {
     const process=detail.grupos_inspecao?.processos ?? {}
     const rows=(detail.items ?? []).map((link:any)=>{
       const item=link.processo_itens
-      const base={...emptySku(),processoItemId:item.id,sku:item.produtos?.sku ?? '',nome:item.produtos?.nome ?? '',lote:item.lote ?? '',material:item.material ?? '',capacidade:item.capacidade ?? '',quantidade:String(item.quantidade ?? ''),quantidadePorCaixa:String(item.quantidade_por_caixa ?? ''),caixasRecebidas:String(item.caixas_recebidas ?? ''),caixasInspecionadas:String(item.caixas_inspecionadas ?? ''),unidadesPorConjunto:String(link.unidades_por_conjunto ?? 1)}
+      const base={...emptySku(),processoItemId:item.id,sku:item.produtos?.sku ?? '',nome:item.produtos?.nome ?? '',
+        codigoCliente:item.codigo_cliente??'',quantidadePv:item.quantidade_pv==null?'':String(item.quantidade_pv),
+        numeroPedidoPv:item.pv_numero??'',fstPv:item.pv_fst??'',lote:item.lote ?? '',material:item.material ?? '',capacidade:item.capacidade ?? '',quantidade:String(item.quantidade ?? ''),quantidadePorCaixa:String(item.quantidade_por_caixa ?? ''),caixasRecebidas:String(item.caixas_recebidas ?? ''),caixasInspecionadas:String(item.caixas_inspecionadas ?? ''),unidadesPorConjunto:String(link.unidades_por_conjunto ?? 1)}
       return applyBoxGroupsToSku(base,item.distribuicao_caixas)
     })
     setExpandedEditSkuIndex(rows.length>1?null:0)
@@ -1443,7 +1459,11 @@ export default function App() {
   async function saveEditingInspectionData() {
     if (!editingInspectionData || !selectedInspectionId) return
     const itens=(editingInspectionData.itens ?? []).map((row:any)=>({
-      processoItemId:row.processoItemId,sku:String(row.sku ?? '').trim(),nome:String(row.nome ?? '').trim(),lote:String(row.lote ?? '').trim() || null,
+      processoItemId:row.processoItemId,sku:String(row.sku ?? '').trim(),nome:String(row.nome ?? '').trim(),
+      codigoCliente:String(row.codigoCliente??'').trim()||null,
+      quantidadePv:row.quantidadePv===''||row.quantidadePv==null?null:Number(row.quantidadePv),
+      numeroPedidoPv:String(row.numeroPedidoPv??'').trim()||null,fstPv:String(row.fstPv??'').trim()||null,
+      lote:String(row.lote ?? '').trim() || null,
       material:String(row.material ?? '').trim() || null,capacidade:String(row.capacidade ?? '').trim() || null,quantidade:Number(row.quantidade)||0,
       quantidadePorCaixa:Number(row.quantidadePorCaixa)||null,caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
       unidadesPorConjunto:Number(row.unidadesPorConjunto)||1,distribuicaoCaixas:boxGroupsFromRow(row),
@@ -1509,6 +1529,9 @@ export default function App() {
         const id=editingInspectionId!
         const itens=skuRows.map(row=>({
           processoItemId:(row as any).processoItemId??null,sku:row.sku.trim(),nome:row.nome.trim(),
+          codigoCliente:row.codigoCliente.trim()||null,
+          quantidadePv:row.quantidadePv.trim()===''?null:Number(row.quantidadePv),
+          numeroPedidoPv:row.numeroPedidoPv||null,fstPv:row.fstPv||null,
           lote:row.lote.trim()||null,material:row.material.trim()||null,capacidade:row.capacidade.trim()||null,
           quantidade:Number(row.quantidade)||0,quantidadePorCaixa:Number(row.quantidadePorCaixa)||null,
           caixasRecebidas:Number(row.caixasRecebidas)||0,caixasInspecionadas:Number(row.caixasInspecionadas)||0,
@@ -1555,6 +1578,9 @@ export default function App() {
       itens.push({
         sku:row.sku.trim(),
         nome:row.nome.trim(),
+        codigoCliente:row.codigoCliente.trim()||null,
+        quantidadePv:row.quantidadePv.trim()===''?null:Number(row.quantidadePv),
+        numeroPedidoPv:row.numeroPedidoPv||null,fstPv:row.fstPv||null,
         lote:row.lote.trim() || null,
         material:row.material.trim() || null,
         capacidade:row.capacidade.trim() || null,
@@ -2545,9 +2571,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                           {row.omieStatus==='not_configured' && <small className="field-status warn">{row.omieMessage || 'Integração OMIE não configurada'}</small>}
                           {row.omieStatus==='error' && <small className="field-status bad">{row.omieMessage || 'Falha ao consultar o OMIE'}</small>}
                         </label>
+                        <label>Código do cliente<input value={row.codigoCliente} onChange={e=>setSkuRows(rows=>rows.map((r,j)=>j===i?{...r,codigoCliente:e.target.value}:r))} placeholder="Código informado pelo cliente"/></label>
                         <label>Lote<input value={row.lote} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,lote:e.target.value}:r))}/></label>
                         <label>Material<input value={row.material} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,material:e.target.value}:r))}/></label>
                         <label>Capacidade<input value={row.capacidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,capacidade:e.target.value}:r))}/></label>
+                        {row.numeroPedidoPv && <label>Quantidade original PV {row.numeroPedidoPv}<input type="number" value={row.quantidadePv} readOnly aria-label="Quantidade original do PV Omie"/></label>}
                         <label>Quantidade total recebida<input type="number" step="0.01" value={row.quantidade} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,quantidade:e.target.value}:r))}/>
                           {row.omieSourcePedido && <small className="field-hint">Referência: quantidade do PV {row.omieSourcePedido}. Confirme o recebimento físico.</small>}
                         </label>
