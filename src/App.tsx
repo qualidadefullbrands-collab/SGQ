@@ -1780,7 +1780,7 @@ export default function App() {
     for (const link of next.items as any[]) {
       const item=link.processo_itens
       const existing=(next.retained as any[]).find((x:any)=>x.produto_id===item?.produto_id)
-      retention[item.id]={retain:false,qty:'',address:'',photoFile:null,photoPreview:''}
+      retention[item.id]={retain:!!existing,qty:'',address:'',photoFile:null,photoPreview:''}
     }
     const suggestedQty=retentionQuantityFromText(next.observacao_interna)
     if (suggestedQty!=null) {
