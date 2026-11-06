@@ -805,11 +805,11 @@ app.MapPost("/api/processos/cadastrar", async (CreateParentProcessRequest input,
             return Results.Json(Error("Selecione a IT oficial do processo principal."),statusCode:400);
         var versions=await RestAsync(client,token,HttpMethod.Get,"it_versoes",
             $"select=id&id=eq.{Uri.EscapeDataString(input.ItVersionId)}&limit=1");
-        if(!FirstRow(versions).Found)
+        if(!FirstRow(versions).found)
             return Results.Json(Error("Versão da IT não localizada."),statusCode:422);
         var existing=await RestAsync(client,token,HttpMethod.Get,"processos",
             $"select=id&codigo=eq.{Uri.EscapeDataString(code)}&excluido_em=is.null&limit=1");
-        if(FirstRow(existing).Found)
+        if(FirstRow(existing).found)
             return Results.Json(Error("Este FST já existe. Abra-o para adicionar um subprocesso."),statusCode:409);
         var created=await RestAsync(client,token,HttpMethod.Post,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id",
@@ -1554,10 +1554,16 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
             : null;
 
         var groupRows=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
-            $"select=processo_id&id=eq.{Uri.EscapeDataString(groupId)}&limit=1");
+            $"select=processo_id,subprocesso_codigo&id=eq.{Uri.EscapeDataString(groupId)}&limit=1");
         var (group,gf)=FirstRow(groupRows);
         if(!gf) return Results.Json(Error("Grupo de inspeção não encontrado."),statusCode:404);
         var processId=group!.Value.GetProperty("processo_id").GetString()!;
+        var isSubprocess=group.Value.TryGetProperty("subprocesso_codigo",out var sc)&&sc.ValueKind==JsonValueKind.String&&!string.IsNullOrWhiteSpace(sc.GetString());
+        var parentRows=await RestAsync(client,token,HttpMethod.Get,"processos",
+            $"select=it_versao_id&id=eq.{Uri.EscapeDataString(processId)}&limit=1");
+        var (parent,hasParent)=FirstRow(parentRows);
+        if(!hasParent)return Results.Json(Error("FST principal não encontrado."),statusCode:404);
+        var parentIt=parent!.Value.TryGetProperty("it_versao_id",out var itProp)&&itProp.ValueKind==JsonValueKind.String?itProp.GetString():null;
 
         var processCode=(input.Codigo??"").Trim();
         var processUpdate=new Dictionary<string,object?> {
@@ -1573,6 +1579,11 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         {
             if(!Guid.TryParse(input.ItVersionId,out _))
                 return Results.Json(Error("Identificador da IT inválido."),statusCode:400);
+            if(!string.IsNullOrWhiteSpace(parentIt)&&!string.Equals(input.ItVersionId,parentIt,StringComparison.OrdinalIgnoreCase))
+                return Results.Json(Error("A IT pertence ao FST principal e não pode ser diferente por subprocesso."),statusCode:409);
+            if(string.IsNullOrWhiteSpace(parentIt))
+                await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(processId)}",
+                    new{it_versao_id=input.ItVersionId},"return=minimal");
             await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
                 new {it_versao_id=input.ItVersionId},"return=minimal");
             await RestAsync(client,token,HttpMethod.Post,"grupo_inspecao_its",
@@ -1580,7 +1591,11 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 new {grupo_inspecao_id=groupId,it_versao_id=input.ItVersionId,principal=true},
                 "resolution=ignore-duplicates,return=minimal");
         }
-        await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(processId)}",processUpdate,"return=minimal");
+        if(isSubprocess)
+            await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",$"id=eq.{Uri.EscapeDataString(groupId)}",
+                new{nota_fiscal=string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim()},"return=minimal");
+        else
+            await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(processId)}",processUpdate,"return=minimal");
 
         if(InvalidOperationalUnits(input.Itens))
             return Results.Json(Error("Caixas e peças devem ser números inteiros; use caixas fracionadas."),statusCode:400);
