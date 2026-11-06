@@ -1,12 +1,14 @@
 from __future__ import annotations
 import os, base64, urllib.parse, re, unicodedata
+from io import BytesIO
+from docx import Document
 from pathlib import Path
 from datetime import datetime, timezone
 import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .docx_generator import generate, file_name, generate_inspection, inspection_file_name
+from .docx_generator import generate, file_name, generate_inspection, inspection_file_name, append_subprocess_appendix
 
 SUPABASE_URL=os.environ.get("SUPABASE_URL","").rstrip("/")
 SUPABASE_KEY=os.environ.get("SUPABASE_PUBLISHABLE_KEY","")
@@ -187,7 +189,7 @@ async def self_test():
                     box_tables+=1
                     box_marks+=selected(table)
             sample_shapes=[p for p in word.inline_shapes if
-                Inches(1.90)<=p.width<=Inches(2.20) and p.height>Inches(0.5)]
+                p.width==Inches(1.75) and p.height==Inches(1.25)]
             centered_captions=sum(1 for c in cells for p in c.paragraphs
                 if "Legenda de teste" in p.text and p.alignment==WD_ALIGN_PARAGRAPH.CENTER)
             template_tests[path.stem]={
@@ -295,7 +297,14 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
     token=authorization.split(" ",1)[1].strip()
     async with httpx.AsyncClient(timeout=60.0) as client:
         user=await verify_user(client,token)
-        rows=await table_rows(client,token,"inspecoes",{"id":f"eq.{inspection_id}","select":"*","limit":"1"})
+        rows=await table_rows(
+            client,token,"inspecoes",
+            {
+                "id":f"eq.{inspection_id}",
+                "select":"*,grupos_inspecao(*,processos(*)),it_versoes(*,instrucoes_trabalho(codigo,titulo))",
+                "limit":"1"
+            }
+        )
         if not rows: raise HTTPException(status_code=404,detail="Inspeção não encontrada.")
         inspection=rows[0]
         group_id=inspection.get("grupo_inspecao_id")
@@ -304,22 +313,16 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
             raise HTTPException(status_code=409,detail="Esta inspeção não possui grupo vinculado e não pode gerar o Word.")
         if not version_id:
             raise HTTPException(status_code=409,detail="Esta inspeção não possui IT vinculada. Vincule uma IT para gerar o Word no modelo oficial.")
-        groups=await table_rows(client,token,"grupos_inspecao",{"id":f"eq.{group_id}","select":"*","limit":"1"})
-        if not groups: raise HTTPException(status_code=409,detail="Grupo da inspeção não encontrado.")
-        group=groups[0]
-        processes=await table_rows(client,token,"processos",{"id":f"eq.{group.get('processo_id')}","select":"*","limit":"1"})
-        process=processes[0] if processes else {}
 
-        versions=await table_rows(client,token,"it_versoes",{"id":f"eq.{version_id}","select":"*","limit":"1"})
-        if not versions:
+        group=inspection.get("grupos_inspecao") or {}
+        if not group:
+            raise HTTPException(status_code=409,detail="Grupo da inspeção não encontrado.")
+        process=group.get("processos") or {}
+
+        version=inspection.get("it_versoes") or {}
+        if not version:
             raise HTTPException(status_code=409,detail="Versão da IT vinculada não encontrada.")
-        version=versions[0]
-
-        instruction_rows=await table_rows(
-            client,token,"instrucoes_trabalho",
-            {"id":f"eq.{version.get('instrucao_trabalho_id')}","select":"codigo,titulo","limit":"1"}
-        )
-        instruction=instruction_rows[0] if instruction_rows else {}
+        instruction=version.get("instrucoes_trabalho") or {}
         it_code=instruction.get("codigo") or ""
         # A versão publicada no SGQ é a fonte oficial. O modelo embarcado fica apenas como fallback técnico.
         template_bytes=None
@@ -341,15 +344,20 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
         if not template_bytes:
             raise HTTPException(status_code=409,detail=f"Modelo Word oficial da {it_code or 'IT'} não está disponível.")
 
-        links=await table_rows(client,token,"grupo_inspecao_itens",{"grupo_inspecao_id":f"eq.{group_id}","select":"processo_item_id,unidades_por_conjunto"})
+        links=await table_rows(
+            client,token,"grupo_inspecao_itens",
+            {
+                "grupo_inspecao_id":f"eq.{group_id}",
+                "select":"processo_item_id,unidades_por_conjunto,processo_itens(*,produtos(*))"
+            }
+        )
         items=[]
         product_photo_refs=[]
         for link in links:
-            item_rows=await table_rows(client,token,"processo_itens",{"id":f"eq.{link.get('processo_item_id')}","select":"*","limit":"1"})
-            if not item_rows: continue
-            item=item_rows[0]
-            prod_rows=await table_rows(client,token,"produtos",{"id":f"eq.{item.get('produto_id')}","select":"*","limit":"1"})
-            product=prod_rows[0] if prod_rows else {}
+            raw_item=link.get("processo_itens") or {}
+            if not raw_item: continue
+            item=dict(raw_item)
+            product=item.pop("produtos",{}) or {}
             item["produto"]=product
             item["unidades_por_conjunto"]=link.get("unidades_por_conjunto")
             items.append(item)
@@ -383,6 +391,7 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
                 data=await storage_download(client,token,"inspecao-fotos",path)
                 photos.append({"bytes":data,"caption":p.get("legenda") or ""})
             except HTTPException as exc:
+                # Never deliver an apparently complete report with missing evidence.
                 raise HTTPException(status_code=503,detail="Não foi possível incluir todas as fotos da inspeção. Confira os arquivos e tente novamente.") from exc
         if not photos and product_photo_refs:
             jobs=[storage_download(client,token,"produto-fotos",path) for path,_ in product_photo_refs]
@@ -430,6 +439,104 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
                 "Cache-Control":"no-store",
             },
         )
+
+@app.get("/generate-process/{process_id}")
+async def generate_process_document(process_id:str,authorization:str|None=Header(default=None)):
+    """Laudo único do FST com a IT oficial uma vez e anexos para A, B, C..."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401,detail="Authorization Bearer obrigatório.")
+    token=authorization.split(" ",1)[1].strip()
+    async with httpx.AsyncClient(timeout=75.0) as client:
+        await verify_user(client,token)
+        parents=await table_rows(client,token,"processos",{"id":f"eq.{process_id}","select":"id,codigo,it_versao_id,excluido_em","limit":"1"})
+        if not parents or parents[0].get("excluido_em"):
+            raise HTTPException(status_code=404,detail="FST não encontrado ou arquivado.")
+        parent=parents[0]
+        groups=await table_rows(client,token,"grupos_inspecao",{
+            "processo_id":f"eq.{process_id}",
+            "select":"id,codigo,subprocesso_codigo,nota_fiscal,nome",
+            "order":"subprocesso_codigo.asc,codigo.asc",
+        })
+        if not groups:
+            raise HTTPException(status_code=409,detail="Este FST não possui subprocessos.")
+        group_ids=",".join(g["id"] for g in groups)
+        inspections=await table_rows(client,token,"inspecoes",{
+            "grupo_inspecao_id":f"in.({group_ids})",
+            "excluido_em":"is.null",
+            "select":"id,numero,status,resultado,grupo_inspecao_id,it_versao_id,data_inspecao,tamanho_lote,tamanho_amostra,nivel_inspecao",
+            "order":"criado_em.asc"
+        })
+        by_group={row["grupo_inspecao_id"]:row for row in inspections}
+        missing=[(g.get("subprocesso_codigo") or g.get("codigo")) for g in groups if g["id"] not in by_group]
+        pending=[(g.get("subprocesso_codigo") or g.get("codigo")) for g in groups
+                 if g["id"] in by_group and by_group[g["id"]].get("status")!="concluida"]
+        if missing or pending:
+            raise HTTPException(status_code=409,detail=
+                "Conclua todos os subprocessos antes de gerar o laudo único. "+
+                ("Sem inspeção: "+", ".join(missing)+". " if missing else "")+
+                ("Pendentes: "+", ".join(pending)+"." if pending else ""))
+        versions={row.get("it_versao_id") for row in inspections if row.get("it_versao_id")}
+        parent_version=parent.get("it_versao_id")
+        if (len(versions)>1 or (parent_version and versions!={parent_version})):
+            raise HTTPException(status_code=409,detail="As ITs dos subprocessos não correspondem à IT única do FST.")
+        first=by_group[groups[0]["id"]]
+        primary=await generate_inspection_document(first["id"],authorization=authorization)
+        if not isinstance(primary,Response) or not getattr(primary,"body",None):
+            raise HTTPException(status_code=502,detail="Falha ao montar o documento principal.")
+        doc=Document(BytesIO(primary.body))
+        # Etiqueta de identificação antes do formulário preenchido do primeiro subprocesso.
+        label=doc.add_paragraph()
+        label.add_run(f"FST {str(parent.get('codigo') or '').removeprefix('FST')} — LAUDO CONSOLIDADO").bold=True
+        label.add_run(f" | Subprocesso {groups[0].get('subprocesso_codigo') or groups[0].get('codigo')}")
+        doc._element.body.remove(label._p)
+        doc._element.body.insert(0,label._p)
+
+        for group in groups[1:]:
+            row=by_group[group["id"]]
+            gid=group["id"]
+            links,checks,check_results,params,dimensionals,tests,test_results,photo_rows=await __import__("asyncio").gather(
+                table_rows(client,token,"grupo_inspecao_itens",{"grupo_inspecao_id":f"eq.{gid}","select":"processo_itens(*,produtos(*))"}),
+                table_rows(client,token,"it_checklist",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
+                table_rows(client,token,"inspecao_checklist_resultados",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
+                table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
+                table_rows(client,token,"inspecao_dimensionais",{"inspecao_id":f"eq.{row['id']}","select":"*","order":"sequencia_amostra.asc"}),
+                table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
+                table_rows(client,token,"inspecao_testes_resultados",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
+                table_rows(client,token,"inspecao_fotos",{"inspecao_id":f"eq.{row['id']}","select":"*","order":"criado_em.asc"}),
+            )
+            items=[]
+            for link in links:
+                item=dict(link.get("processo_itens") or {})
+                if item:
+                    item["produto"]=item.pop("produtos",{}) or {}
+                    items.append(item)
+            photos=[]
+            seen=set()
+            for photo in photo_rows:
+                path=photo.get("storage_path")
+                if not path or path in seen:continue
+                seen.add(path)
+                try:
+                    binary=await storage_download(client,token,"inspecao-fotos",path)
+                except HTTPException as exc:
+                    raise HTTPException(status_code=503,detail=f"Foto indisponível no subprocesso {group.get('subprocesso_codigo') or group.get('codigo')}.") from exc
+                photos.append({"bytes":binary,"caption":photo.get("legenda") or ""})
+            append_subprocess_appendix(doc,{
+                "inspection":row,"group":group,"items":items,
+                "checklist":checks,"check_results":check_results,
+                "dim_params":params,"dim_results":dimensionals,
+                "tests":tests,"test_results":test_results,"photos":photos,
+            })
+        out=BytesIO()
+        doc.save(out)
+        filename=f"FST{str(parent.get('codigo') or '').removeprefix('FST')} - Laudo consolidado.docx"
+        clean=re.sub(r'[\\/:*?"<>|]+'," ",filename)
+        encoded=urllib.parse.quote(clean,safe="")
+        return Response(content=out.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition":f"attachment; filename*=UTF-8''{encoded}",
+                     "X-SGQ-File-Name":encoded,"Cache-Control":"no-store"})
+
 
 @app.get("/template-status")
 async def template_status(authorization:str|None=Header(default=None)):
