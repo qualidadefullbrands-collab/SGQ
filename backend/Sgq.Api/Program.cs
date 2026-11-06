@@ -589,7 +589,7 @@ app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory f
         var processesTask=RestAsync(client,token,HttpMethod.Get,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id&excluido_em=is.null&order=criado_em.desc");
         var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
+            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
         await Task.WhenAll(profileTask,processesTask,inspectionsTask);
         var (profile,found)=FirstRow(profileTask.Result);
         if(!found)return Results.Json(Error("Usuário sem perfil autorizado no SGQ."),statusCode:403);
@@ -632,7 +632,7 @@ app.MapGet("/api/app/catalogos", async (HttpRequest request,IHttpClientFactory f
         var its=RestAsync(client,token,HttpMethod.Get,"it_versoes",
             "select=id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)&order=criado_em.desc");
         var groups=RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
-            "select=id,nome,codigo,tipo,status,tamanho_lote_estatistico,processo_id,subprocesso_codigo,nota_fiscal,processos(codigo,cliente,excluido_em)&order=criado_em.desc");
+            "select=id,nome,codigo,tipo,status,tamanho_lote_estatistico,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(codigo,cliente,excluido_em)&order=criado_em.desc");
         await Task.WhenAll(its,groups);
         return Results.Ok(new {data=new {itVersions=its.Result,groups=OperationalGroups(groups.Result)},error=(object?)null});
     }
@@ -664,7 +664,7 @@ app.MapGet("/api/app/listas", async (HttpRequest request,IHttpClientFactory fact
         var processes=RestAsync(client,token,HttpMethod.Get,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id&excluido_em=is.null&order=criado_em.desc");
         var inspections=RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
+            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
         await Task.WhenAll(processes,inspections);
         return Results.Ok(new{data=new{processes=processes.Result,
             inspections=OperationalInspections(processes.Result,inspections.Result)},error=(object?)null});
@@ -680,7 +680,7 @@ app.MapGet("/api/inspecoes/{id}/fotos/links", async (string id,HttpRequest reque
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         var photosTask=RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
-            $"select=storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+            $"select=storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null");
         await photosTask;
         // Signed photo URLs are independent: fetch concurrently with a bounded fan-out.
         var photoUrls=new Dictionary<string,string?>();
@@ -743,7 +743,7 @@ app.MapGet("/api/inspecoes/{id}/detalhe", async (string id,HttpRequest request,I
         var dimConfigsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_dimensional_configuracoes",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
         var testsTask=string.IsNullOrWhiteSpace(itId) ? Task.FromResult<JsonElement?>(null) : RestAsync(client,token,HttpMethod.Get,"it_testes_especiais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
         var testResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_testes_resultados",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
-        var photosTask=RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+        var photosTask=RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&order=criado_em.asc");
         var registersTask=RestAsync(client,token,HttpMethod.Get,"inspecao_registros",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=sequencia.asc");
         var ncsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_nao_conformidades",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
         var retainedTask=RestAsync(client,token,HttpMethod.Get,"amostras",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
@@ -816,9 +816,8 @@ app.MapPost("/api/processos/cadastrar", async (CreateParentProcessRequest input,
             new {
                 codigo=code,cliente=string.IsNullOrWhiteSpace(input.Cliente)?null:input.Cliente.Trim(),
                 nota_fiscal=(string?)null,it_versao_id=input.ItVersionId,
-                origem=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
-                transporte=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
-                chegada_cd=input.ChegadaCd,data_processo=DateOnly.FromDateTime(DateTime.UtcNow),
+                origem=(string?)null,transporte=(string?)null,
+                chegada_cd=(DateOnly?)null,data_processo=DateOnly.FromDateTime(DateTime.UtcNow),
                 status="aberto",criado_por=userId
             },"return=representation");
         var (row,found)=FirstRow(created);
@@ -836,13 +835,8 @@ app.MapPut("/api/processos/{id}", async (string id,ProcessUpdateRequest input,Ht
         var token=Token(request);
         var changed=await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"processos",
             $"select=id&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null",
-            new {
-                cliente=input.Cliente,
-                origem=input.Origem,
-                transporte=input.Transporte,
-                chegada_cd=input.ChegadaCd,
-                atualizado_em=DateTimeOffset.UtcNow
-            },"return=representation");
+            new {cliente=input.Cliente,atualizado_em=DateTimeOffset.UtcNow},
+            "return=representation");
         if(!FirstRow(changed).found)
             return Results.Json(Error("O FST não foi atualizado; confira suas permissões."),statusCode:409);
         return Results.Ok(new {data=new {ok=true},error=(object?)null});
@@ -1269,9 +1263,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 new {
                     codigo=processCode,cliente=string.IsNullOrWhiteSpace(input.Cliente)?null:input.Cliente.Trim(),
                     nota_fiscal=(string?)null,
-                    origem=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
-                    transporte=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
-                    chegada_cd=input.ChegadaCd,it_versao_id=effectiveIt,
+                    origem=(string?)null,transporte=(string?)null,
+                    chegada_cd=(DateOnly?)null,it_versao_id=effectiveIt,
                     status="em_inspecao",data_processo=inspectionDate,criado_por=userId
                 },"return=representation");
             var (row,found)=FirstRow(created);
@@ -1309,6 +1302,9 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 codigo = groupCode,
                 subprocesso_codigo = subCode,
                 nota_fiscal = string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim(),
+                origem = string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
+                transporte = string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
+                chegada_cd = input.ChegadaCd,
                 nome = groupName,
                 tipo = isComponentSet ? "kit_componentes" : "individual",
                 tamanho_lote_estatistico = Math.Max(1, statisticalLot),
@@ -1627,19 +1623,21 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         }
         if(isSubprocess)
         {
-            // A NF é individual por subprocesso. Cliente, origem, transporte e
-            // chegada pertencem ao FST principal e devem persistir quando editados.
+            // NF, chegada, origem e transporte pertencem exclusivamente ao
+            // subprocesso. Só o cliente e a IT são compartilhados pelo FST.
             var updatedSubprocess=await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",
-                $"select=id,nota_fiscal&id=eq.{Uri.EscapeDataString(groupId)}",
-                new{nota_fiscal=string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim()},
+                $"select=id,nota_fiscal,origem,transporte,chegada_cd&id=eq.{Uri.EscapeDataString(groupId)}",
+                new{
+                    nota_fiscal=string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim(),
+                    origem=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
+                    transporte=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
+                    chegada_cd=input.ChegadaCd
+                },
                 "return=representation");
             if(!FirstRow(updatedSubprocess).found)
                 return Results.Json(Error("Não foi possível salvar a NF do subprocesso."),statusCode:409);
             var parentChanges=new {
                 cliente=string.IsNullOrWhiteSpace(input.Cliente)?null:input.Cliente.Trim(),
-                origem=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
-                transporte=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
-                chegada_cd=input.ChegadaCd,
                 atualizado_em=DateTimeOffset.UtcNow
             };
             var updatedParent=await RestAsync(client,token,HttpMethod.Patch,"processos",
@@ -2616,7 +2614,7 @@ app.MapGet("/api/mobile/fotos/inspecoes/{id}", async (string id,HttpRequest requ
         if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var record=ins!.Value;
         var status=record.GetProperty("status").GetString();
-        if(status is not ("aberta" or "em_andamento"))return Results.Json(Error("Esta inspeção não pode receber fotos."),statusCode:409);
+        if(status is "cancelada")return Results.Json(Error("Esta inspeção está cancelada."),statusCode:409);
         var group=record.GetProperty("grupos_inspecao");
         if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process)
            || process.ValueKind!=JsonValueKind.Object ||
@@ -2624,7 +2622,7 @@ app.MapGet("/api/mobile/fotos/inspecoes/{id}", async (string id,HttpRequest requ
             return Results.Json(Error("Processo arquivado ou indisponível."),statusCode:409);
 
         var photos=await RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
-            $"select=id,storage_path,legenda,criado_em&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+            $"select=id,storage_path,legenda,criado_em&inspecao_id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&order=criado_em.asc");
         return Results.Ok(new {data=new {
             inspecao=new {id,numero=record.GetProperty("numero").GetString(),status},
             photos=photos
@@ -2645,7 +2643,14 @@ app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInsp
         var (ins,found)=FirstRow(inspectionRows);
         if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var record=ins!.Value;
-        if(record.GetProperty("status").GetString() is not ("aberta" or "em_andamento"))return Results.Json(Error("Esta inspeção não pode receber fotos."),statusCode:409);
+        if(record.GetProperty("status").GetString() is "cancelada")
+            return Results.Json(Error("Esta inspeção está cancelada."),statusCode:409);
+        var userId=await CurrentUserId(client,token);
+        var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
+        var (profile,authorized)=FirstRow(profileRows);
+        if(!authorized || profile!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor" or "inspetor"))
+            return Results.Json(Error("Sem permissão para alterar fotos."),statusCode:403);
         var group=record.GetProperty("grupos_inspecao");
         if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process) ||
            process.ValueKind!=JsonValueKind.Object ||
