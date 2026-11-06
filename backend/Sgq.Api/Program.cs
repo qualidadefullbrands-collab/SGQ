@@ -1161,6 +1161,9 @@ decimal OperationalBoxesToEvaluate(CreateInspectionItem item)
 bool InvalidOperationalUnits(IEnumerable<CreateInspectionItem>? rows)
 {
     return (rows??[]).Any(item =>
+        item.Quantidade<0m || item.CaixasRecebidas<0m || item.CaixasInspecionadas<0m ||
+        item.UnidadesPorConjunto<0m || (item.QuantidadePorCaixa??0m)<0m ||
+        (item.DistribuicaoCaixas?.Any(b=>b.Caixas<0m || b.Unidades<0m)??false) ||
         item.CaixasRecebidas!=decimal.Truncate(item.CaixasRecebidas) ||
         item.CaixasInspecionadas!=decimal.Truncate(item.CaixasInspecionadas) ||
         item.Quantidade!=decimal.Truncate(item.Quantidade) ||
@@ -1624,6 +1627,14 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         var wasConcluded=ins.Value.GetProperty("status").GetString()=="concluida";
         if(ins.Value.GetProperty("status").GetString()=="cancelada")
             return Results.Json(Error("Esta inspeção está cancelada."),statusCode:409);
+        // Validate before touching the parent FST or any saved item.
+        if(InvalidOperationalUnits(input.Itens))
+            return Results.Json(Error("Caixas e peças devem ser números inteiros e não negativos."),statusCode:400);
+        var duplicateItems=(input.Itens??[]).Where(x=>!string.IsNullOrWhiteSpace(x.ProcessoItemId))
+            .GroupBy(x=>x.ProcessoItemId,StringComparer.OrdinalIgnoreCase)
+            .Any(g=>g.Count()>1);
+        if(duplicateItems)
+            return Results.Json(Error("Há um SKU duplicado na atualização. Atualize a inspeção."),statusCode:409);
         var previousItems=wasConcluded
             ? await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
                 $"select=unidades_por_conjunto,processo_itens(*)&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}")
@@ -1699,8 +1710,6 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 return Results.Json(Error("Não foi possível salvar o FST."),statusCode:409);
         }
 
-        if(InvalidOperationalUnits(input.Itens))
-            return Results.Json(Error("Caixas e peças devem ser números inteiros; use caixas fracionadas."),statusCode:400);
         foreach(var item in input.Itens ?? [])
         {
             if(string.IsNullOrWhiteSpace(item.ProcessoItemId))
