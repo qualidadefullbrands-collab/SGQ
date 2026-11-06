@@ -2969,7 +2969,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {inspection.processoId && <button className="secondary" type="button" onClick={resetNewInspection}>Novo processo</button>}
               {!inspection.processoId && !editingInspectionId && !editingProcessId && <button className="secondary" type="button"
                 disabled={inspectionBusy||!parentFstCode(inspection.codigo)||!inspection.itVersionId}
-                onClick={()=>void registerParentProcess()}>Cadastrar FST</button>
+                onClick={()=>void registerParentProcess()}>Cadastrar FST</button>}
             </div>
           </div>
 
