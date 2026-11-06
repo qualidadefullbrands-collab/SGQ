@@ -3351,8 +3351,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <div className="inspection-data-summary">
               <div><small>Processo / subprocesso</small><strong>{formatFst(detail.grupos_inspecao?.processos?.codigo)}{detail.grupos_inspecao?.subprocesso_codigo?'-'+detail.grupos_inspecao.subprocesso_codigo:''}</strong></div>
               <div><small>Cliente</small><strong>{detail.grupos_inspecao?.processos?.cliente || '—'}</strong></div>
-              <div><small>Nota fiscal</small><strong>{detail.grupos_inspecao?.nota_fiscal ?? detail.grupos_inspecao?.processos?.nota_fiscal ?? '—'}</strong></div>
-              <div><small>Origem / transporte</small><strong>{detail.grupos_inspecao?.processos?.origem || '—'} · {detail.grupos_inspecao?.processos?.transporte || '—'}</strong></div>
+              <div><small>Nota fiscal</small><strong>{detail.grupos_inspecao?.nota_fiscal || '—'}</strong></div>
+              <div><small>Origem / transporte</small><strong>{detail.grupos_inspecao?.origem || '—'} · {detail.grupos_inspecao?.transporte || '—'}</strong></div>
+              <div><small>Chegada no CD</small><strong>{formatDateBR(detail.grupos_inspecao?.chegada_cd)}</strong></div>
               <div><small>IT / versão</small><strong>{detail.it_versoes?.instrucoes_trabalho?.codigo || 'Não selecionada'} · {detail.it_versoes?.versao || '—'}</strong></div>
               <div><small>Nível da inspeção</small><strong>{detail.nivel_inspecao || '—'}</strong></div>
               <div><small>Data da inspeção</small><strong>{formatDateBR(detail.data_inspecao)}</strong></div>
