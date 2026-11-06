@@ -3101,13 +3101,17 @@ app.MapPost("/api/inspecoes/{id}/retencao", async (string id,RetentionRequest in
         var (ins,found)=FirstRow(insRows);
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
 
+        // A retenção não integra os requisitos de conclusão da inspeção ou do
+        // laudo. Registrar a decisão "não reter" é opcional; justificativa idem.
         if(input.Itens is null || input.Itens.Count==0)
         {
-            if(string.IsNullOrWhiteSpace(input.MotivoSemRetencao))
-                return Results.Json(Error("Informe o motivo para não reter amostra."),statusCode:400);
-
-            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
-                new {retencao_decisao=false,retencao_motivo=input.MotivoSemRetencao.Trim()},"return=minimal");
+            var note=string.IsNullOrWhiteSpace(input.MotivoSemRetencao)
+                ?null:input.MotivoSemRetencao.Trim();
+            var updated=await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+                $"select=id&id=eq.{Uri.EscapeDataString(id)}",
+                new {retencao_decisao=false,retencao_motivo=note},"return=representation");
+            if(!FirstRow(updated).found)
+                return Results.Json(Error("Não foi possível registrar a decisão de não reter."),statusCode:409);
             return Results.Ok(new {data=new {retidos=0},error=(object?)null});
         }
 
