@@ -834,16 +834,17 @@ app.MapPut("/api/processos/{id}", async (string id,ProcessUpdateRequest input,Ht
     try
     {
         var token=Token(request);
-        await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"processos",
-            $"id=eq.{Uri.EscapeDataString(id)}",
+        var changed=await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"processos",
+            $"select=id&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null",
             new {
                 cliente=input.Cliente,
-                nota_fiscal=input.NotaFiscal,
                 origem=input.Origem,
                 transporte=input.Transporte,
                 chegada_cd=input.ChegadaCd,
                 atualizado_em=DateTimeOffset.UtcNow
-            },"return=minimal");
+            },"return=representation");
+        if(!FirstRow(changed).found)
+            return Results.Json(Error("O FST não foi atualizado; confira suas permissões."),statusCode:409);
         return Results.Ok(new {data=new {ok=true},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -1592,10 +1593,34 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 "resolution=ignore-duplicates,return=minimal");
         }
         if(isSubprocess)
-            await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",$"id=eq.{Uri.EscapeDataString(groupId)}",
-                new{nota_fiscal=string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim()},"return=minimal");
+        {
+            // A NF é individual por subprocesso. Cliente, origem, transporte e
+            // chegada pertencem ao FST principal e devem persistir quando editados.
+            var updatedSubprocess=await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",
+                $"select=id,nota_fiscal&id=eq.{Uri.EscapeDataString(groupId)}",
+                new{nota_fiscal=string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim()},
+                "return=representation");
+            if(!FirstRow(updatedSubprocess).found)
+                return Results.Json(Error("Não foi possível salvar a NF do subprocesso."),statusCode:409);
+            var parentChanges=new {
+                cliente=string.IsNullOrWhiteSpace(input.Cliente)?null:input.Cliente.Trim(),
+                origem=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
+                transporte=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
+                chegada_cd=input.ChegadaCd,
+                atualizado_em=DateTimeOffset.UtcNow
+            };
+            var updatedParent=await RestAsync(client,token,HttpMethod.Patch,"processos",
+                $"select=id&id=eq.{Uri.EscapeDataString(processId)}",parentChanges,"return=representation");
+            if(!FirstRow(updatedParent).found)
+                return Results.Json(Error("Não foi possível salvar os dados compartilhados do FST."),statusCode:409);
+        }
         else
-            await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(processId)}",processUpdate,"return=minimal");
+        {
+            var updatedParent=await RestAsync(client,token,HttpMethod.Patch,"processos",
+                $"select=id&id=eq.{Uri.EscapeDataString(processId)}",processUpdate,"return=representation");
+            if(!FirstRow(updatedParent).found)
+                return Results.Json(Error("Não foi possível salvar o FST."),statusCode:409);
+        }
 
         if(InvalidOperationalUnits(input.Itens))
             return Results.Json(Error("Caixas e peças devem ser números inteiros; use caixas fracionadas."),statusCode:400);
@@ -2686,6 +2711,31 @@ app.MapPut("/api/inspecoes/{id}/fotos/{photoId}/legenda", async (
     catch(Exception e){return Results.Json(Error("Não foi possível atualizar a legenda da foto.",e.Message),statusCode:500);}
 });
 
+// Situação consolidada do Word: consulta os dados efetivamente gravados,
+ // sem confiar no status ou nos campos que estão apenas no navegador.
+app.MapGet("/api/processos/{id}/laudo-status", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("FST inválido."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        using var msg=new HttpRequestMessage(HttpMethod.Get,
+            $"{auditDocsUrl}/process-report-status/{Uri.EscapeDataString(id)}");
+        msg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
+        using var response=await client.SendAsync(msg);
+        var raw=await response.Content.ReadAsStringAsync();
+        if(!response.IsSuccessStatusCode)
+            return Results.Json(Error("Não foi possível verificar as pendências do laudo.",
+                raw[..Math.Min(raw.Length,300)]),statusCode:(int)response.StatusCode);
+        var data=JsonSerializer.Deserialize<JsonElement>(raw);
+        return Results.Ok(new{data,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha na verificação do laudo.",e.Message),statusCode:503);}
+});
+
 app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -2815,22 +2865,33 @@ app.MapPost("/api/inspecoes/{id}/enviar-automate", async (string id,HttpRequest 
             || profile!.Value.GetProperty("ativo").ValueKind!=JsonValueKind.True)
             return Results.Json(Error("Sem permissão para exportar documentos."),statusCode:403);
         var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=id,status,grupo_inspecao_id,grupos_inspecao(processos(codigo,cliente))&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+            $"select=id,status,grupo_inspecao_id,grupos_inspecao(subprocesso_codigo,processo_id,processos(codigo,cliente))&id=eq.{Uri.EscapeDataString(id)}&limit=1");
         var (ins,found)=FirstRow(insRows);
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         if(ins!.Value.GetProperty("status").GetString()!="concluida")
             return Results.Json(Error("Conclua a inspeção antes de enviar o Word."),statusCode:409);
+        var group=ins.Value.GetProperty("grupos_inspecao");
+        var isSubprocess=group.ValueKind==JsonValueKind.Object &&
+            group.TryGetProperty("subprocesso_codigo",out var suffix) &&
+            suffix.ValueKind==JsonValueKind.String&&!string.IsNullOrWhiteSpace(suffix.GetString());
+        var parentId=isSubprocess && group.TryGetProperty("processo_id",out var parentProp)
+            ? parentProp.GetString():null;
+        if(isSubprocess&&!Guid.TryParse(parentId,out _))
+            return Results.Json(Error("FST principal não identificado para o laudo único."),statusCode:409);
         byte[] bytes;
         string fileName;
         using(var generateMsg=new HttpRequestMessage(HttpMethod.Get,
-            $"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}"))
+            isSubprocess
+                ? $"{auditDocsUrl}/generate-process/{Uri.EscapeDataString(parentId!)}"
+                : $"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}"))
         {
             generateMsg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
             using var documentRes=await client.SendAsync(generateMsg);
             if(!documentRes.IsSuccessStatusCode)
             {
                 var reason=await documentRes.Content.ReadAsStringAsync();
-                return Results.Json(Error("Não foi possível gerar o Word para envio.",reason[..Math.Min(reason.Length,250)]),statusCode:502);
+                return Results.Json(Error("Não foi possível gerar o Word para envio.",reason[..Math.Min(reason.Length,500)]),
+                    statusCode:documentRes.StatusCode==System.Net.HttpStatusCode.Conflict?409:502);
             }
             bytes=await documentRes.Content.ReadAsByteArrayAsync();
             fileName=documentRes.Headers.TryGetValues("X-SGQ-File-Name",out var names)

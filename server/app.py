@@ -290,6 +290,152 @@ async def generate_document(execution_id:str,authorization:str|None=Header(defau
         )
 
 
+
+def required_text(value) -> bool:
+    return bool(str(value or "").strip()) and str(value).strip().lower() not in {"pendente","não informado","nao informado"}
+
+def group_label(group:dict) -> str:
+    return "Subprocesso "+str(group.get("subprocesso_codigo") or group.get("codigo") or "?")
+
+async def process_word_status(client:httpx.AsyncClient, token:str, process_id:str)->dict:
+    """Valida integralidade no banco; status concluída isoladamente não libera Word."""
+    parents=await table_rows(client,token,"processos",{
+        "id":f"eq.{process_id}","select":"id,codigo,cliente,it_versao_id,excluido_em","limit":"1"})
+    if not parents or parents[0].get("excluido_em"):
+        raise HTTPException(status_code=404,detail="FST não encontrado ou arquivado.")
+    parent=parents[0]
+    groups=await table_rows(client,token,"grupos_inspecao",{
+        "processo_id":f"eq.{process_id}",
+        "select":"id,codigo,subprocesso_codigo,nota_fiscal,nome",
+        "order":"subprocesso_codigo.asc,codigo.asc"})
+    pending=[]
+    if not required_text(parent.get("cliente")):
+        pending.append("FST principal: cliente não preenchido.")
+    if not parent.get("it_versao_id"):
+        pending.append("FST principal: IT não selecionada.")
+    if not groups:
+        pending.append("FST principal: nenhum subprocesso cadastrado.")
+        return {"ready":False,"pending":pending,"processCode":parent.get("codigo"),
+                "subprocesses":0,"completed":0}
+
+    group_ids=",".join(group["id"] for group in groups)
+    inspections=await table_rows(client,token,"inspecoes",{
+        "grupo_inspecao_id":f"in.({group_ids})","excluido_em":"is.null",
+        "select":"id,grupo_inspecao_id,status,resultado,it_versao_id,data_inspecao,"
+                 "responsavel_id,tamanho_lote,tamanho_amostra,total_inspecionado,"
+                 "total_nao_conforme,limite_rejeicao,dimensionais_finalizados,"
+                 "testes_finalizados,revisao_obrigatoria,revisado_em,observacoes",
+        "order":"criado_em.asc"})
+    by_group={}
+    for item in inspections:
+        by_group.setdefault(item["grupo_inspecao_id"],[]).append(item)
+    ids=",".join(row["id"] for row in inspections)
+    version_id=parent.get("it_versao_id")
+    checks,dims,tests=[],[],[]
+    if version_id:
+        checks,dims,tests=await __import__("asyncio").gather(
+            table_rows(client,token,"it_checklist",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}),
+            table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}),
+            table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}))
+    links,photos,check_results,dim_results,test_results=([],[],[],[],[])
+    if ids:
+        links,photos,check_results,dim_results,test_results=await __import__("asyncio").gather(
+            table_rows(client,token,"grupo_inspecao_itens",{
+                "grupo_inspecao_id":f"in.({group_ids})",
+                "select":"grupo_inspecao_id,processo_itens(id,quantidade,caixas_recebidas,"
+                         "caixas_inspecionadas,quantidade_por_caixa,produtos(sku,nome))"}),
+            table_rows(client,token,"inspecao_fotos",{
+                "inspecao_id":f"in.({ids})","select":"inspecao_id,storage_path,legenda"}),
+            table_rows(client,token,"inspecao_checklist_resultados",{
+                "inspecao_id":f"in.({ids})","select":"inspecao_id,checklist_id,resultado"}),
+            table_rows(client,token,"inspecao_dimensionais",{
+                "inspecao_id":f"in.({ids})","select":"inspecao_id,parametro_id,valor,conforme"}),
+            table_rows(client,token,"inspecao_testes_resultados",{
+                "inspecao_id":f"in.({ids})","select":"inspecao_id,teste_id,resultado"}))
+    completed=0
+    for group in groups:
+        label=group_label(group)
+        group_rows=by_group.get(group["id"],[])
+        if not required_text(group.get("nota_fiscal")):
+            pending.append(f"{label}: nota fiscal não informada.")
+        if not group_rows:
+            pending.append(f"{label}: inspeção não cadastrada.")
+            continue
+        if len(group_rows)>1:
+            pending.append(f"{label}: existem {len(group_rows)} inspeções ativas; regularize antes de emitir o laudo único.")
+        child_links=[x.get("processo_itens") or {} for x in links if x.get("grupo_inspecao_id")==group["id"]]
+        if not child_links:
+            pending.append(f"{label}: nenhum produto vinculado.")
+        for n,product in enumerate(child_links,1):
+            sku=(product.get("produtos") or {}).get("sku")
+            if not required_text(sku) or str(sku).upper().startswith("TMP-"):
+                pending.append(f"{label}: SKU do item {n} não preenchido.")
+            if float(product.get("quantidade") or 0)<=0:
+                pending.append(f"{label}: quantidade do item {n} não preenchida.")
+            if float(product.get("caixas_recebidas") or 0)<=0:
+                pending.append(f"{label}: caixas recebidas do item {n} não preenchidas.")
+            if float(product.get("caixas_inspecionadas") or 0)<=0:
+                pending.append(f"{label}: caixas inspecionadas do item {n} não preenchidas.")
+        for row in group_rows:
+            ident=row["id"]
+            if row.get("status")!="concluida":
+                pending.append(f"{label}: inspeção ainda não concluída.")
+                continue
+            completed+=1
+            if row.get("resultado") not in ("aprovado","reprovado"):
+                pending.append(f"{label}: resultado da inspeção não definido.")
+            if not version_id or row.get("it_versao_id")!=version_id:
+                pending.append(f"{label}: IT diferente da IT única do FST.")
+            if not row.get("data_inspecao"):
+                pending.append(f"{label}: data da inspeção não preenchida.")
+            if not row.get("responsavel_id"):
+                pending.append(f"{label}: responsável não informado.")
+            sample=int(row.get("tamanho_amostra") or 0)
+            inspected=int(row.get("total_inspecionado") or 0)
+            rejection_limit=row.get("limite_rejeicao")
+            early_rejection=(rejection_limit is not None
+                             and int(row.get("total_nao_conforme") or 0)>=int(rejection_limit)
+                             and row.get("resultado")=="reprovado")
+            if sample<=0 or (inspected<sample and not early_rejection):
+                pending.append(f"{label}: amostragem não concluída ({inspected}/{sample}).")
+            if row.get("revisao_obrigatoria") and not row.get("revisado_em"):
+                pending.append(f"{label}: revisão obrigatória ainda pendente.")
+            recorded_checks={str(c["checklist_id"]) for c in check_results
+                             if c.get("inspecao_id")==ident and required_text(c.get("resultado"))}
+            if any(str(c["id"]) not in recorded_checks for c in checks):
+                pending.append(f"{label}: verificações obrigatórias incompletas.")
+            recorded_dims={str(d["parametro_id"]) for d in dim_results if
+                           d.get("inspecao_id")==ident and d.get("valor") is not None
+                           and d.get("conforme") is not None}
+            if dims and (not row.get("dimensionais_finalizados")
+                         or any(str(d["id"]) not in recorded_dims for d in dims)):
+                pending.append(f"{label}: dimensionais incompletos.")
+            recorded_tests={str(t["teste_id"]) for t in test_results if
+                            t.get("inspecao_id")==ident and required_text(t.get("resultado"))}
+            if tests and (not row.get("testes_finalizados")
+                          or any(str(t["id"]) not in recorded_tests for t in tests)):
+                pending.append(f"{label}: testes especiais incompletos.")
+            photo_rows=[p for p in photos if p.get("inspecao_id")==ident]
+            if not photo_rows:
+                pending.append(f"{label}: fotografias da inspeção não registradas.")
+            elif any(not required_text(p.get("storage_path")) or not required_text(p.get("legenda"))
+                     for p in photo_rows):
+                pending.append(f"{label}: fotografias sem arquivo ou legenda.")
+    return {"ready":len(pending)==0,"pending":pending,
+            "processCode":parent.get("codigo"),"subprocesses":len(groups),
+            "completed":completed}
+
+
+@app.get("/process-report-status/{process_id}")
+async def process_report_status(process_id:str,authorization:str|None=Header(default=None)):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401,detail="Authorization Bearer obrigatório.")
+    token=authorization.split(" ",1)[1].strip()
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        await verify_user(client,token)
+        return await process_word_status(client,token,process_id)
+
+
 @app.get("/generate-inspection/{inspection_id}")
 async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=None,authorization:str|None=Header(default=None)):
     if not authorization or not authorization.lower().startswith("bearer "):
@@ -318,6 +464,12 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
         if not group:
             raise HTTPException(status_code=409,detail="Grupo da inspeção não encontrado.")
         process=group.get("processos") or {}
+        if process.get("id") and not inspection.get("excluido_em"):
+            status=await process_word_status(client,token,process["id"])
+            if not status["ready"]:
+                raise HTTPException(status_code=409,detail=
+                    "Laudo bloqueado: conclua e preencha todos os subprocessos. "+
+                    " | ".join(status["pending"][:12]))
 
         version=inspection.get("it_versoes") or {}
         if not version:
@@ -448,6 +600,11 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
     token=authorization.split(" ",1)[1].strip()
     async with httpx.AsyncClient(timeout=75.0) as client:
         await verify_user(client,token)
+        status=await process_word_status(client,token,process_id)
+        if not status["ready"]:
+            raise HTTPException(status_code=409,detail=
+                "Laudo bloqueado: conclua e preencha todos os subprocessos. "+
+                " | ".join(status["pending"][:15]))
         parents=await table_rows(client,token,"processos",{"id":f"eq.{process_id}","select":"id,codigo,it_versao_id,excluido_em","limit":"1"})
         if not parents or parents[0].get("excluido_em"):
             raise HTTPException(status_code=404,detail="FST não encontrado ou arquivado.")

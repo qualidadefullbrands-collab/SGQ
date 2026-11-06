@@ -52,6 +52,16 @@ const columns=[
   {status:'concluida',label:'Concluídas',tone:'done'}
 ] as const
 
+function groupByFst(items:Inspection[]){
+  const groups=new Map<string,Inspection[]>()
+  for(const item of items){
+    const key=item.grupos_inspecao?.processo_id||item.id
+    const current=groups.get(key)
+    if(current)current.push(item)
+    else groups.set(key,[item])
+  }
+  return Array.from(groups.entries()).map(([key,children])=>({key,children}))
+}
 function normalized(value:unknown){
   return String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim()
 }
@@ -283,7 +293,13 @@ export default function InspectionsKanban({
           <span className="sgq-kanban-lane-count">{column.items.length}</span>
         </div>
         <div className="sgq-kanban-lane-content">
-          {column.items.slice(0,shownByLane[column.status]??pageSize).map(item=>{
+          {groupByFst(column.items.slice(0,shownByLane[column.status]??pageSize)).map(({key,children})=><section
+            className="sgq-kanban-process-group" key={key} aria-label={'Processo '+formatFst(processById.get(key)?.codigo??children[0]?.grupos_inspecao?.processos?.codigo)}>
+            <div className="sgq-kanban-process-group-title">
+              <strong>{formatFst(processById.get(key)?.codigo??children[0]?.grupos_inspecao?.processos?.codigo)}</strong>
+              <span>{children.length} inspeção(ões) independentes</span>
+            </div>
+            {children.map(item=>{
             const group=item.grupos_inspecao
             const process=processById.get(group?.processo_id??'')
             const linked=group?.processos
@@ -295,7 +311,7 @@ export default function InspectionsKanban({
             const done=item.status==='concluida'
             const active=item.status==='em_andamento'
             const result=item.resultado==='aprovado'?'Aprovado':item.resultado==='reprovado'?'Reprovado':null
-            return <article className="sgq-kanban-card" key={item.id}
+            return <article className="sgq-kanban-card sgq-kanban-independent-inspection" key={item.id}
               draggable={canMoveCard(item)}
               data-dragging={draggingId===item.id}
               onDragStart={e=>{
@@ -339,7 +355,8 @@ export default function InspectionsKanban({
                 </button>
               </div>
             </article>
-          })}
+            })}
+          </section>)}
           {column.items.length>(shownByLane[column.status]??pageSize)&&
             <button type="button" className="sgq-kanban-loadmore"
               onClick={()=>setShownByLane(current=>({...current,[column.status]:(current[column.status]??pageSize)+pageSize}))}>
