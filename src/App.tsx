@@ -1497,8 +1497,8 @@ export default function App() {
       setInspection(old=>parentFstCode(old.codigo)===parentFstCode(code)?{
         ...old,processoId:existing.id,itVersionId:existing.it_versao_id??old.itVersionId,
         subprocessoCodigo:code.match(/-([A-Z])$/)?.[1]??(old.processoId===existing.id?old.subprocessoCodigo:nextSubprocessFor(existing)),cliente:old.cliente||existing.cliente||'',
-        notaFiscal:old.notaFiscal,origem:old.origem||existing.origem||'',
-        transporte:old.transporte||existing.transporte||'',chegadaCd:old.chegadaCd||existing.chegada_cd||''
+        notaFiscal:old.notaFiscal,origem:old.origem,
+        transporte:old.transporte,chegadaCd:old.chegadaCd
       }:old)
     }
     try{
@@ -1571,9 +1571,6 @@ export default function App() {
     const saved=await apiPut<any>(`/api/processos/${editingProcess.id}`,{
       cliente:editingProcess.cliente,
       notaFiscal:null,
-      origem:editingProcess.origem,
-      transporte:editingProcess.transporte,
-      chegadaCd:editingProcess.chegada_cd,
     })
     if (saved.error) return setError(saved.error.message)
     const revised={...editingProcess,nota_fiscal:null}
@@ -1761,8 +1758,9 @@ export default function App() {
       return suggestMissingInspectedBoxes(applyBoxGroupsToSku(base,item.distribuicao_caixas))
     })
     const form={
-      codigo:fstCode(process.codigo),cliente:process.cliente ?? '',notaFiscal:detail.grupos_inspecao?.nota_fiscal ?? process.nota_fiscal ?? '',origem:process.origem ?? '',transporte:process.transporte ?? '',
-      chegadaCd:process.chegada_cd ?? '',dataInspecao:String(detail.data_inspecao ?? '').slice(0,10),inspectionLevel:detail.nivel_inspecao ?? 'I',
+      codigo:fstCode(process.codigo),cliente:process.cliente ?? '',notaFiscal:detail.grupos_inspecao?.nota_fiscal ?? '',
+      origem:detail.grupos_inspecao?.origem ?? '',transporte:detail.grupos_inspecao?.transporte ?? '',
+      chegadaCd:detail.grupos_inspecao?.chegada_cd ?? '',dataInspecao:String(detail.data_inspecao ?? '').slice(0,10),inspectionLevel:detail.nivel_inspecao ?? 'I',
       observacaoInterna:detail.observacao_interna ?? '',itVersionId:detail.it_versao_id ?? '',itens:rows,
     }
     setExpandedEditSkuIndex(rows.length>1?null:0)
@@ -1861,11 +1859,11 @@ export default function App() {
           observacao_interna:editPayload.observacaoInterna,
           grupos_inspecao:{...current.grupos_inspecao,
             nota_fiscal:fastPath?current.grupos_inspecao?.nota_fiscal:editPayload.notaFiscal,
+            origem:fastPath?current.grupos_inspecao?.origem:editPayload.origem,
+            transporte:fastPath?current.grupos_inspecao?.transporte:editPayload.transporte,
+            chegada_cd:fastPath?current.grupos_inspecao?.chegada_cd:editPayload.chegadaCd,
             processos:{...current.grupos_inspecao?.processos,
-              cliente:fastPath?current.grupos_inspecao?.processos?.cliente:editPayload.cliente,
-              origem:fastPath?current.grupos_inspecao?.processos?.origem:editPayload.origem,
-              transporte:fastPath?current.grupos_inspecao?.processos?.transporte:editPayload.transporte,
-              chegada_cd:fastPath?current.grupos_inspecao?.processos?.chegada_cd:editPayload.chegadaCd}
+              cliente:fastPath?current.grupos_inspecao?.processos?.cliente:editPayload.cliente}
           }
         }
       })
@@ -1875,19 +1873,18 @@ export default function App() {
         codigo_amostragem:p?.codigo??item.codigo_amostragem,
         grupos_inspecao:item.grupos_inspecao?{...item.grupos_inspecao,
           nota_fiscal:fastPath?item.grupos_inspecao.nota_fiscal:editPayload.notaFiscal,
+          origem:fastPath?item.grupos_inspecao.origem:editPayload.origem,
+          transporte:fastPath?item.grupos_inspecao.transporte:editPayload.transporte,
+          chegada_cd:fastPath?item.grupos_inspecao.chegada_cd:editPayload.chegadaCd,
           processos:item.grupos_inspecao.processos?{...item.grupos_inspecao.processos,
-            cliente:fastPath?item.grupos_inspecao.processos.cliente:editPayload.cliente,
-            origem:fastPath?item.grupos_inspecao.processos.origem:editPayload.origem,
-            transporte:fastPath?item.grupos_inspecao.processos.transporte:editPayload.transporte,
-            chegada_cd:fastPath?item.grupos_inspecao.processos.chegada_cd:editPayload.chegadaCd
+            cliente:fastPath?item.grupos_inspecao.processos.cliente:editPayload.cliente
           }:item.grupos_inspecao.processos
         }:item.grupos_inspecao
       }:item))
       if(!fastPath){
         const pid=detail?.grupos_inspecao?.processo_id
         if(pid)setProcesses(current=>current.map(proc=>proc.id===pid?
-          {...proc,cliente:editPayload.cliente,origem:editPayload.origem,
-            transporte:editPayload.transporte,chegada_cd:editPayload.chegadaCd}:proc))
+          {...proc,cliente:editPayload.cliente}:proc))
       }
       setMessage(fastPath?'Quantidades e caixas salvas.':'Dados da inspeção salvos.')
       editLastSavedFingerprint.current=JSON.stringify(editingInspectionData)
@@ -4157,9 +4154,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <h2>{formatFst(editingProcess.codigo)}</h2>
             <div className="form-grid one">
               <label>Cliente<input value={editingProcess.cliente ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,cliente:e.target.value})}/></label>
-              <label>Origem<input value={editingProcess.origem ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,origem:e.target.value})}/></label>
-              <label>Transporte<input value={editingProcess.transporte ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,transporte:e.target.value})}/></label>
-              <label>Chegada no CD<input type="date" value={editingProcess.chegada_cd ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,chegada_cd:e.target.value})}/></label>
+
             </div>
             <button className="primary wide" type="submit">Salvar alterações</button>
           </form>
