@@ -22,7 +22,8 @@ test('subprocess invoice is populated from its own group, not stale parent proce
  const edit=app.split('function startEditingInspectionData()')[1]?.split('async function saveEditingInspectionData()')[0]||''
  assert.match(edit,/notaFiscal:detail\.grupos_inspecao\?\.nota_fiscal/)
  assert.match(app,/NF deste subprocesso/)
- assert.match(app,/detail\.grupos_inspecao\?\.nota_fiscal \?\? detail\.grupos_inspecao\?\.processos\?\.nota_fiscal/)
+ assert.match(app,/detail\.grupos_inspecao\?\.nota_fiscal \|\| '—'/)
+ assert.doesNotMatch(app,/detail\.grupos_inspecao\?\.nota_fiscal \?\? detail\.grupos_inspecao\?\.processos\?\.nota_fiscal/)
  const save=app.split('async function saveEditingInspectionData()')[1]?.split('async function suggestApplicableIt')[0]||''
  assert.match(save,/setDetail\(/)
  assert.match(save,/nota_fiscal:fastPath\?current\.grupos_inspecao\?\.nota_fiscal:editPayload\.notaFiscal/)
