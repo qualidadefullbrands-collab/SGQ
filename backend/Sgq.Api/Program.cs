@@ -2749,6 +2749,118 @@ app.MapPut("/api/inspecoes/{id}/fotos/{photoId}/legenda", async (
     catch(Exception e){return Results.Json(Error("Não foi possível atualizar a legenda da foto.",e.Message),statusCode:500);}
 });
 
+// Photo changes preserve original files and audit the change rather than deleting
+// evidence permanently. The report and gallery show only active photo rows.
+app.MapPost("/api/inspecoes/{id}/fotos/{photoId}/remover", async(
+    string id,string photoId,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _)||!Guid.TryParse(photoId,out _))
+            return Results.Json(Error("Foto ou inspeção inválida."),statusCode:400);
+        var token=Token(request);var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
+        var (profile,authorized)=FirstRow(profileRows);
+        if(!authorized||profile!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor" or "inspetor"))
+            return Results.Json(Error("Sem permissão para remover fotos."),statusCode:403);
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,status,grupos_inspecao(processos(excluido_em))&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+        var (ins,found)=FirstRow(insRows);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        if(ins!.Value.GetProperty("status").GetString() is "cancelada")
+            return Results.Json(Error("Inspeção cancelada."),statusCode:409);
+        var group=ins.Value.GetProperty("grupos_inspecao");
+        if(group.ValueKind!=JsonValueKind.Object||!group.TryGetProperty("processos",out var process)||
+           process.ValueKind!=JsonValueKind.Object||
+           (process.TryGetProperty("excluido_em",out var archived)&&archived.ValueKind!=JsonValueKind.Null))
+            return Results.Json(Error("FST arquivado ou indisponível."),statusCode:409);
+        var photoQuery=$"inspecao_id=eq.{Uri.EscapeDataString(id)}&id=eq.{Uri.EscapeDataString(photoId)}&excluido_em=is.null";
+        var before=await RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
+            "select=id,storage_path,legenda,nc_id&"+photoQuery+"&limit=1");
+        var (original,exists)=FirstRow(before);
+        if(!exists)return Results.Json(Error("Esta foto não está ativa nesta inspeção."),statusCode:404);
+        var updated=await RestAsync(client,token,HttpMethod.Patch,"inspecao_fotos",
+            "select=id&"+photoQuery,
+            new{excluido_em=DateTimeOffset.UtcNow,excluido_por=userId},"return=representation");
+        if(!FirstRow(updated).found)return Results.Json(Error("Não foi possível remover a foto."),statusCode:409);
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+            $"id=eq.{Uri.EscapeDataString(id)}",
+            new{documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
+        try{
+            await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+                new{usuario_id=userId,entidade="inspecao_fotos",entidade_id=photoId,
+                    acao="remocao_foto",dados=new{inspecao_id=id,antes=original,registrado_em=DateTimeOffset.UtcNow}},
+                "return=minimal");
+        }catch(Exception e){app.Logger.LogWarning(e,"Photo removal audit log failed {PhotoId}",photoId);}
+        return Results.Ok(new{data=new{ok=true,foto_id=photoId},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível remover a foto.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/inspecoes/{id}/fotos/{photoId}/substituir", async(
+    string id,string photoId,RegisterInspectionPhotoItem input,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _)||!Guid.TryParse(photoId,out _))
+            return Results.Json(Error("Foto ou inspeção inválida."),statusCode:400);
+        var path=(input.StoragePath??"").Trim();
+        if(!path.StartsWith(id+"/gerais/",StringComparison.Ordinal)||input.Legenda?.Length>300)
+            return Results.Json(Error("Selecione uma foto válida desta inspeção."),statusCode:400);
+        var token=Token(request);var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
+        var (profile,authorized)=FirstRow(profileRows);
+        if(!authorized||profile!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor" or "inspetor"))
+            return Results.Json(Error("Sem permissão para substituir fotos."),statusCode:403);
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,status,grupos_inspecao(processos(excluido_em))&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+        var (ins,found)=FirstRow(insRows);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        if(ins!.Value.GetProperty("status").GetString() is "cancelada")
+            return Results.Json(Error("Inspeção cancelada."),statusCode:409);
+        var group=ins.Value.GetProperty("grupos_inspecao");
+        if(group.ValueKind!=JsonValueKind.Object||!group.TryGetProperty("processos",out var process)||
+           process.ValueKind!=JsonValueKind.Object||
+           (process.TryGetProperty("excluido_em",out var archived)&&archived.ValueKind!=JsonValueKind.Null))
+            return Results.Json(Error("FST arquivado ou indisponível."),statusCode:409);
+        var photoQuery=$"inspecao_id=eq.{Uri.EscapeDataString(id)}&id=eq.{Uri.EscapeDataString(photoId)}&excluido_em=is.null";
+        var before=await RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
+            "select=id,storage_path,legenda,nc_id&"+photoQuery+"&limit=1");
+        var (original,exists)=FirstRow(before);
+        if(!exists)return Results.Json(Error("Foto original não encontrada nesta inspeção."),statusCode:404);
+        var ncId=original!.Value.TryGetProperty("nc_id",out var ncProp)&&ncProp.ValueKind==JsonValueKind.String?ncProp.GetString():null;
+        // Insert replacement BEFORE archiving the old photo. If the insertion
+        // fails, the original evidence remains available and unchanged.
+        var inserted=await RestAsync(client,token,HttpMethod.Post,"inspecao_fotos","select=id",
+            new{inspecao_id=id,storage_path=path,
+                legenda=string.IsNullOrWhiteSpace(input.Legenda)?null:input.Legenda.Trim(),
+                nc_id=ncId},"return=representation");
+        var (created,createdOk)=FirstRow(inserted);
+        if(!createdOk)return Results.Json(Error("A nova foto não pôde ser registrada."),statusCode:409);
+        var newId=created!.Value.GetProperty("id").GetString()!;
+        var archivedRows=await RestAsync(client,token,HttpMethod.Patch,"inspecao_fotos",
+            "select=id&"+photoQuery,
+            new{excluido_em=DateTimeOffset.UtcNow,excluido_por=userId,substituida_por=newId},
+            "return=representation");
+        if(!FirstRow(archivedRows).found)
+            return Results.Json(Error("A foto nova foi registrada, mas a anterior continua ativa. Atualize a galeria antes de tentar novamente."),statusCode:409);
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+            $"id=eq.{Uri.EscapeDataString(id)}",
+            new{documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
+        try{
+            await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+                new{usuario_id=userId,entidade="inspecao_fotos",entidade_id=photoId,
+                    acao="substituicao_foto",dados=new{inspecao_id=id,antes=original,
+                        novo_id=newId,novo_caminho=path,registrado_em=DateTimeOffset.UtcNow}},
+                "return=minimal");
+        }catch(Exception e){app.Logger.LogWarning(e,"Photo replacement audit log failed {PhotoId}",photoId);}
+        return Results.Ok(new{data=new{ok=true,foto_id=newId,substituida=photoId},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível substituir a foto.",e.Message),statusCode:500);}
+});
+
 // Situação consolidada do Word: consulta os dados efetivamente gravados,
  // sem confiar no status ou nos campos que estão apenas no navegador.
 app.MapGet("/api/processos/{id}/laudo-status", async (string id,HttpRequest request,IHttpClientFactory factory)=>
