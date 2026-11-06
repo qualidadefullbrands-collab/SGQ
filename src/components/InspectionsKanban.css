@@ -148,3 +148,21 @@
   .sgq-operational-shell .sgq-process-view-toggle button{flex:1}
 }
 @media(prefers-reduced-motion:reduce){.sgq-operational-shell .sgq-process-node-toggle>svg{transition:none}}
+
+/* Kanban por FST: um cartão por processo, subprocessos e inspeções dentro */
+.sgq-operational-shell .sgq-kanban-process-card{cursor:default}
+.sgq-operational-shell .sgq-kanban-process-actions{display:flex;align-items:center;gap:5px}
+.sgq-operational-shell .sgq-kanban-process-actions>button{display:grid;place-items:center;border:1px solid #d7e4eb;border-radius:7px;background:#fff;color:#4d7085;width:29px;height:29px;padding:0;cursor:pointer}
+.sgq-operational-shell .sgq-kanban-process-actions>button:disabled{opacity:.5}
+.sgq-operational-shell .sgq-kanban-subprocess-list{display:grid;gap:8px;margin:12px 0 2px}
+.sgq-operational-shell .sgq-kanban-subprocess{border:1px solid #e2eaf0;border-radius:9px;background:#f9fbfc;padding:9px;min-width:0}
+.sgq-operational-shell .sgq-kanban-subprocess-heading{display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;color:#567083;font-size:11px;margin-bottom:7px}
+.sgq-operational-shell .sgq-kanban-subprocess-heading strong{font-size:12px;color:#275670}
+.sgq-operational-shell .sgq-kanban-subprocess-item{border-top:1px solid #e2e9ef;padding-top:8px;margin-top:8px;min-width:0}
+.sgq-operational-shell .sgq-kanban-subprocess-identity{display:flex;align-items:center;gap:6px;justify-content:space-between;flex-wrap:wrap;font-size:12px;color:#49657a;font-weight:700}
+.sgq-operational-shell .sgq-kanban-subprocess-buttons{display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-top:7px}
+.sgq-operational-shell .sgq-kanban-subprocess-buttons>.sgq-kanban-open{margin-left:auto}
+.sgq-operational-shell .sgq-kanban-subprocess-buttons .sgq-kanban-actions{position:relative}
+.sgq-operational-shell .sgq-kanban-subprocess-item[draggable="true"]{cursor:grab}
+.sgq-operational-shell .sgq-kanban-subprocess-item[draggable="true"]:active{cursor:grabbing}
+@media(max-width:650px){.sgq-operational-shell .sgq-kanban-process-actions{gap:3px}.sgq-operational-shell .sgq-kanban-subprocess{padding:8px}}
