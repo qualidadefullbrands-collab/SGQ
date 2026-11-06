@@ -3884,7 +3884,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
       {itReview && (
-        <div className="modal-backdrop" onClick={()=>setItReview(null)}>
+        <div className="modal-backdrop">
           <article className="sample-detail it-review-modal" onClick={(e)=>e.stopPropagation()}>
             <button className="close" type="button" onClick={()=>setItReview(null)}>×</button>
             <span className="eyebrow">REVISÃO DA ESTRUTURA</span>
@@ -4013,7 +4013,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
 
           {selectedSample && (
-            <div className="modal-backdrop stock-drawer-backdrop" onClick={()=>setSelectedSample(null)}>
+            <div className="modal-backdrop stock-drawer-backdrop">
               <article className="sample-detail stock-drawer" onClick={(e)=>e.stopPropagation()}>
                 <div className="stock-drawer-head">
                   <div>
@@ -4141,7 +4141,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
       {editingInspectionData && (
-        <div className="modal-backdrop" onClick={()=>setEditingInspectionData(null)}>
+        <div className="modal-backdrop">
           <article className="sample-detail inspection-edit-modal" onClick={(e)=>e.stopPropagation()}>
             <button className="close" type="button" onClick={()=>setEditingInspectionData(null)}>×</button>
             <span className="eyebrow">DADOS DA INSPEÇÃO</span>
@@ -4220,7 +4220,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </div>
       )}
       {editingProcess && (
-        <div className="modal-backdrop" onClick={()=>setEditingProcess(null)}>
+        <div className="modal-backdrop">
           <form className="sample-detail" onSubmit={saveProcessEdit} onClick={(e)=>e.stopPropagation()}>
             <button className="close" type="button" onClick={()=>setEditingProcess(null)}>×</button>
             <span className="eyebrow">EDITAR PROCESSO</span>
@@ -4314,7 +4314,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
       {!!pendingModal.length && (
-        <div className="modal-backdrop" onClick={()=>setPendingModal([])}>
+        <div className="modal-backdrop">
           <article className="sample-detail pending-detail" onClick={(e)=>e.stopPropagation()}>
             <button className="close" type="button" onClick={()=>setPendingModal([])}>×</button>
             <span className="eyebrow">PENDÊNCIAS</span>
