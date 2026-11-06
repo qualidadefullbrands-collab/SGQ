@@ -61,6 +61,6 @@ test('Changing the FST invalidates stale lookups and removes only old Omie-impor
  assert.match(app,/setOmieSkuImport\(null\);setOmieSkuReview\(null\);setOmieSkuReviewError\(''\);setOmieOrderPickerOpen\(false\);setOmieOrders\(null\);setOmieSelectedOrder\(''\)/)
  assert.match(app,/rows\.filter\(row=>!row\.omieSourceFst\|\|row\.omieSourceFst===fstCode\(inputValue\)\)/)
  assert.match(lookup,/if\(requestId!==fstLookupRequest\.current\)return/)
- assert.match(lookup,/const existing=processes\.find\(p=>fstCode\(p\.codigo\)===code\)/)
+ assert.ok(lookup.includes('const existing=processes.find(p=>parentFstCode(p.codigo)===parentFstCode(code))'))
  assert.match(lookup,/body:\{codigo:code,\.\.\.\(codigoPedido\?\{codigoPedido\}:\{\}\)\}/)
 })

@@ -1,12 +1,14 @@
 from __future__ import annotations
 import os, base64, urllib.parse, re, unicodedata
+from io import BytesIO
+from docx import Document
 from pathlib import Path
 from datetime import datetime, timezone
 import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .docx_generator import generate, file_name, generate_inspection, inspection_file_name
+from .docx_generator import generate, file_name, generate_inspection, inspection_file_name, append_subprocess_appendix
 
 SUPABASE_URL=os.environ.get("SUPABASE_URL","").rstrip("/")
 SUPABASE_KEY=os.environ.get("SUPABASE_PUBLISHABLE_KEY","")
@@ -437,6 +439,104 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
                 "Cache-Control":"no-store",
             },
         )
+
+@app.get("/generate-process/{process_id}")
+async def generate_process_document(process_id:str,authorization:str|None=Header(default=None)):
+    """Laudo único do FST com a IT oficial uma vez e anexos para A, B, C..."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401,detail="Authorization Bearer obrigatório.")
+    token=authorization.split(" ",1)[1].strip()
+    async with httpx.AsyncClient(timeout=75.0) as client:
+        await verify_user(client,token)
+        parents=await table_rows(client,token,"processos",{"id":f"eq.{process_id}","select":"id,codigo,it_versao_id,excluido_em","limit":"1"})
+        if not parents or parents[0].get("excluido_em"):
+            raise HTTPException(status_code=404,detail="FST não encontrado ou arquivado.")
+        parent=parents[0]
+        groups=await table_rows(client,token,"grupos_inspecao",{
+            "processo_id":f"eq.{process_id}",
+            "select":"id,codigo,subprocesso_codigo,nota_fiscal,nome",
+            "order":"subprocesso_codigo.asc,codigo.asc",
+        })
+        if not groups:
+            raise HTTPException(status_code=409,detail="Este FST não possui subprocessos.")
+        group_ids=",".join(g["id"] for g in groups)
+        inspections=await table_rows(client,token,"inspecoes",{
+            "grupo_inspecao_id":f"in.({group_ids})",
+            "excluido_em":"is.null",
+            "select":"id,numero,status,resultado,grupo_inspecao_id,it_versao_id,data_inspecao,tamanho_lote,tamanho_amostra,nivel_inspecao",
+            "order":"criado_em.asc"
+        })
+        by_group={row["grupo_inspecao_id"]:row for row in inspections}
+        missing=[(g.get("subprocesso_codigo") or g.get("codigo")) for g in groups if g["id"] not in by_group]
+        pending=[(g.get("subprocesso_codigo") or g.get("codigo")) for g in groups
+                 if g["id"] in by_group and by_group[g["id"]].get("status")!="concluida"]
+        if missing or pending:
+            raise HTTPException(status_code=409,detail=
+                "Conclua todos os subprocessos antes de gerar o laudo único. "+
+                ("Sem inspeção: "+", ".join(missing)+". " if missing else "")+
+                ("Pendentes: "+", ".join(pending)+"." if pending else ""))
+        versions={row.get("it_versao_id") for row in inspections if row.get("it_versao_id")}
+        parent_version=parent.get("it_versao_id")
+        if (len(versions)>1 or (parent_version and versions!={parent_version})):
+            raise HTTPException(status_code=409,detail="As ITs dos subprocessos não correspondem à IT única do FST.")
+        first=by_group[groups[0]["id"]]
+        primary=await generate_inspection_document(first["id"],authorization=authorization)
+        if not isinstance(primary,Response) or not getattr(primary,"body",None):
+            raise HTTPException(status_code=502,detail="Falha ao montar o documento principal.")
+        doc=Document(BytesIO(primary.body))
+        # Etiqueta de identificação antes do formulário preenchido do primeiro subprocesso.
+        label=doc.add_paragraph()
+        label.add_run(f"FST {str(parent.get('codigo') or '').removeprefix('FST')} — LAUDO CONSOLIDADO").bold=True
+        label.add_run(f" | Subprocesso {groups[0].get('subprocesso_codigo') or groups[0].get('codigo')}")
+        doc._element.body.remove(label._p)
+        doc._element.body.insert(0,label._p)
+
+        for group in groups[1:]:
+            row=by_group[group["id"]]
+            gid=group["id"]
+            links,checks,check_results,params,dimensionals,tests,test_results,photo_rows=await __import__("asyncio").gather(
+                table_rows(client,token,"grupo_inspecao_itens",{"grupo_inspecao_id":f"eq.{gid}","select":"processo_itens(*,produtos(*))"}),
+                table_rows(client,token,"it_checklist",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
+                table_rows(client,token,"inspecao_checklist_resultados",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
+                table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
+                table_rows(client,token,"inspecao_dimensionais",{"inspecao_id":f"eq.{row['id']}","select":"*","order":"sequencia_amostra.asc"}),
+                table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
+                table_rows(client,token,"inspecao_testes_resultados",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
+                table_rows(client,token,"inspecao_fotos",{"inspecao_id":f"eq.{row['id']}","select":"*","order":"criado_em.asc"}),
+            )
+            items=[]
+            for link in links:
+                item=dict(link.get("processo_itens") or {})
+                if item:
+                    item["produto"]=item.pop("produtos",{}) or {}
+                    items.append(item)
+            photos=[]
+            seen=set()
+            for photo in photo_rows:
+                path=photo.get("storage_path")
+                if not path or path in seen:continue
+                seen.add(path)
+                try:
+                    binary=await storage_download(client,token,"inspecao-fotos",path)
+                except HTTPException as exc:
+                    raise HTTPException(status_code=503,detail=f"Foto indisponível no subprocesso {group.get('subprocesso_codigo') or group.get('codigo')}.") from exc
+                photos.append({"bytes":binary,"caption":photo.get("legenda") or ""})
+            append_subprocess_appendix(doc,{
+                "inspection":row,"group":group,"items":items,
+                "checklist":checks,"check_results":check_results,
+                "dim_params":params,"dim_results":dimensionals,
+                "tests":tests,"test_results":test_results,"photos":photos,
+            })
+        out=BytesIO()
+        doc.save(out)
+        filename=f"FST{str(parent.get('codigo') or '').removeprefix('FST')} - Laudo consolidado.docx"
+        clean=re.sub(r'[\\/:*?"<>|]+'," ",filename)
+        encoded=urllib.parse.quote(clean,safe="")
+        return Response(content=out.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition":f"attachment; filename*=UTF-8''{encoded}",
+                     "X-SGQ-File-Name":encoded,"Cache-Control":"no-store"})
+
 
 @app.get("/template-status")
 async def template_status(authorization:str|None=Header(default=None)):

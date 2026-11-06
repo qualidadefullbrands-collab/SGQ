@@ -390,6 +390,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
     doc=Document(BytesIO(template_bytes))
     inspection=payload.get("inspection") or {}
     process=payload.get("process") or {}
+    group=payload.get("group") or {}
     items=payload.get("items") or []
     checks=payload.get("checklist") or []
     check_results=payload.get("check_results") or []
@@ -439,7 +440,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
         "código do cliente": "\n".join(all_skus),
         "cliente": process.get("cliente") or "",
         "processo fst": fst_code(process.get("codigo")),
-        "nota fiscal": process.get("nota_fiscal") or "",
+        "nota fiscal": group.get("nota_fiscal") or process.get("nota_fiscal") or "",
         "lote": first_item.get("lote") or "",
         "material": first_item.get("material") or "",
         "capacidade": first_item.get("capacidade") or "",
@@ -599,6 +600,78 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             if trPr.find(qn("w:cantSplit")) is None: trPr.append(OxmlElement("w:cantSplit"))
 
     out=BytesIO(); doc.save(out); return out.getvalue()
+
+def append_subprocess_appendix(doc, payload:dict) -> None:
+    """Anexo individual; não replica o modelo da IT do FST principal."""
+    inspection=payload.get("inspection") or {}
+    group=payload.get("group") or {}
+    items=payload.get("items") or []
+    checks=payload.get("checklist") or []
+    check_results=payload.get("check_results") or []
+    dimensionals=payload.get("dim_results") or []
+    params=payload.get("dim_params") or []
+    tests=payload.get("tests") or []
+    test_results=payload.get("test_results") or []
+    photos=payload.get("photos") or []
+    code=group.get("subprocesso_codigo") or group.get("codigo") or "SEM-CODIGO"
+    doc.add_page_break()
+    title=doc.add_paragraph()
+    title.add_run(f"ANEXO DE INSPEÇÃO — SUBPROCESSO {code}").bold=True
+    doc.add_paragraph(f"Nota fiscal: {group.get('nota_fiscal') or 'Não informada'}")
+    doc.add_paragraph(f"Inspeção: {inspection.get('numero') or ''} · Data: {fmt_date(inspection.get('data_inspecao'))} · Resultado: {str(inspection.get('resultado') or 'pendente').upper()}")
+    doc.add_paragraph(f"Amostragem: lote {whole_number(inspection.get('tamanho_lote'))}; amostra {whole_number(inspection.get('tamanho_amostra'))}; nível {inspection.get('nivel_inspecao') or '—'}")
+    item_table=doc.add_table(rows=1,cols=7)
+    for cell,value in zip(item_table.rows[0].cells,["SKU","Produto","Lote","Qtd. recebida","Caixas recebidas","Caixas inspecionadas","Qtd. por caixa"]):
+        set_cell(cell,value,7,bold=True)
+    for item in items:
+        product=item.get("produto") or {}
+        add_row(item_table,[
+            product.get("sku") or item.get("codigo_cliente") or "—",
+            product.get("nome") or "—",
+            item.get("lote") or "—",
+            whole_number(item.get("quantidade")),
+            whole_number(item.get("caixas_recebidas")),
+            whole_number(item.get("caixas_inspecionadas")),
+            whole_number(item.get("quantidade_por_caixa")),
+        ],7)
+    if checks:
+        doc.add_paragraph("Verificações")
+        by_id={str(r.get("checklist_id")):r for r in check_results}
+        table=doc.add_table(rows=1,cols=3)
+        for cell,val in zip(table.rows[0].cells,["Verificação","Resultado","Observação"]):set_cell(cell,val,7,bold=True)
+        for check in checks:
+            value=by_id.get(str(check.get("id")),{})
+            add_row(table,[check.get("descricao") or check.get("nome") or check.get("titulo") or f"Item {check.get('ordem') or ''}",
+                value.get("resultado") or "pendente",value.get("observacao") or ""],7)
+    if dimensionals:
+        doc.add_paragraph("Verificações dimensionais")
+        names={str(r.get("id")):r.get("nome") for r in params}
+        table=doc.add_table(rows=1,cols=5)
+        for cell,val in zip(table.rows[0].cells,["Parâmetro","Produto","Amostra","Valor","Conformidade"]):set_cell(cell,val,7,bold=True)
+        item_names={str(i.get("id")):str((i.get("produto") or {}).get("sku") or "") for i in items}
+        for row in dimensionals:
+            add_row(table,[names.get(str(row.get("parametro_id"))) or "Parâmetro",
+                item_names.get(str(row.get("processo_item_id"))) or "",
+                row.get("sequencia_amostra") or "",row.get("valor") or "",
+                "C" if row.get("conforme") is True else "NC" if row.get("conforme") is False else ""],7)
+    if tests:
+        doc.add_paragraph("Testes especiais")
+        by_id={str(r.get("teste_id")):r for r in test_results}
+        table=doc.add_table(rows=1,cols=3)
+        for cell,val in zip(table.rows[0].cells,["Teste","Resultado","Observação"]):set_cell(cell,val,7,bold=True)
+        for test in tests:
+            value=by_id.get(str(test.get("id")),{})
+            add_row(table,[test.get("nome") or test.get("descricao") or "Teste",
+                value.get("resultado") or "pendente",value.get("observacao") or ""],7)
+    if photos:
+        doc.add_paragraph("Registro fotográfico")
+        table=doc.add_table(rows=0,cols=3)
+        for index,photo in enumerate(photos):
+            if index%3==0:table.add_row()
+            data=photo_bytes(photo.get("bytes"))
+            if not data:raise ValueError(f"Foto {index+1} indisponível para o subprocesso {code}.")
+            add_photo(table.cell(index//3,index%3),data,
+                      photo.get("caption") or f"Foto {index+1}",width=2.17,max_height=2.5)
 
 def inspection_file_name(process_code:str|None,sku:str|None,product_name:str|None=None,collection_name:str|None=None)->str:
     process=fst_code(process_code) if process_code else "FST-SEM-NUMERO"

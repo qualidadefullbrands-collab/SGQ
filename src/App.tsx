@@ -46,6 +46,7 @@ type ProcessRow = {
   data_processo: string
   status: string
   criado_em: string
+  it_versao_id?: string | null
 }
 type InspectionRow = {
   id: string
@@ -65,6 +66,8 @@ type InspectionRow = {
     nome: string
     tipo: string
     processo_id: string
+    subprocesso_codigo?: string | null
+    nota_fiscal?: string | null
     processos?: ProcessRow | null
   } | null
   it_versoes?: {
@@ -224,10 +227,12 @@ function formatFst(value: string | null | undefined) {
   const code=fstCode(raw)
   return code ? 'FST'+code : raw
 }
-function inspectionDisplay(row:{grupos_inspecao?:{processos?:{codigo?:string|null;cliente?:string|null}|null}|null}) {
+function inspectionDisplay(row:{grupos_inspecao?:{subprocesso_codigo?:string|null;processos?:{codigo?:string|null;cliente?:string|null}|null}|null}) {
   const p=row.grupos_inspecao?.processos
-  return formatFst(p?.codigo)+' - '+(p?.cliente?.trim()||'Cliente não informado')
+  const sub=row.grupos_inspecao?.subprocesso_codigo
+  return formatFst(p?.codigo)+(sub?'-'+sub:'')+' - '+(p?.cliente?.trim()||'Cliente não informado')
 }
+function parentFstCode(raw:string){return fstCode(raw).replace(/-[A-Z]$/i,'')}
 function formatDateBR(value: string | null | undefined) {
   if (!value) return '—'
   const raw=String(value).slice(0,10)
@@ -593,6 +598,7 @@ export default function App() {
 
   const [inspection, setInspection] = useState({
     processoId: '',
+    subprocessoCodigo: 'A',
     codigo: '',
     cliente: '',
     notaFiscal: '',
@@ -1082,7 +1088,7 @@ export default function App() {
     manualItSelection.current=false;lastItSuggested.current='';setItSuggestionNote('');setProcessLookupMessage('')
     fstLookupRequest.current++;setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('')
     setInspection({
-      processoId: '', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
+      processoId: '', subprocessoCodigo: 'A', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
       dataInspecao: '', itVersionId: '', inspectionLevel: 'I', observacaoInterna: '',
     })
     setSkuRows([emptySku()])
@@ -1094,6 +1100,7 @@ export default function App() {
     setInspection((current)=>({
       ...current,
       processoId:'',
+      subprocessoCodigo:'A',
       codigo:suffix,
       cliente:'CLIENTE TESTE SGQ',
       notaFiscal:`TESTE-${suffix}`,
@@ -1131,6 +1138,43 @@ export default function App() {
     })
   }
 
+  function nextSubprocessFor(p:ProcessRow){
+    const used=new Set(inspections.filter(i=>i.grupos_inspecao?.processo_id===p.id)
+      .map(i=>i.grupos_inspecao?.subprocesso_codigo).filter(Boolean))
+    return Array.from({length:26},(_,i)=>String.fromCharCode(65+i)).find(letter=>!used.has(letter))||'A'
+  }
+
+  async function registerParentProcess(){
+    if(!canWrite||inspectionBusy)return
+    const codigo=parentFstCode(inspection.codigo)
+    if(!codigo||!inspection.itVersionId){
+      setPopupMessage('Informe o FST principal e selecione uma IT para cadastrá-lo.')
+      return
+    }
+    if(processes.some(p=>parentFstCode(p.codigo)===codigo)){
+      setPopupMessage('Este FST já existe. Selecione o processo na lista.')
+      return
+    }
+    setInspectionBusy(true)
+    try{
+      const created=await apiPost<any>('/api/processos/cadastrar',{
+        codigo,cliente:inspection.cliente,origem:inspection.origem,
+        transporte:inspection.transporte,chegadaCd:inspection.chegadaCd||null,
+        itVersionId:inspection.itVersionId,
+      })
+      if(created.error||!created.data?.id){
+        setPopupMessage(created.error?.message||'Falha ao cadastrar FST.')
+        return
+      }
+      const p=created.data as ProcessRow
+      setProcesses(old=>[p,...old])
+      setInspection(old=>({...old,processoId:p.id,codigo,subprocessoCodigo:'A',
+        cliente:p.cliente??old.cliente,itVersionId:p.it_versao_id??old.itVersionId}))
+      setMessage('FST principal cadastrado. Adicione agora a inspeção do subprocesso A.')
+      void refreshLists()
+    }finally{setInspectionBusy(false)}
+  }
+
   function reuseProcess(p: ProcessRow) {
     autoNfeRef.current=null
     fstLookupRequest.current++
@@ -1139,9 +1183,11 @@ export default function App() {
     setInspection((x) => ({
       ...x,
       processoId: p.id,
+      subprocessoCodigo: nextSubprocessFor(p),
+      itVersionId:p.it_versao_id??x.itVersionId,
       codigo: fstCode(p.codigo),
       cliente: p.cliente ?? '',
-      notaFiscal: p.nota_fiscal ?? '',
+      notaFiscal: '',
       origem: p.origem ?? '',
       transporte: p.transporte ?? '',
       chegadaCd: p.chegada_cd ?? '',
@@ -1174,7 +1220,7 @@ export default function App() {
         unidadesPorConjunto:String(link.unidades_por_conjunto??1)},x.distribuicao_caixas))
     })
     const form={
-      codigo:fstCode(process.codigo),cliente:process.cliente??'',notaFiscal:process.nota_fiscal??'',
+      codigo:fstCode(process.codigo),cliente:process.cliente??'',notaFiscal:data.grupos_inspecao?.nota_fiscal??process.nota_fiscal??'',
       origem:process.origem??'',transporte:process.transporte??'',chegadaCd:process.chegada_cd??'',
       dataInspecao:String(data.data_inspecao??'').slice(0,10),itVersionId:data.it_versao_id??'',
       inspectionLevel:data.nivel_inspecao??'I',observacaoInterna:data.observacao_interna??'',
@@ -1193,10 +1239,10 @@ export default function App() {
     const candidate=inspections.find(x=>x.grupos_inspecao?.processo_id===p.id&&x.status!=='concluida')
     if(candidate){void editInspectionFull(candidate.id);return}
     setEditingInspectionId(null);setEditingProcessId(p.id)
-    setInspection({processoId:p.id,codigo:fstCode(p.codigo),cliente:p.cliente??'',
+    setInspection({processoId:p.id,subprocessoCodigo:'A',codigo:fstCode(p.codigo),cliente:p.cliente??'',
       notaFiscal:p.nota_fiscal??'',origem:p.origem??'',transporte:p.transporte??'',
       chegadaCd:p.chegada_cd??'',dataInspecao:'',
-      itVersionId:'',inspectionLevel:'I',observacaoInterna:''})
+      itVersionId:p.it_versao_id??'',inspectionLevel:'I',observacaoInterna:''})
     setExpandedSkuIndex(0);setSkuRows([emptySku()]);setTab('nova');setMessage('')
   }
 
@@ -1360,11 +1406,12 @@ export default function App() {
     }
     setOmieSkuReviewError('')
     setProcessLookupBusy(true)
-    const existing=processes.find(p=>fstCode(p.codigo)===code)
+    const existing=processes.find(p=>parentFstCode(p.codigo)===parentFstCode(code))
     if(existing){
-      setInspection(old=>fstCode(old.codigo)===code?{
-        ...old,processoId:existing.id,cliente:old.cliente||existing.cliente||'',
-        notaFiscal:old.notaFiscal||existing.nota_fiscal||'',origem:old.origem||existing.origem||'',
+      setInspection(old=>parentFstCode(old.codigo)===parentFstCode(code)?{
+        ...old,processoId:existing.id,itVersionId:existing.it_versao_id??old.itVersionId,
+        subprocessoCodigo:old.processoId===existing.id?old.subprocessoCodigo:nextSubprocessFor(existing),cliente:old.cliente||existing.cliente||'',
+        notaFiscal:old.notaFiscal,origem:old.origem||existing.origem||'',
         transporte:old.transporte||existing.transporte||'',chegadaCd:old.chegadaCd||existing.chegada_cd||''
       }:old)
     }
@@ -1790,7 +1837,9 @@ export default function App() {
     })
     const photos=rows.map((row,index)=>row.fotoFile?{index,file:row.fotoFile}:null).filter(Boolean)
     const payload={
-      codigo:inspection.codigo.trim(),requestId:createRequestId.current,
+      codigo:parentFstCode(inspection.codigo),processoId:inspection.processoId||null,
+      subprocessoCodigo:inspection.subprocessoCodigo,
+      requestId:createRequestId.current,
       cliente:inspection.cliente.trim()||null,notaFiscal:inspection.notaFiscal.trim()||null,
       origem:inspection.origem.trim()||null,transporte:inspection.transporte.trim()||null,
       chegadaCd:inspection.chegadaCd||null,dataInspecao:inspection.dataInspecao||null,
@@ -1867,7 +1916,7 @@ export default function App() {
     setError('')
     setMessage('')
 
-    if (iniciar && !inspection.itVersionId) {setPopupMessage('Selecione a IT para iniciar a inspeção.');return}
+    if (iniciar && !inspection.itVersionId) {setPopupMessage('Selecione a IT no FST principal para iniciar a inspeção.');return}
     setInspectionBusy(true)
     if(!navigator.onLine){
       try{await queueInspectionCreate(iniciar)}
@@ -1923,7 +1972,9 @@ export default function App() {
     }
 
     const created=await apiPost<any>('/api/inspecoes/criar',{
-      codigo:inspection.codigo.trim(),
+      codigo:parentFstCode(inspection.codigo),
+      processoId:inspection.processoId||null,
+      subprocessoCodigo:inspection.subprocessoCodigo,
       requestId:createRequestId.current,
       cliente:inspection.cliente.trim() || null,
       notaFiscal:inspection.notaFiscal.trim() || null,
@@ -1948,8 +1999,8 @@ export default function App() {
     }
 
     // Show the newly saved record without another round trip to the dashboard.
-    const fst=inspection.codigo.trim()
-    const existing=processes.find(p=>fstCode(p.codigo)===fstCode(fst))
+    const fst=parentFstCode(inspection.codigo)
+    const existing=processes.find(p=>parentFstCode(p.codigo)===fst)
     const processSummary:ProcessRow=existing??{
       id:'',codigo:fst?('FST'+fstCode(fst)):'',cliente:inspection.cliente.trim()||null,
       nota_fiscal:inspection.notaFiscal.trim()||null,origem:inspection.origem.trim()||null,
@@ -1964,7 +2015,8 @@ export default function App() {
       total_inspecionado:0,total_nao_conforme:0,nivel_inspecao:inspection.inspectionLevel,
       codigo_amostragem:plan?.codigo??null,criado_em:new Date().toISOString(),
       grupos_inspecao:{
-        id:created.data.grupo_inspecao_id||'',nome:skuRows.find(row=>row.nome.trim())?.nome||'Inspeção',
+        id:created.data.grupo_inspecao_id||'',subprocesso_codigo:inspection.subprocessoCodigo,
+        nota_fiscal:inspection.notaFiscal||null,nome:skuRows.find(row=>row.nome.trim())?.nome||'Inspeção',
         tipo:skuRows.filter(row=>row.sku.trim()||row.nome.trim()).length>1?'kit_componentes':'individual',
         processo_id:existing?.id||'',processos:processSummary
       }
@@ -2673,7 +2725,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
     if(!detail.it_versao_id){
       return setError('Esta inspeção não possui IT vinculada. Vincule uma IT para gerar o Word oficial.')
     }
-    const collectionName=askCollectionName()
+    const parentId=detail.grupos_inspecao?.processo_id as string|undefined
+    const consolidated=Boolean(detail.grupos_inspecao?.subprocesso_codigo&&parentId)
+    const collectionName=consolidated?'':askCollectionName()
     if(collectionName===null)return
     setWordDownloading(true)
     try{
@@ -2681,7 +2735,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       const token=session.data.session?.access_token
       if(!token){setError('Sua sessão expirou. Entre novamente no SGQ.');return}
       const suffix=collectionName?'?nomeConjunto='+encodeURIComponent(collectionName):''
-      const response=await fetch(`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo${suffix}`,{
+      const url=consolidated?`${apiUrl}/api/processos/${parentId}/laudo`:`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo${suffix}`
+      const response=await fetch(url,{
         method:'POST',headers:{Authorization:`Bearer ${token}`},
       })
       if(!response.ok){
@@ -2855,7 +2910,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <button type="button" className={'metric-button '+(dashboardView==='concluidas'?'selected':'')} onClick={()=>setDashboardView('concluidas')}><Metric icon={FileText} label="Concluídas" value={inspections.filter((i)=>i.status==='concluida').length}/></button>
           </section>
           {dashboardView==='processos' && <section className="panel queue"><div className="section-title"><h2>Processos</h2><button className="secondary" type="button" onClick={()=>setTab('inspecoes')}>Ver todos</button></div>
-            {processes.slice(0,25).map(p=><div className="queue-row" key={p.id}><div><strong>{formatFst(p.codigo)} - {p.cliente||'Cliente não informado'}</strong><span>{p.nota_fiscal?'NF '+p.nota_fiscal:'NF não informada'}</span></div><button className="secondary small" onClick={()=>setTab('inspecoes')}>Inspeções</button></div>)}
+            {processes.slice(0,25).map(p=><div className="queue-row" key={p.id}><div><strong>{formatFst(p.codigo)} - {p.cliente||'Cliente não informado'}</strong><span>{inspections.filter(i=>i.grupos_inspecao?.processo_id===p.id).length} subprocesso(s) · IT definida no FST</span></div><button className="secondary small" onClick={()=>setTab('inspecoes')}>Inspeções</button></div>)}
             {!processes.length&&<p>Nenhum processo ativo no momento. Os registros arquivados permanecem preservados no SGQ.</p>}
           </section>}
           {dashboardView==='estoque' && <section className="panel queue"><div className="section-title"><h2>Estoque</h2><button className="secondary" onClick={()=>setTab('estoque')}>Abrir estoque</button></div>
@@ -2912,6 +2967,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               
               {processes[0] && <button className="secondary" type="button" onClick={()=>reuseProcess(processes[0])}><Copy size={16}/> Reutilizar últimos dados gerais</button>}
               {inspection.processoId && <button className="secondary" type="button" onClick={resetNewInspection}>Novo processo</button>}
+              {!inspection.processoId && !editingInspectionId && !editingProcessId && <button className="secondary" type="button"
+                disabled={inspectionBusy||!parentFstCode(inspection.codigo)||!inspection.itVersionId}
+                onClick={()=>void registerParentProcess()}>Cadastrar FST</button>}
             </div>
           </div>
 
@@ -2923,10 +2981,21 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 {inspection.processoId && <span className="pill">Processo existente</span>}
               </div>
               <div className="form-grid">
+                {!editingInspectionId && !editingProcessId && processes.length>0 && <label className="span-2">Usar processo existente
+                  <select value={inspection.processoId} onChange={e=>{
+                    const p=processes.find(p=>p.id===e.target.value)
+                    if(p)reuseProcess(p);else resetNewInspection()
+                  }}>
+                    <option value="">Novo FST</option>
+                    {processes.map(p=><option key={p.id} value={p.id}>{formatFst(p.codigo)} · {p.cliente||'Cliente não informado'}</option>)}
+                  </select>
+                </label>}
                 <div className="sgq-fst-field">
                   <label htmlFor="sgq-fst-input">Processo</label>
                   <div className="sgq-fst-controls">
-                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;fstNfeRequest.current++;fstLookupInFlight.current=null;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection(current=>{const prev=autoNfeRef.current;const clear=prev&&fstCode(inputValue)!==prev.fst&&current.notaFiscal===prev.numero;if(clear)autoNfeRef.current=null;return {...current,codigo:inputValue,notaFiscal:clear?'':current.notaFiscal}})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
+                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;fstNfeRequest.current++;fstLookupInFlight.current=null;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection(current=>{const prev=autoNfeRef.current;const clear=prev&&fstCode(inputValue)!==prev.fst&&current.notaFiscal===prev.numero;if(clear)autoNfeRef.current=null;return {...current,codigo:inputValue,processoId:parentFstCode(inputValue)===parentFstCode(current.codigo)?current.processoId:'',
+                  itVersionId:parentFstCode(inputValue)===parentFstCode(current.codigo)?current.itVersionId:'',
+                  notaFiscal:clear?'':current.notaFiscal}})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
                     <button type="button" className="secondary sgq-fst-retry" disabled={processLookupBusy||!fstCode(inspection.codigo)}
                       onMouseDown={e=>e.preventDefault()} onClick={()=>void lookupFstClient(inspection.codigo)} title="Buscar cliente e SKUs no Omie">
                       <Search size={16}/> Consultar
@@ -2937,8 +3006,14 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
 
                 </div>
+                <label>Subprocesso
+                  <select value={inspection.subprocessoCodigo} disabled={!!editingProcessId||!!editingInspectionId}
+                    onChange={e=>setInspection({...inspection,subprocessoCodigo:e.target.value,notaFiscal:''})}>
+                    {Array.from({length:26},(_,i)=>String.fromCharCode(65+i)).map(c=><option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
                 <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
-                <label>Nota fiscal<input value={inspection.notaFiscal} onChange={(e)=>{autoNfeRef.current=null;setInspection({...inspection,notaFiscal:e.target.value})}}/></label>
+                <label>NF do subprocesso {inspection.subprocessoCodigo}<input value={inspection.notaFiscal} onChange={(e)=>{autoNfeRef.current=null;setInspection({...inspection,notaFiscal:e.target.value})}}/></label>
                 <label>Chegada no CD<input type="date" value={inspection.chegadaCd} onChange={(e)=>setInspection({...inspection,chegadaCd:e.target.value})}/></label>
                 <label>Origem<input value={inspection.origem} onChange={(e)=>setInspection({...inspection,origem:e.target.value})} placeholder="China"/></label>
                 <div className="field-label"><span>Transporte</span><div className="transport-checks">
@@ -3065,8 +3140,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
             <section className="panel section-card inspection-it-choice">
               <div className="section-title"><h2>IT aplicável</h2><button className="secondary small" type="button" disabled={itSuggestBusy} onClick={()=>void suggestApplicableIt(true)}><Sparkles size={16}/>{itSuggestBusy?'Analisando…':'Sugerir com IA'}</button></div>
-              <label>IT para os produtos cadastrados
-                <select value={inspection.itVersionId} onChange={e=>{
+              <label>IT do FST principal
+                <select value={inspection.itVersionId} disabled={!!inspection.processoId&&!!processes.find(p=>p.id===inspection.processoId)?.it_versao_id} onChange={e=>{
                   manualItSelection.current=true
                   const selected=itVersions.find(it=>it.id===e.target.value)
                   setInspection(old=>({...old,itVersionId:e.target.value,inspectionLevel:selected?.nivel_inspecao_padrao||old.inspectionLevel}))
@@ -3872,7 +3947,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div></div>
               <label>Data da inspeção<input type="date" value={editingInspectionData.dataInspecao ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,dataInspecao:e.target.value})}/></label>
               <label>Nível de inspeção<select value={editingInspectionData.inspectionLevel ?? 'I'} onChange={(e)=>setEditingInspectionData({...editingInspectionData,inspectionLevel:e.target.value})}><option value="I">Nível I</option><option value="II">Nível II</option><option value="III">Nível III</option><option value="S1">S1</option><option value="S2">S2</option><option value="S3">S3</option><option value="S4">S4</option></select></label>
-              <label>IT aplicável<select value={editingInspectionData.itVersionId ?? ''} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}><option value="">Selecionar IT</option>{itVersions.map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}</select></label>
+              <label>IT do FST principal<select value={editingInspectionData.itVersionId ?? ''} disabled={!!detail?.grupos_inspecao?.processos?.it_versao_id} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}><option value="">Selecionar IT</option>{itVersions.map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}</select></label>
                   <label className="span-2">Observação interna<textarea rows={3} value={editingInspectionData.observacaoInterna ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,observacaoInterna:e.target.value})}/></label>
             </div>
             <div className="edit-items-list">
