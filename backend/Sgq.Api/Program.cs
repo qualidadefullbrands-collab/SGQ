@@ -845,6 +845,24 @@ app.MapPut("/api/processos/{id}", async (string id,ProcessUpdateRequest input,Ht
     catch(Exception e){return Results.Json(Error("Falha ao atualizar processo.",e.Message),statusCode:500);}
 });
 
+// Change the shared FST IT atomically and keep old inspection evidence.
+app.MapPut("/api/processos/{id}/it", async (string id, ChangeProcessItRequest input,
+    HttpRequest request,IHttpClientFactory factory) =>
+{
+    try
+    {
+        if(!Guid.TryParse(id,out _) || !Guid.TryParse(input.ItVersionId,out _))
+            return Results.Json(Error("Selecione uma IT válida."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var changed=await RestAsync(client,token,HttpMethod.Post,"rpc/sgq_trocar_it_fst","",
+            new {p_processo_id=id,p_it_versao_id=input.ItVersionId,p_confirmado=input.Confirmado});
+        return Results.Ok(new {data=changed,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível trocar a IT do FST.",e.Message),statusCode:409);}
+});
+
 app.MapPost("/api/processos/{id}/excluir", async (string id,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -1150,6 +1168,32 @@ bool InvalidOperationalUnits(IEnumerable<CreateInspectionItem>? rows)
         item.UnidadesPorConjunto!=decimal.Truncate(item.UnidadesPorConjunto) ||
         (item.DistribuicaoCaixas?.Any(b => b.Caixas!=decimal.Truncate(b.Caixas) ||
             b.Unidades!=decimal.Truncate(b.Unidades))??false));
+}
+
+// Verify the exact value stored in both inspection item tables before reporting success.
+async Task<bool> OperationalQuantitiesPersisted(
+    HttpClient client,string token,string groupId,IEnumerable<CreateInspectionItem> submitted)
+{
+    var expected=submitted.Where(x=>!string.IsNullOrWhiteSpace(x.ProcessoItemId))
+        .ToDictionary(x=>x.ProcessoItemId!,x=>EffectiveReceived(x),StringComparer.OrdinalIgnoreCase);
+    if(expected.Count==0)return true;
+    var stored=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+        $"select=processo_item_id,quantidade_componente,processo_itens(id,quantidade)&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
+    if(stored is not {ValueKind:JsonValueKind.Array})return false;
+    var verified=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach(var link in stored.Value.EnumerateArray())
+    {
+        if(!link.TryGetProperty("processo_item_id",out var key) || key.ValueKind!=JsonValueKind.String)continue;
+        var id=key.GetString()!;
+        if(!expected.TryGetValue(id,out var quantity))continue;
+        if(!link.TryGetProperty("quantidade_componente",out var component)
+            || component.ValueKind!=JsonValueKind.Number || component.GetDecimal()!=quantity)return false;
+        if(!link.TryGetProperty("processo_itens",out var item) || item.ValueKind!=JsonValueKind.Object
+            || !item.TryGetProperty("quantidade",out var storedQty)
+            || storedQty.ValueKind!=JsonValueKind.Number || storedQty.GetDecimal()!=quantity)return false;
+        verified.Add(id);
+    }
+    return verified.Count==expected.Count;
 }
 
 app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRequest request, IHttpClientFactory factory) =>
@@ -1518,6 +1562,8 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
                 );
             }finally{gate.Release();}
         }));
+        if(!await OperationalQuantitiesPersisted(client,token,groupId,items))
+            return Results.Json(Error("A quantidade gravada diverge do valor informado. Atualize a inspeção e confira os valores antes de tentar novamente."),statusCode:409);
         var lots=items.Select(x=>{
             var per=x.UnidadesPorConjunto>0?x.UnidadesPorConjunto:1m;
             return (long)Math.Floor(EffectiveReceived(x)/per);
@@ -1753,6 +1799,8 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 new {unidades_por_conjunto=item.UnidadesPorConjunto<=0?1m:item.UnidadesPorConjunto,quantidade_componente=effectiveQuantity},"return=minimal");
         }
 
+        if(!await OperationalQuantitiesPersisted(client,token,groupId,input.Itens??[]))
+            return Results.Json(Error("A quantidade gravada diverge do valor informado. Atualize a inspeção e confira os valores antes de tentar novamente."),statusCode:409);
         var links=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
             $"select=unidades_por_conjunto,processo_itens(id,quantidade,caixas_recebidas,caixas_inspecionadas)&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
         var lots=new List<long>();
@@ -3831,6 +3879,12 @@ public sealed class AuditTemplateRequest
 public sealed class FinishAuditRequest
 {
     public string? Observacao { get; set; }
+}
+
+public sealed class ChangeProcessItRequest
+{
+    public string ItVersionId { get; set; } = "";
+    public bool Confirmado { get; set; }
 }
 
 public sealed class ProcessUpdateRequest
