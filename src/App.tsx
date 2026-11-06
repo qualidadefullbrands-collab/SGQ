@@ -1410,7 +1410,7 @@ export default function App() {
     if(existing){
       setInspection(old=>parentFstCode(old.codigo)===parentFstCode(code)?{
         ...old,processoId:existing.id,itVersionId:existing.it_versao_id??old.itVersionId,
-        subprocessoCodigo:old.processoId===existing.id?old.subprocessoCodigo:nextSubprocessFor(existing),cliente:old.cliente||existing.cliente||'',
+        subprocessoCodigo:code.match(/-([A-Z])$/)?.[1]??(old.processoId===existing.id?old.subprocessoCodigo:nextSubprocessFor(existing)),cliente:old.cliente||existing.cliente||'',
         notaFiscal:old.notaFiscal,origem:old.origem||existing.origem||'',
         transporte:old.transporte||existing.transporte||'',chegadaCd:old.chegadaCd||existing.chegada_cd||''
       }:old)
@@ -2910,7 +2910,17 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <button type="button" className={'metric-button '+(dashboardView==='concluidas'?'selected':'')} onClick={()=>setDashboardView('concluidas')}><Metric icon={FileText} label="Concluídas" value={inspections.filter((i)=>i.status==='concluida').length}/></button>
           </section>
           {dashboardView==='processos' && <section className="panel queue"><div className="section-title"><h2>Processos</h2><button className="secondary" type="button" onClick={()=>setTab('inspecoes')}>Ver todos</button></div>
-            {processes.slice(0,25).map(p=><div className="queue-row" key={p.id}><div><strong>{formatFst(p.codigo)} - {p.cliente||'Cliente não informado'}</strong><span>{inspections.filter(i=>i.grupos_inspecao?.processo_id===p.id).length} subprocesso(s) · IT definida no FST</span></div><button className="secondary small" onClick={()=>setTab('inspecoes')}>Inspeções</button></div>)}
+            {processes.slice(0,25).map(p=>{
+              const children=inspections.filter(i=>i.grupos_inspecao?.processo_id===p.id)
+              const overview=children.map(i=>{
+                const sub=i.grupos_inspecao?.subprocesso_codigo
+                return (sub?'Subprocesso '+sub:i.numero)+(i.grupos_inspecao?.nota_fiscal?' · NF '+i.grupos_inspecao.nota_fiscal:' · NF não informada')
+              }).join(' | ')
+              return <div className="queue-row" key={p.id}><div>
+                <strong>{formatFst(p.codigo)} - {p.cliente||'Cliente não informado'}</strong>
+                <span>{overview||'Nenhum subprocesso cadastrado'}</span>
+              </div><button className="secondary small" onClick={()=>setTab('inspecoes')}>Inspeções</button></div>
+            })}
             {!processes.length&&<p>Nenhum processo ativo no momento. Os registros arquivados permanecem preservados no SGQ.</p>}
           </section>}
           {dashboardView==='estoque' && <section className="panel queue"><div className="section-title"><h2>Estoque</h2><button className="secondary" onClick={()=>setTab('estoque')}>Abrir estoque</button></div>

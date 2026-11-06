@@ -19,6 +19,8 @@ type Inspection={
   grupos_inspecao?:{
     nome:string
     processo_id:string
+    subprocesso_codigo?:string|null
+    nota_fiscal?:string|null
     processos?:{codigo:string;cliente:string|null;nota_fiscal?:string|null}|null
   }|null
 }
@@ -96,6 +98,9 @@ export default function InspectionsKanban({
       const p=item.grupos_inspecao?.processos
       return normalized([
         item.numero,item.grupos_inspecao?.nome,process?.codigo,p?.codigo,
+        item.grupos_inspecao?.subprocesso_codigo,
+        item.grupos_inspecao?.nota_fiscal,
+        (process?.codigo??p?.codigo??'')+(item.grupos_inspecao?.subprocesso_codigo?'-'+item.grupos_inspecao?.subprocesso_codigo:''),
         process?.cliente,p?.cliente,process?.nota_fiscal,p?.nota_fiscal
       ].join(' ')).includes(search)
     })
@@ -162,7 +167,7 @@ export default function InspectionsKanban({
             const group=item.grupos_inspecao
             const process=processById.get(group?.processo_id??'')
             const linked=group?.processos
-            const fst=formatFst(process?.codigo??linked?.codigo)
+            const fst=formatFst(process?.codigo??linked?.codigo)+(group?.subprocesso_codigo?'-'+group.subprocesso_codigo:'')
             const client=process?.cliente??linked?.cliente
             const target=Number(item.tamanho_amostra)||0
             const inspected=Number(item.total_inspecionado)||0
@@ -188,6 +193,7 @@ export default function InspectionsKanban({
               </div>
               <h3 title={client||'Cliente não informado'}>{client||'Cliente não informado'}</h3>
               {group?.nome&&<p className="sgq-kanban-group" title={group.nome}>{group.nome}</p>}
+              {group?.subprocesso_codigo&&<p className="sgq-kanban-group">{group.nota_fiscal?'NF '+group.nota_fiscal:'NF não informada'}</p>}
               {(active||done)&&target>0&&<div className="sgq-kanban-progress">
                 <div className="sgq-kanban-progress-label"><span>Amostra</span><strong>{formatQuantity(inspected)} / {formatQuantity(target)}</strong></div>
                 <div className="sgq-kanban-progress-track" role="progressbar"
