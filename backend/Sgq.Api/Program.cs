@@ -587,9 +587,9 @@ app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory f
         var profileTask=RestAsync(client,token,HttpMethod.Get,"profiles",
             $"select=nome,perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
         var processesTask=RestAsync(client,token,HttpMethod.Get,"processos",
-            "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em&excluido_em=is.null&order=criado_em.desc");
+            "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id&excluido_em=is.null&order=criado_em.desc");
         var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
+            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
         await Task.WhenAll(profileTask,processesTask,inspectionsTask);
         var (profile,found)=FirstRow(profileTask.Result);
         if(!found)return Results.Json(Error("Usuário sem perfil autorizado no SGQ."),statusCode:403);
@@ -632,7 +632,7 @@ app.MapGet("/api/app/catalogos", async (HttpRequest request,IHttpClientFactory f
         var its=RestAsync(client,token,HttpMethod.Get,"it_versoes",
             "select=id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)&order=criado_em.desc");
         var groups=RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
-            "select=id,nome,codigo,tipo,status,tamanho_lote_estatistico,processo_id,processos(codigo,cliente,excluido_em)&order=criado_em.desc");
+            "select=id,nome,codigo,tipo,status,tamanho_lote_estatistico,processo_id,subprocesso_codigo,nota_fiscal,processos(codigo,cliente,excluido_em)&order=criado_em.desc");
         await Task.WhenAll(its,groups);
         return Results.Ok(new {data=new {itVersions=its.Result,groups=OperationalGroups(groups.Result)},error=(object?)null});
     }
@@ -662,9 +662,9 @@ app.MapGet("/api/app/listas", async (HttpRequest request,IHttpClientFactory fact
         var client=factory.CreateClient("supabase");
         await CurrentUserId(client,token);
         var processes=RestAsync(client,token,HttpMethod.Get,"processos",
-            "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em&excluido_em=is.null&order=criado_em.desc");
+            "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id&excluido_em=is.null&order=criado_em.desc");
         var inspections=RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
+            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
         await Task.WhenAll(processes,inspections);
         return Results.Ok(new{data=new{processes=processes.Result,
             inspections=OperationalInspections(processes.Result,inspections.Result)},error=(object?)null});
@@ -788,6 +788,45 @@ app.MapGet("/api/me", async (HttpRequest request, IHttpClientFactory factory) =>
         return Results.Text(raw, "application/json", statusCode: (int)res.StatusCode);
     }
     catch (UnauthorizedAccessException e) { return Results.Json(Error(e.Message), statusCode: 401); }
+});
+
+// A IT é selecionada no FST principal. As notas fiscais são dos subprocessos.
+app.MapPost("/api/processos/cadastrar", async (CreateParentProcessRequest input, HttpRequest request, IHttpClientFactory factory) =>
+{
+    try
+    {
+        var token=Token(request);var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        var code=(input.Codigo??"").Trim().ToUpperInvariant();
+        if(code.StartsWith("FST",StringComparison.OrdinalIgnoreCase))code=code[3..].Trim();
+        if(string.IsNullOrWhiteSpace(code)||code.Length>50||Regex.IsMatch(code,@"-[A-Z]$"))
+            return Results.Json(Error("Cadastre somente o FST principal, sem sufixo de subprocesso."),statusCode:400);
+        if(!Guid.TryParse(input.ItVersionId,out _))
+            return Results.Json(Error("Selecione a IT oficial do processo principal."),statusCode:400);
+        var versions=await RestAsync(client,token,HttpMethod.Get,"it_versoes",
+            $"select=id&id=eq.{Uri.EscapeDataString(input.ItVersionId)}&limit=1");
+        if(!FirstRow(versions).Found)
+            return Results.Json(Error("Versão da IT não localizada."),statusCode:422);
+        var existing=await RestAsync(client,token,HttpMethod.Get,"processos",
+            $"select=id&codigo=eq.{Uri.EscapeDataString(code)}&excluido_em=is.null&limit=1");
+        if(FirstRow(existing).Found)
+            return Results.Json(Error("Este FST já existe. Abra-o para adicionar um subprocesso."),statusCode:409);
+        var created=await RestAsync(client,token,HttpMethod.Post,"processos",
+            "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id",
+            new {
+                codigo=code,cliente=string.IsNullOrWhiteSpace(input.Cliente)?null:input.Cliente.Trim(),
+                nota_fiscal=(string?)null,it_versao_id=input.ItVersionId,
+                origem=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
+                transporte=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
+                chegada_cd=input.ChegadaCd,data_processo=DateOnly.FromDateTime(DateTime.UtcNow),
+                status="aberto",criado_por=userId
+            },"return=representation");
+        var (row,found)=FirstRow(created);
+        if(!found)throw new InvalidOperationException("Não foi possível cadastrar FST.");
+        return Results.Ok(new{data=row,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao cadastrar FST.",e.Message),statusCode:500);}
 });
 
 app.MapPut("/api/processos/{id}", async (string id,ProcessUpdateRequest input,HttpRequest request,IHttpClientFactory factory)=>
@@ -1121,8 +1160,6 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 },error=(object?)null});
             }
         }
-        if(startNow && string.IsNullOrWhiteSpace(input.ItVersionId))
-            return Results.Json(Error("Selecione a IT para iniciar a inspeção."),statusCode:400);
 
         var processCodeRaw = (input.Codigo ?? "").Trim();
         var processCode = string.IsNullOrWhiteSpace(processCodeRaw)
@@ -1155,51 +1192,80 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         var level = string.IsNullOrWhiteSpace(input.InspectionLevel) ? "I" : input.InspectionLevel;
         var plan = SamplingPlan(statisticalLot, level);
 
-        var existingProcessRows = await RestAsync(client, token, HttpMethod.Get, "processos",
-            $"select=id,excluido_em&codigo=eq.{Uri.EscapeDataString(processCode)}&limit=1");
-        var (existingProcess, hasProcess) = FirstRow(existingProcessRows);
+        var byId=!string.IsNullOrWhiteSpace(input.ProcessoId);
+        if(byId&&!Guid.TryParse(input.ProcessoId,out _))
+            return Results.Json(Error("Processo principal inválido."),statusCode:400);
+        var existingProcessRows=await RestAsync(client,token,HttpMethod.Get,"processos",
+            $"select=id,codigo,it_versao_id,excluido_em&{(byId?"id":"codigo")}=eq.{Uri.EscapeDataString(byId?input.ProcessoId!:processCode)}&limit=1");
+        var (existingProcess,hasProcess)=FirstRow(existingProcessRows);
+        if(byId&&!hasProcess)
+            return Results.Json(Error("FST principal não localizado."),statusCode:404);
         string processId;
-
-        if (hasProcess)
+        string effectiveIt=input.ItVersionId?.Trim()??"";
+        if(hasProcess)
         {
-            processId = existingProcess!.Value.GetProperty("id").GetString()!;
-            await RestAsync(client, token, HttpMethod.Patch, "processos",
+            var process=existingProcess!.Value;
+            if(process.TryGetProperty("excluido_em",out var deleted)&&deleted.ValueKind!=JsonValueKind.Null)
+                return Results.Json(Error("Processo arquivado não pode receber subprocessos."),statusCode:409);
+            processId=process.GetProperty("id").GetString()!;
+            var parentIt=process.TryGetProperty("it_versao_id",out var version)&&version.ValueKind==JsonValueKind.String
+                ?version.GetString():null;
+            if(!string.IsNullOrWhiteSpace(parentIt))
+            {
+                if(!string.IsNullOrWhiteSpace(effectiveIt)&&!string.Equals(effectiveIt,parentIt,StringComparison.OrdinalIgnoreCase))
+                    return Results.Json(Error("A IT dos subprocessos deve ser a mesma do FST principal."),statusCode:409);
+                effectiveIt=parentIt!;
+            }
+            else if(!string.IsNullOrWhiteSpace(effectiveIt))
+            {
+                if(!Guid.TryParse(effectiveIt,out _))
+                    return Results.Json(Error("IT inválida."),statusCode:400);
+                await RestAsync(client,token,HttpMethod.Patch,"processos",
+                    $"id=eq.{Uri.EscapeDataString(processId)}",
+                    new {it_versao_id=effectiveIt,atualizado_em=DateTimeOffset.UtcNow},"return=minimal");
+            }
+            await RestAsync(client,token,HttpMethod.Patch,"processos",
                 $"id=eq.{Uri.EscapeDataString(processId)}",
-                new {
-                    cliente = string.IsNullOrWhiteSpace(input.Cliente) ? null : input.Cliente.Trim(),
-                    nota_fiscal = string.IsNullOrWhiteSpace(input.NotaFiscal) ? null : input.NotaFiscal.Trim(),
-                    origem = string.IsNullOrWhiteSpace(input.Origem) ? null : input.Origem.Trim(),
-                    transporte = string.IsNullOrWhiteSpace(input.Transporte) ? null : input.Transporte.Trim(),
-                    chegada_cd = input.ChegadaCd,
-                    status = "em_inspecao",
-                    excluido_em = (DateTimeOffset?)null,
-                    excluido_por = (string?)null,
-                    atualizado_em = DateTimeOffset.UtcNow
-                }, "return=minimal");
+                new {status="em_inspecao",atualizado_em=DateTimeOffset.UtcNow},"return=minimal");
         }
         else
         {
-            var created = await RestAsync(client, token, HttpMethod.Post, "processos", "select=id",
+            if(!Guid.TryParse(effectiveIt,out _))
+                return Results.Json(Error("Selecione a IT do FST principal antes do subprocesso."),statusCode:400);
+            var created=await RestAsync(client,token,HttpMethod.Post,"processos","select=id",
                 new {
-                    codigo = processCode,
-                    cliente = string.IsNullOrWhiteSpace(input.Cliente) ? null : input.Cliente.Trim(),
-                    nota_fiscal = string.IsNullOrWhiteSpace(input.NotaFiscal) ? null : input.NotaFiscal.Trim(),
-                    origem = string.IsNullOrWhiteSpace(input.Origem) ? null : input.Origem.Trim(),
-                    transporte = string.IsNullOrWhiteSpace(input.Transporte) ? null : input.Transporte.Trim(),
-                    chegada_cd = input.ChegadaCd,
-                    status = "em_inspecao",
-                    data_processo = inspectionDate,
-                    criado_por = userId
-                }, "return=representation");
-            var (row, found) = FirstRow(created);
-            if (!found) throw new InvalidOperationException("Falha ao criar processo.");
-            processId = row!.Value.GetProperty("id").GetString()!;
+                    codigo=processCode,cliente=string.IsNullOrWhiteSpace(input.Cliente)?null:input.Cliente.Trim(),
+                    nota_fiscal=(string?)null,
+                    origem=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
+                    transporte=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
+                    chegada_cd=input.ChegadaCd,it_versao_id=effectiveIt,
+                    status="em_inspecao",data_processo=inspectionDate,criado_por=userId
+                },"return=representation");
+            var (row,found)=FirstRow(created);
+            if(!found)throw new InvalidOperationException("Falha ao criar FST.");
+            processId=row!.Value.GetProperty("id").GetString()!;
         }
-
-        var groupsRows = await RestAsync(client, token, HttpMethod.Get, "grupos_inspecao",
-            $"select=id&processo_id=eq.{Uri.EscapeDataString(processId)}");
-        var groupCount = groupsRows is { ValueKind: JsonValueKind.Array } ? groupsRows.Value.GetArrayLength() : 0;
-        var groupCode = $"G{groupCount + 1:00}";
+        if(startNow&&string.IsNullOrWhiteSpace(effectiveIt))
+            return Results.Json(Error("FST principal sem IT definida."),statusCode:409);
+        var groupsRows=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
+            $"select=id,codigo,subprocesso_codigo&processo_id=eq.{Uri.EscapeDataString(processId)}");
+        var groups=groupsRows is {ValueKind:JsonValueKind.Array}
+            ?groupsRows.Value.EnumerateArray().ToList():new List<JsonElement>();
+        var groupCodes=groups.Select(x=>x.GetProperty("codigo").GetString()??"")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var groupIndex=1;
+        while(groupCodes.Contains($"G{groupIndex:00}"))groupIndex++;
+        var groupCode=$"G{groupIndex:00}";
+        var usedSubs=groups.Where(x=>x.TryGetProperty("subprocesso_codigo",out var v)&&v.ValueKind==JsonValueKind.String)
+            .Select(x=>x.GetProperty("subprocesso_codigo").GetString()??"").ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var subCode=(input.SubprocessoCodigo??"").Trim().ToUpperInvariant();
+        if(string.IsNullOrWhiteSpace(subCode))
+            subCode=Enumerable.Range(65,26).Select(n=>((char)n).ToString())
+                .FirstOrDefault(c=>!usedSubs.Contains(c))??"";
+        if(subCode.Length!=1||subCode[0]<'A'||subCode[0]>'Z')
+            return Results.Json(Error("Subprocesso deve ter uma letra de A a Z."),statusCode:400);
+        if(usedSubs.Contains(subCode))
+            return Results.Json(Error($"O subprocesso {subCode} já existe neste FST."),statusCode:409);
         var nonEmptyNames = items.Select(x => (x.Nome ?? "").Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
         var groupName = nonEmptyNames.Count > 0 ? string.Join(" + ", nonEmptyNames) : "Inspeção em preenchimento";
         var isComponentSet = items.Count > 1;
@@ -1208,6 +1274,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             new {
                 processo_id = processId,
                 codigo = groupCode,
+                subprocesso_codigo = subCode,
+                nota_fiscal = string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim(),
                 nome = groupName,
                 tipo = isComponentSet ? "kit_componentes" : "individual",
                 tamanho_lote_estatistico = Math.Max(1, statisticalLot),
@@ -1292,9 +1360,9 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 }, "return=minimal");
         }
 
-        if(!string.IsNullOrWhiteSpace(input.ItVersionId))
+        if(!string.IsNullOrWhiteSpace(effectiveIt))
             await RestAsync(client,token,HttpMethod.Post,"grupo_inspecao_its","",
-                new {grupo_inspecao_id=groupId,it_versao_id=input.ItVersionId,principal=true},"return=minimal");
+                new {grupo_inspecao_id=groupId,it_versao_id=effectiveIt,principal=true},"return=minimal");
 
         var inspectionNumber = $"INS-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
         var totalBoxesReceived = items.Sum(x => x.CaixasRecebidas);
@@ -1305,7 +1373,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 numero = inspectionNumber,
                 processo_item_id = firstItemId,
                 grupo_inspecao_id = groupId,
-                it_versao_id = input.ItVersionId,
+                it_versao_id = effectiveIt,
                 status = startNow ? "em_andamento" : "aberta",
                 resultado = "pendente",
                 tamanho_lote = statisticalLot,
@@ -3493,6 +3561,15 @@ public sealed class ProcessUpdateRequest
     public string? Transporte { get; set; }
     public DateOnly? ChegadaCd { get; set; }
 }
+public sealed class CreateParentProcessRequest
+{
+    public string Codigo { get; set; } = "";
+    public string Cliente { get; set; } = "";
+    public string ItVersionId { get; set; } = "";
+    public string? Origem { get; set; }
+    public string? Transporte { get; set; }
+    public DateOnly? ChegadaCd { get; set; }
+}
 public sealed class DeleteInspectionRequest
 {
     public string? Numero { get; set; }
@@ -3629,6 +3706,8 @@ public sealed class FinishInspectionRequest
 
 public class CreateInspectionRequest
 {
+    public string? ProcessoId { get; set; }
+    public string? SubprocessoCodigo { get; set; }
     public bool Iniciar { get; set; } = true;
     public string? RequestId { get; set; }
     public string Codigo { get; set; } = "";
