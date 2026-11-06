@@ -2711,6 +2711,31 @@ app.MapPut("/api/inspecoes/{id}/fotos/{photoId}/legenda", async (
     catch(Exception e){return Results.Json(Error("Não foi possível atualizar a legenda da foto.",e.Message),statusCode:500);}
 });
 
+// Situação consolidada do Word: consulta os dados efetivamente gravados,
+ // sem confiar no status ou nos campos que estão apenas no navegador.
+app.MapGet("/api/processos/{id}/laudo-status", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("FST inválido."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        using var msg=new HttpRequestMessage(HttpMethod.Get,
+            $"{auditDocsUrl}/process-report-status/{Uri.EscapeDataString(id)}");
+        msg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
+        using var response=await client.SendAsync(msg);
+        var raw=await response.Content.ReadAsStringAsync();
+        if(!response.IsSuccessStatusCode)
+            return Results.Json(Error("Não foi possível verificar as pendências do laudo.",
+                raw[..Math.Min(raw.Length,300)]),statusCode:(int)response.StatusCode);
+        var data=JsonSerializer.Deserialize<JsonElement>(raw);
+        return Results.Ok(new{data,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha na verificação do laudo.",e.Message),statusCode:503);}
+});
+
 app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -2840,22 +2865,33 @@ app.MapPost("/api/inspecoes/{id}/enviar-automate", async (string id,HttpRequest 
             || profile!.Value.GetProperty("ativo").ValueKind!=JsonValueKind.True)
             return Results.Json(Error("Sem permissão para exportar documentos."),statusCode:403);
         var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=id,status,grupo_inspecao_id,grupos_inspecao(processos(codigo,cliente))&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+            $"select=id,status,grupo_inspecao_id,grupos_inspecao(subprocesso_codigo,processo_id,processos(codigo,cliente))&id=eq.{Uri.EscapeDataString(id)}&limit=1");
         var (ins,found)=FirstRow(insRows);
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         if(ins!.Value.GetProperty("status").GetString()!="concluida")
             return Results.Json(Error("Conclua a inspeção antes de enviar o Word."),statusCode:409);
+        var group=ins.Value.GetProperty("grupos_inspecao");
+        var isSubprocess=group.ValueKind==JsonValueKind.Object &&
+            group.TryGetProperty("subprocesso_codigo",out var suffix) &&
+            suffix.ValueKind==JsonValueKind.String&&!string.IsNullOrWhiteSpace(suffix.GetString());
+        var parentId=isSubprocess && group.TryGetProperty("processo_id",out var parentProp)
+            ? parentProp.GetString():null;
+        if(isSubprocess&&!Guid.TryParse(parentId,out _))
+            return Results.Json(Error("FST principal não identificado para o laudo único."),statusCode:409);
         byte[] bytes;
         string fileName;
         using(var generateMsg=new HttpRequestMessage(HttpMethod.Get,
-            $"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}"))
+            isSubprocess
+                ? $"{auditDocsUrl}/generate-process/{Uri.EscapeDataString(parentId!)}"
+                : $"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}"))
         {
             generateMsg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
             using var documentRes=await client.SendAsync(generateMsg);
             if(!documentRes.IsSuccessStatusCode)
             {
                 var reason=await documentRes.Content.ReadAsStringAsync();
-                return Results.Json(Error("Não foi possível gerar o Word para envio.",reason[..Math.Min(reason.Length,250)]),statusCode:502);
+                return Results.Json(Error("Não foi possível gerar o Word para envio.",reason[..Math.Min(reason.Length,500)]),
+                    statusCode:documentRes.StatusCode==System.Net.HttpStatusCode.Conflict?409:502);
             }
             bytes=await documentRes.Content.ReadAsByteArrayAsync();
             fileName=documentRes.Headers.TryGetValues("X-SGQ-File-Name",out var names)
