@@ -96,3 +96,55 @@
 @media(prefers-reduced-motion:reduce){
   .sgq-operational-shell .sgq-kanban-card[draggable="true"]{transition:none}
 }
+
+
+/* Hierarquia real: processo FST > subprocessos > inspeções. Kanban permanece alternativo. */
+.sgq-operational-shell .sgq-process-view-toggle{display:flex;align-items:center;gap:3px;border:1px solid #d9e4eb;background:#f5f8fa;border-radius:10px;padding:3px}
+.sgq-operational-shell .sgq-process-view-toggle button{border:0;background:transparent;border-radius:7px;color:#6a8191;font-size:12px;font-weight:750;padding:9px 11px;cursor:pointer}
+.sgq-operational-shell .sgq-process-view-toggle button.is-active{background:#fff;color:#194c6b;box-shadow:0 1px 4px #194c6b16}
+.sgq-operational-shell .sgq-process-tree{display:grid;gap:12px}
+.sgq-operational-shell .sgq-process-node{min-width:0;border:1px solid #dae5eb;border-radius:13px;overflow:hidden;background:#fff;box-shadow:0 2px 10px #254c6110}
+.sgq-operational-shell .sgq-process-node-heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:13px 15px}
+.sgq-operational-shell .sgq-process-node-toggle{flex:1;display:flex;align-items:center;min-width:170px;gap:9px;background:none;border:0;padding:3px;text-align:left;cursor:pointer;color:#35586e}
+.sgq-operational-shell .sgq-process-node-toggle>svg{flex:none;transition:transform .15s ease;color:#6b899a}
+.sgq-operational-shell .sgq-process-node-toggle>svg.is-expanded{transform:rotate(90deg)}
+.sgq-operational-shell .sgq-process-node-identity{display:grid;min-width:0;gap:3px}
+.sgq-operational-shell .sgq-process-node-identity strong{font-size:16px;font-weight:850;line-height:1.2;color:#1d4159}
+.sgq-operational-shell .sgq-process-node-identity span{font-size:12px;color:#74899a;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-process-node-summary{display:flex;align-items:center;gap:10px;font-size:12px;color:#6c8294;white-space:nowrap}
+.sgq-operational-shell .sgq-process-status{border-radius:7px;background:#edf3f7;color:#507085;font-size:11px;font-weight:800;padding:5px 8px;white-space:nowrap}
+.sgq-operational-shell .sgq-process-status.is-complete{background:#e8f5ee;color:#247555}
+.sgq-operational-shell .sgq-process-node-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.sgq-operational-shell .sgq-process-node-actions button{display:inline-flex;align-items:center;gap:5px;border:1px solid #d8e4eb;border-radius:8px;background:#f7fafc;color:#315a75;font-size:12px;font-weight:750;padding:8px 10px;cursor:pointer;white-space:nowrap}
+.sgq-operational-shell .sgq-process-node-actions button:hover{background:#eaf3f8}
+.sgq-operational-shell .sgq-process-node-actions .sgq-process-danger{color:#a45759;background:#fff}
+.sgq-operational-shell .sgq-process-node-actions button:disabled{opacity:.5;cursor:default}
+.sgq-operational-shell .sgq-process-children{display:grid;gap:9px;padding:13px 14px 15px 34px;border-top:1px solid #e7eef2;background:#f8fafc}
+.sgq-operational-shell .sgq-subprocess-node{min-width:0;background:#fff;border:1px solid #dce6ed;border-radius:10px;overflow:hidden}
+.sgq-operational-shell .sgq-subprocess-node-heading{display:flex;align-items:center;gap:10px;padding:12px 13px;min-width:0;flex-wrap:wrap}
+.sgq-operational-shell .sgq-subprocess-letter{display:grid;place-items:center;flex:none;width:32px;height:32px;border-radius:9px;background:#eaf4fa;color:#216889;font-size:15px;font-weight:900}
+.sgq-operational-shell .sgq-subprocess-node-name{display:grid;gap:3px;min-width:0;flex:1}
+.sgq-operational-shell .sgq-subprocess-node-name strong{color:#2b5067;font-size:13px}
+.sgq-operational-shell .sgq-subprocess-node-name>span{font-size:12px;color:#71899b;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-subprocess-invoice{font-size:12px;color:#667f8f;white-space:nowrap}
+.sgq-operational-shell .sgq-subprocess-inspection{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:9px 12px 10px 56px;border-top:1px solid #eff3f5;font-size:12px;color:#8293a1}
+.sgq-operational-shell .sgq-subprocess-inspection-number{font-weight:700;color:#456578;flex:1;min-width:145px}
+.sgq-operational-shell .sgq-subprocess-inspection button,.sgq-operational-shell .sgq-process-empty button{display:inline-flex;align-items:center;gap:5px;border:1px solid #d2e4ed;border-radius:8px;background:#f0f8fc;color:#20749b;font-size:12px;font-weight:800;padding:8px 11px;cursor:pointer}
+.sgq-operational-shell .sgq-subprocess-inspection button:hover,.sgq-operational-shell .sgq-process-empty button:hover{background:#e1f0f8}
+.sgq-operational-shell .sgq-process-empty{display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:#8a9bab;font-size:12px;padding:13px}
+.sgq-operational-shell .sgq-process-report-note{display:flex;gap:7px;align-items:center;color:#618276;font-size:12px;padding:2px 4px}
+@media(max-width:900px){
+  .sgq-operational-shell .sgq-process-node-heading{align-items:stretch}
+  .sgq-operational-shell .sgq-process-node-toggle{flex-basis:100%}
+  .sgq-operational-shell .sgq-process-node-summary{flex:1}
+}
+@media(max-width:650px){
+  .sgq-operational-shell .sgq-process-node-actions{width:100%}
+  .sgq-operational-shell .sgq-process-node-actions button{flex:1;justify-content:center}
+  .sgq-operational-shell .sgq-process-children{padding:9px}
+  .sgq-operational-shell .sgq-subprocess-inspection{padding:9px 10px}
+  .sgq-operational-shell .sgq-subprocess-inspection button{width:100%;justify-content:center}
+  .sgq-operational-shell .sgq-process-view-toggle{flex:1}
+  .sgq-operational-shell .sgq-process-view-toggle button{flex:1}
+}
+@media(prefers-reduced-motion:reduce){.sgq-operational-shell .sgq-process-node-toggle>svg{transition:none}}

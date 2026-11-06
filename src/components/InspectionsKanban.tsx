@@ -7,6 +7,8 @@ type Process={
   codigo:string
   cliente:string|null
   nota_fiscal?:string|null
+  status?:string
+  it_versao_id?:string|null
 }
 type Inspection={
   id:string
@@ -19,6 +21,7 @@ type Inspection={
   grupos_inspecao?:{
     nome:string
     processo_id:string
+    id?:string
     subprocesso_codigo?:string|null
     nota_fiscal?:string|null
     processos?:{codigo:string;cliente:string|null;nota_fiscal?:string|null}|null
@@ -33,6 +36,7 @@ type Props={
   movingInspectionId?:string|null
   onMove?:(id:string,target:'aberta'|'em_andamento')=>void
   mode?:'page'|'panel'
+  focusProcessId?:string|null
   onViewAll?:()=>void
   onOpen:(id:string)=>void
   onCreate:()=>void
@@ -78,10 +82,12 @@ function InspectionMenu({inspection,process,canDelete,deletingProcessId,onReuseP
 
 export default function InspectionsKanban({
   inspections,processes,canDelete,deletingProcessId,canMove=false,movingInspectionId=null,onMove,
-  mode='page',onViewAll,onOpen,onCreate,onReuseProcess,onEditProcess,
+  mode='page',focusProcessId=null,onViewAll,onOpen,onCreate,onReuseProcess,onEditProcess,
   onDeleteProcess,onDeleteInspection,formatFst
 }:Props){
   const [query,setQuery]=useState('')
+  const [view,setView]=useState<'processos'|'kanban'>('processos')
+  const [expandedProcessId,setExpandedProcessId]=useState<string|null>(null)
   const [shownByLane,setShownByLane]=useState<Record<string,number>>({})
   const [draggingId,setDraggingId]=useState<string|null>(null)
   const [overLane,setOverLane]=useState<string|null>(null)
@@ -110,6 +116,38 @@ export default function InspectionsKanban({
     const others=visible.filter(i=>!columns.some(c=>c.status===i.status))
     return others.length?[...base,{status:'other',label:'Outras',tone:'other',items:others}]:base
   },[visible])
+  const processTree=useMemo(()=>{
+    const active=inspections.filter(item=>item.status!=='cancelada')
+    return processes.map(process=>{
+      const own=active.filter(item=>item.grupos_inspecao?.processo_id===process.id)
+      const groups=new Map<string,{
+        key:string,letter:string,invoice:string|null,name:string,items:Inspection[]
+      }>()
+      for(const item of own){
+        const group=item.grupos_inspecao
+        const letter=String(group?.subprocesso_codigo??'').trim().toUpperCase()
+        const key=group?.id||letter||item.id
+        const prior=groups.get(key)
+        if(prior)prior.items.push(item)
+        else groups.set(key,{key,letter,invoice:group?.nota_fiscal??null,
+          name:group?.nome??'Inspeção',items:[item]})
+      }
+      const subprocesses=[...groups.values()].sort((a,b)=>
+        a.letter.localeCompare(b.letter,'pt-BR')||a.name.localeCompare(b.name,'pt-BR'))
+      const searchable=normalized([
+        process.codigo,formatFst(process.codigo),process.cliente,
+        ...subprocesses.flatMap(sub=>[
+          sub.letter,sub.letter?formatFst(process.codigo)+'-'+sub.letter:'',
+          sub.invoice,sub.name,...sub.items.map(item=>item.numero)
+        ])
+      ].join(' '))
+      return {process,subprocesses,searchable,inspectionCount:own.length,
+        allCompleted:own.length>0&&own.every(item=>item.status==='concluida'),
+        anyStarted:own.some(item=>item.status==='em_andamento'),
+      }
+    }).filter(entry=>!search||entry.searchable.includes(search))
+      .sort((a,b)=>Number(b.process.id===focusProcessId)-Number(a.process.id===focusProcessId))
+  },[inspections,processes,search,focusProcessId])
   const activeProcessIds=useMemo(()=>new Set(inspections.map(i=>i.grupos_inspecao?.processo_id).filter(Boolean)),[inspections])
   const emptyProcesses=processes.filter(p=>!activeProcessIds.has(p.id)&&
     (!search||normalized([p.codigo,p.cliente,p.nota_fiscal].join(' ')).includes(search)))
@@ -123,20 +161,102 @@ export default function InspectionsKanban({
   }
   return <section className={'workspace sgq-kanban-page '+(mode==='panel'?'sgq-kanban-embedded':'')} aria-label="Inspeções">
     <header className="sgq-kanban-toolbar">
-      <div className="sgq-kanban-title">{mode==='panel'?<h2>Inspeções</h2>:<h1>Inspeções</h1>}
-        <span className="sgq-kanban-total">{inspections.filter(i=>i.status!=='cancelada').length}</span></div>
+      <div className="sgq-kanban-title">{mode==='panel'?<h2>Inspeções</h2>:<h1>Processos</h1>}
+        <span className="sgq-kanban-total">{mode==='panel'?inspections.filter(i=>i.status!=='cancelada').length:processes.length}</span></div>
       {mode==='panel'?<button type="button" className="secondary small" onClick={onViewAll}>Ver todas</button>:
       <div className="sgq-kanban-tools">
+        <div className="sgq-process-view-toggle" role="group" aria-label="Visualizar por processo ou Kanban">
+          <button type="button" className={view==='processos'?'is-active':''} aria-pressed={view==='processos'}
+            onClick={()=>setView('processos')}>Por processo</button>
+          <button type="button" className={view==='kanban'?'is-active':''} aria-pressed={view==='kanban'}
+            onClick={()=>setView('kanban')}>Kanban</button>
+        </div>
         <label className="sgq-kanban-search">
           <Search size={17} aria-hidden="true"/>
           <input type="search" value={query} onChange={e=>{setQuery(e.target.value);setShownByLane({})}}
-            placeholder="Buscar FST ou cliente" aria-label="Buscar inspeções"/>
+            placeholder="Buscar FST, letra, NF ou cliente" aria-label="Buscar processos"/>
         </label>
-        <button type="button" className="primary sgq-kanban-new" onClick={onCreate}><Plus size={17}/> Nova inspeção</button>
+        <button type="button" className="primary sgq-kanban-new" onClick={onCreate}><Plus size={17}/> Novo FST</button>
       </div>}
     </header>
 
-    <div className="sgq-kanban-board" aria-label="Quadro Kanban de inspeções">
+    {mode==='page'&&view==='processos'&&<section className="sgq-process-tree" aria-label="Processos e subprocessos">
+      {processTree.map((entry,index)=>{
+        const process=entry.process
+        const processLabel=formatFst(process.codigo)
+        const expanded=search.length>0||expandedProcessId===process.id||
+          (expandedProcessId===null&&process.id===(focusProcessId||processTree[0]?.process.id))
+        const progressLabel=entry.allCompleted?'Concluído':entry.anyStarted?'Em andamento':'Não iniciado'
+        return <article className="sgq-process-node" key={process.id}>
+          <div className="sgq-process-node-heading">
+            <button type="button" className="sgq-process-node-toggle" onClick={()=>
+              setExpandedProcessId(expanded?'':process.id)} aria-expanded={expanded}
+              aria-controls={'sgq-process-children-'+process.id}>
+              <ChevronRight size={18} className={expanded?'is-expanded':''}/>
+              <span className="sgq-process-node-identity">
+                <strong>{processLabel}</strong>
+                <span>{process.cliente||'Cliente não informado'}</span>
+              </span>
+            </button>
+            <div className="sgq-process-node-summary">
+              <span>{entry.subprocesses.length} subprocesso(s)</span>
+              <span className={'sgq-process-status '+(entry.allCompleted?'is-complete':'')}>{progressLabel}</span>
+            </div>
+            <div className="sgq-process-node-actions">
+              <button type="button" onClick={()=>onReuseProcess(process.id)} title={'Adicionar subprocesso a '+processLabel}>
+                <Plus size={15}/> Subprocesso
+              </button>
+              <button type="button" onClick={()=>onEditProcess(process.id)} title={'Editar dados do FST '+processLabel}>
+                <Edit3 size={15}/> Editar FST
+              </button>
+              {canDelete&&<button type="button" className="sgq-process-danger"
+                disabled={deletingProcessId!==null} onClick={()=>onDeleteProcess(process.id)}
+                title={'Excluir FST '+processLabel}><Trash2 size={15}/></button>}
+            </div>
+          </div>
+          {expanded&&<div className="sgq-process-children" id={'sgq-process-children-'+process.id}>
+            {entry.subprocesses.map(sub=>{
+              const done=sub.items.length>0&&sub.items.every(i=>i.status==='concluida')
+              const started=sub.items.some(i=>i.status==='em_andamento')
+              return <section className="sgq-subprocess-node" key={sub.key}>
+                <div className="sgq-subprocess-node-heading">
+                  <span className="sgq-subprocess-letter">{sub.letter||'—'}</span>
+                  <div className="sgq-subprocess-node-name">
+                    <strong>{sub.letter?'Subprocesso '+sub.letter:'Inspeção vinculada'}</strong>
+                    <span>{sub.name}</span>
+                  </div>
+                  <span className="sgq-subprocess-invoice">{sub.invoice?'NF '+sub.invoice:'NF não informada'}</span>
+                  <span className={'sgq-process-status '+(done?'is-complete':'')}>
+                    {done?'Concluído':started?'Em andamento':'Não iniciado'}
+                  </span>
+                </div>
+                {sub.items.map(item=><div className="sgq-subprocess-inspection" key={item.id}>
+                  <span className="sgq-subprocess-inspection-number">{item.numero}</span>
+                  <span>{item.status==='concluida'?
+                    (item.resultado==='aprovado'?'Aprovado':item.resultado==='reprovado'?'Reprovado':'Concluído'):
+                    item.status==='em_andamento'?'Inspeção em andamento':'Inspeção aberta'}</span>
+                  <button type="button" onClick={()=>onOpen(item.id)}>
+                    {item.status==='concluida'?<CheckCircle2 size={15}/>:<ChevronRight size={15}/>}
+                    Abrir inspeção
+                  </button>
+                </div>)}
+              </section>
+            })}
+            {!entry.subprocesses.length&&<div className="sgq-process-empty">
+              Nenhum subprocesso cadastrado.
+              <button type="button" onClick={()=>onReuseProcess(process.id)}><Plus size={15}/> Adicionar subprocesso A</button>
+            </div>}
+            {entry.allCompleted&&<div className="sgq-process-report-note">
+              <ClipboardCheck size={15}/> Laudo único disponível ao abrir uma inspeção concluída.
+            </div>}
+          </div>}
+        </article>
+      })}
+      {!processTree.length&&<div className="sgq-kanban-no-results">
+        {search?'Nenhum processo encontrado para “'+query+'”.':'Nenhum processo ativo cadastrado.'}
+      </div>}
+    </section>}
+    {(mode==='panel'||view==='kanban')&&<div className="sgq-kanban-board" aria-label="Quadro Kanban de inspeções">
       {columnsToShow.map(column=><section className={'sgq-kanban-lane tone-'+column.tone}
         key={column.status} aria-label={column.label}
         data-drop-active={overLane===column.status}
@@ -228,8 +348,8 @@ export default function InspectionsKanban({
           {!column.items.length&&<div className="sgq-kanban-empty">Nenhuma inspeção</div>}
         </div>
       </section>)}
-    </div>
-    {mode==='page'&&emptyProcesses.length>0&&<section className="sgq-kanban-unassigned" aria-label="Processos sem inspeção">
+    </div>}
+    {mode==='page'&&view==='kanban'&&emptyProcesses.length>0&&<section className="sgq-kanban-unassigned" aria-label="Processos sem inspeção">
       <div className="sgq-kanban-unassigned-head"><ClipboardCheck size={17}/><h2>Processos sem inspeção</h2><span>{emptyProcesses.length}</span></div>
       <div className="sgq-kanban-unassigned-list">
         {emptyProcesses.map(process=><article className="sgq-kanban-unassigned-card" key={process.id}>
@@ -242,6 +362,6 @@ export default function InspectionsKanban({
         </article>)}
       </div>
     </section>}
-    {!totalMatches&&search&&<div className="sgq-kanban-no-results">Nenhum resultado para “{query}”.</div>}
+    {mode==='page'&&view==='kanban'&&!totalMatches&&search&&<div className="sgq-kanban-no-results">Nenhum resultado para “{query}”.</div>}
   </section>
 }
