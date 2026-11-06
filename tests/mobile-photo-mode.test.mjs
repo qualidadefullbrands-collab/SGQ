@@ -17,8 +17,8 @@ test('phone automatically opens a dedicated photo-only screen without QR codes',
  assert.match(mobile,/Processos com inspeções/)
  assert.doesNotMatch(mobile,/COLETA DE EVIDÊNCIAS/i)
 })
-test('mobile lists open and started inspections associated with operational processes',()=>{
- assert.match(mobile,/\['aberta','em_andamento'\]\.includes\(i\.status\)/)
+test('mobile lists open, started and concluded inspection photos associated with operational processes',()=>{
+ assert.match(mobile,/i\.status==='cancelada'/)
  assert.match(mobile,/const valid=new Set\(processes\.map\(p=>p\.id\)\)/)
  assert.match(mobile,/active:processes\.filter\(p=>map\.has\(p\.id\)\)/)
  assert.match(mobile,/selectProcess\(p\.id\)/)
@@ -41,13 +41,13 @@ test('mobile does not contain inspection completion or mutation of measurements'
  assert.match(mobile,/A conclusão será feita no computador/)
  assert.match(mobile,/canWrite/)
 })
-test('API uses a lightweight read endpoint and rejects archived or finished inspections',()=>{
+test('API uses lightweight photo endpoint and rejects archived or cancelled inspections',()=>{
  assert.match(api,/MapGet\("\/api\/mobile\/fotos\/inspecoes\/\{id\}"/)
- assert.match(api,/status is not \("aberta" or "em_andamento"\)/)
+ assert.match(api,/status is "cancelada"/)
  assert.match(api,/Processo arquivado ou indisponível/)
  const upload=api.slice(api.indexOf('app.MapPost("/api/inspecoes/{id}/fotos/registrar"'),api.indexOf('app.MapPost("/api/inspecoes/{id}/laudo"'))
  assert.match(upload,/excluido_em=is\.null/)
- assert.match(upload,/record\.GetProperty\("status"\)\.GetString\(\) is not \("aberta" or "em_andamento"\)/)
+ assert.match(upload,/record\.GetProperty\("status"\)\.GetString\(\) is "cancelada"/)
  assert.match(upload,/photo\.StoragePath\.StartsWith\(id\+"\/gerais\/"/)
  assert.match(upload,/on_conflict=inspecao_id,storage_path/)
 })
