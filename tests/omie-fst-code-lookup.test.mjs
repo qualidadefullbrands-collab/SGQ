@@ -8,7 +8,7 @@ const edge=file('supabase/functions/sgq-omie-fst/index.ts')
 const frontendCode=app.slice(app.indexOf('function fstCode('),app.indexOf('function inspectionDisplay('))
 const frontendLookup=app.slice(app.indexOf('async function lookupFstClient('),app.indexOf('async function saveProcessEdit('))
 
-test('FST formatting retains A/B suffix for both display and stored identification',()=>{
+test('FST formatting retains Omie A/B identifiers but stores one parent FST',()=>{
  assert.match(frontendCode,/replace\(\/\^FST/)
  assert.doesNotMatch(frontendCode,/replace\(\/\\D\/g/)
  assert.match(frontendCode,/return code \? 'FST'\+code/)
@@ -16,7 +16,7 @@ test('FST formatting retains A/B suffix for both display and stored identificati
  assert.match(app,/codigo:fst\?\('FST'\+fstCode\(fst\)\):''/)
  assert.doesNotMatch(app,/fstDigits\(/)
 })
-test('frontend lookup sends exact project identifier and never conflates 26169-A with 26169-B',()=>{
+test('frontend lookup sends exact Omie project identifier and finds the parent FST separately',()=>{
  assert.match(frontendLookup,/const code=fstCode\(value\)/)
  assert.match(frontendLookup,/processes\.find\(p=>fstCode\(p\.codigo\)===code\)/)
  assert.match(frontendLookup,/body:\{codigo:code,\.\.\.\(codigoPedido\?\{codigoPedido\}:\{\}\)\}/)
