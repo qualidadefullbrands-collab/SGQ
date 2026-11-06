@@ -1410,8 +1410,8 @@ export default function App() {
     if(existing){
       setInspection(old=>parentFstCode(old.codigo)===parentFstCode(code)?{
         ...old,processoId:existing.id,itVersionId:existing.it_versao_id??old.itVersionId,
-        subprocessoCodigo:nextSubprocessFor(existing),cliente:old.cliente||existing.cliente||'',
-        notaFiscal:old.notaFiscal||existing.nota_fiscal||'',origem:old.origem||existing.origem||'',
+        subprocessoCodigo:old.processoId===existing.id?old.subprocessoCodigo:nextSubprocessFor(existing),cliente:old.cliente||existing.cliente||'',
+        notaFiscal:old.notaFiscal,origem:old.origem||existing.origem||'',
         transporte:old.transporte||existing.transporte||'',chegadaCd:old.chegadaCd||existing.chegada_cd||''
       }:old)
     }
@@ -2910,7 +2910,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <button type="button" className={'metric-button '+(dashboardView==='concluidas'?'selected':'')} onClick={()=>setDashboardView('concluidas')}><Metric icon={FileText} label="Concluídas" value={inspections.filter((i)=>i.status==='concluida').length}/></button>
           </section>
           {dashboardView==='processos' && <section className="panel queue"><div className="section-title"><h2>Processos</h2><button className="secondary" type="button" onClick={()=>setTab('inspecoes')}>Ver todos</button></div>
-            {processes.slice(0,25).map(p=><div className="queue-row" key={p.id}><div><strong>{formatFst(p.codigo)} - {p.cliente||'Cliente não informado'}</strong><span>{p.nota_fiscal?'NF '+p.nota_fiscal:'NF não informada'}</span></div><button className="secondary small" onClick={()=>setTab('inspecoes')}>Inspeções</button></div>)}
+            {processes.slice(0,25).map(p=><div className="queue-row" key={p.id}><div><strong>{formatFst(p.codigo)} - {p.cliente||'Cliente não informado'}</strong><span>{inspections.filter(i=>i.grupos_inspecao?.processo_id===p.id).length} subprocesso(s) · IT definida no FST</span></div><button className="secondary small" onClick={()=>setTab('inspecoes')}>Inspeções</button></div>)}
             {!processes.length&&<p>Nenhum processo ativo no momento. Os registros arquivados permanecem preservados no SGQ.</p>}
           </section>}
           {dashboardView==='estoque' && <section className="panel queue"><div className="section-title"><h2>Estoque</h2><button className="secondary" onClick={()=>setTab('estoque')}>Abrir estoque</button></div>
@@ -2993,7 +2993,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <div className="sgq-fst-field">
                   <label htmlFor="sgq-fst-input">Processo</label>
                   <div className="sgq-fst-controls">
-                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;fstNfeRequest.current++;fstLookupInFlight.current=null;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection(current=>{const prev=autoNfeRef.current;const clear=prev&&fstCode(inputValue)!==prev.fst&&current.notaFiscal===prev.numero;if(clear)autoNfeRef.current=null;return {...current,codigo:inputValue,notaFiscal:clear?'':current.notaFiscal}})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
+                    <div className="fst-input"><span>FST</span><input id="sgq-fst-input" value={inspection.codigo} onChange={(e)=>{const inputValue=e.target.value;fstLookupRequest.current++;fstNfeRequest.current++;fstLookupInFlight.current=null;setProcessLookupBusy(false);setProcessLookupMessage('');setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('');setSkuRows(rows=>{const retained=rows.filter(row=>!row.omieSourceFst||row.omieSourceFst===fstCode(inputValue));return retained.length?retained:[emptySku()]});setInspection(current=>{const prev=autoNfeRef.current;const clear=prev&&fstCode(inputValue)!==prev.fst&&current.notaFiscal===prev.numero;if(clear)autoNfeRef.current=null;return {...current,codigo:inputValue,processoId:parentFstCode(inputValue)===parentFstCode(current.codigo)?current.processoId:'',
+                  itVersionId:parentFstCode(inputValue)===parentFstCode(current.codigo)?current.itVersionId:'',
+                  notaFiscal:clear?'':current.notaFiscal}})}} onBlur={e=>void lookupFstClient(e.target.value)} placeholder="Número FST"/></div>
                     <button type="button" className="secondary sgq-fst-retry" disabled={processLookupBusy||!fstCode(inspection.codigo)}
                       onMouseDown={e=>e.preventDefault()} onClick={()=>void lookupFstClient(inspection.codigo)} title="Buscar cliente e SKUs no Omie">
                       <Search size={16}/> Consultar
@@ -3138,7 +3140,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
             <section className="panel section-card inspection-it-choice">
               <div className="section-title"><h2>IT aplicável</h2><button className="secondary small" type="button" disabled={itSuggestBusy} onClick={()=>void suggestApplicableIt(true)}><Sparkles size={16}/>{itSuggestBusy?'Analisando…':'Sugerir com IA'}</button></div>
-              <label>IT para os produtos cadastrados
+              <label>IT do FST principal
                 <select value={inspection.itVersionId} disabled={!!inspection.processoId&&!!processes.find(p=>p.id===inspection.processoId)?.it_versao_id} onChange={e=>{
                   manualItSelection.current=true
                   const selected=itVersions.find(it=>it.id===e.target.value)
@@ -3945,7 +3947,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div></div>
               <label>Data da inspeção<input type="date" value={editingInspectionData.dataInspecao ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,dataInspecao:e.target.value})}/></label>
               <label>Nível de inspeção<select value={editingInspectionData.inspectionLevel ?? 'I'} onChange={(e)=>setEditingInspectionData({...editingInspectionData,inspectionLevel:e.target.value})}><option value="I">Nível I</option><option value="II">Nível II</option><option value="III">Nível III</option><option value="S1">S1</option><option value="S2">S2</option><option value="S3">S3</option><option value="S4">S4</option></select></label>
-              <label>IT aplicável<select value={editingInspectionData.itVersionId ?? ''} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}><option value="">Selecionar IT</option>{itVersions.map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}</select></label>
+              <label>IT do FST principal<select value={editingInspectionData.itVersionId ?? ''} disabled={!!detail?.grupos_inspecao?.processos?.it_versao_id} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}><option value="">Selecionar IT</option>{itVersions.map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}</select></label>
                   <label className="span-2">Observação interna<textarea rows={3} value={editingInspectionData.observacaoInterna ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,observacaoInterna:e.target.value})}/></label>
             </div>
             <div className="edit-items-list">
