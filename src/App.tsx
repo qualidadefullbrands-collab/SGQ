@@ -174,10 +174,25 @@ function prepareOmieSkuReview(suggestion:OmieSkuImport,rows:ReturnType<typeof em
     })
   }
 }
+// Operational stock boxes and pieces are whole units. Reject invalid input rather
+// than silently converting a fractional or malformed value into zero.
+function operationalQuantityError(rows:any[]):string|null{
+  const keys=['quantidade','quantidadePorCaixa','unidadesPorConjunto',
+    'caixasRecebidas','caixasInspecionadas','caixasPadrao','unidadesPadrao',
+    'caixasFracionadas','unidadesFracionadas','caixasLaboratorio','unidadesLaboratorio']
+  for(const row of rows){
+    for(const key of keys){
+      const value=String(row?.[key]??'').trim()
+      if(value!=='' && (!/^[0-9]+$/.test(value) || !Number.isSafeInteger(Number(value))))
+        return 'Quantidade inválida em '+(row?.sku||'produto')+': caixas e unidades precisam ser números inteiros e não negativos.'
+    }
+  }
+  return null
+}
 function validOmieSkuReview(review:OmieSkuReview){
   return review.itens.length>0 && review.itens.every(item=>{
     const value=item.quantidadeInformada.trim()
-    return value!==''&&Number.isFinite(Number(value))&&Number(value)>=0
+    return value!==''&&/^[0-9]+$/.test(value)&&Number.isSafeInteger(Number(value))
   })
 }
 function applyOmieReviewedRows(rows:ReturnType<typeof emptySku>[],review:OmieSkuReview){
@@ -374,9 +389,9 @@ function setLaboratoryUnits(row:any,value:string) {
   if(received>0 && retained>=0 && retained<=received &&
      standardBoxes>0 && fractions===0 && Number.isFinite(received) && Number.isFinite(retained)) {
     const perBox=(received-retained)/standardBoxes
-    const rounded=Math.round(perBox*100)/100
-    if(rounded>0 && Math.abs(perBox-rounded)<0.000001)
-      return {...next,unidadesPadrao:String(rounded),quantidadePorCaixa:String(rounded)}
+    if(Number.isSafeInteger(received) && Number.isSafeInteger(retained)
+      && Number.isSafeInteger(standardBoxes) && Number.isSafeInteger(perBox) && perBox>0)
+      return {...next,unidadesPadrao:String(perBox),quantidadePorCaixa:String(perBox)}
   }
   return next
 }
@@ -609,6 +624,7 @@ export default function App() {
   const [offlineError,setOfflineError]=useState('')
   const editingBaseline=useRef<string|null>(null)
   const [editingProcess, setEditingProcess] = useState<ProcessRow | null>(null)
+  const [processEditSaving,setProcessEditSaving]=useState(false)
   const [focusedProcessId,setFocusedProcessId] = useState<string|null>(null)
   const [deletingProcessId,setDeletingProcessId]=useState<string|null>(null)
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null)
@@ -1568,23 +1584,61 @@ export default function App() {
 
   async function saveProcessEdit(e: React.FormEvent) {
     e.preventDefault()
-    if (!editingProcess) return
-    const saved=await apiPut<any>(`/api/processos/${editingProcess.id}`,{
-      cliente:editingProcess.cliente,
-      notaFiscal:null,
-    })
-    if (saved.error) return setError(saved.error.message)
-    const revised={...editingProcess,nota_fiscal:null}
-    setProcesses(current=>current.map(p=>p.id===revised.id?{...p,...revised}:p))
-    setInspections(current=>current.map(item=>item.grupos_inspecao?.processo_id===revised.id?
-      {...item,grupos_inspecao:{...item.grupos_inspecao,
-        processos:{...item.grupos_inspecao?.processos,...revised}}}:item))
-    setDetail((current:any)=>current?.grupos_inspecao?.processo_id===revised.id?
-      {...current,grupos_inspecao:{...current.grupos_inspecao,
-        processos:{...current.grupos_inspecao.processos,...revised}}}:current)
-    setEditingProcess(null)
-    setMessage('Processo atualizado.')
-    void refreshLists()
+    if(!editingProcess || processEditSaving)return
+    const previous=processes.find(p=>p.id===editingProcess.id)
+    const itChanged=!!editingProcess.it_versao_id &&
+      editingProcess.it_versao_id!==previous?.it_versao_id
+    if(itChanged){
+      const it=itVersions.find(v=>v.id===editingProcess.it_versao_id)
+      if(!it || it.status!=='publicada'){
+        setError('Selecione uma versão de IT publicada.');return
+      }
+      if(!window.confirm('Trocar a IT do FST '+editingProcess.codigo+
+        '? A alteração será aplicada a todos os subprocessos, inclusive inspeções iniciadas ou concluídas. Fotos e registros anteriores serão preservados, mas os critérios da nova IT precisarão ser revisados antes de emitir outro laudo.'))return
+    }
+    setProcessEditSaving(true);setError('')
+    try{
+      if(itChanged){
+        if(!navigator.onLine){setError('A troca de IT requer conexão para atualizar todas as inspeções com segurança.');return}
+        const changed=await apiPut<any>('/api/processos/'+encodeURIComponent(editingProcess.id)+'/it',{
+          itVersionId:editingProcess.it_versao_id,confirmado:true
+        })
+        if(changed.error || !changed.data?.ok){
+          setError(changed.error?.message||'O servidor não confirmou a troca de IT.');return
+        }
+      }
+      if(editingProcess.cliente!==previous?.cliente){
+        const saved=await apiPut<any>('/api/processos/'+encodeURIComponent(editingProcess.id),{
+          cliente:editingProcess.cliente,notaFiscal:null,
+        })
+        if(saved.error){setError(saved.error.message);void refreshLists();return}
+      }
+      const revised={...editingProcess,nota_fiscal:null}
+      const it=itVersions.find(v=>v.id===revised.it_versao_id)
+      setProcesses(current=>current.map(p=>p.id===revised.id?{...p,...revised}:p))
+      setInspections(current=>current.map(item=>item.grupos_inspecao?.processo_id===revised.id?{
+        ...item,
+        it_versoes:itChanged&&it?{id:it.id,versao:it.versao,instrucoes_trabalho:it.instrucoes_trabalho}:item.it_versoes,
+        grupos_inspecao:{...item.grupos_inspecao,
+          processos:{...item.grupos_inspecao?.processos,...revised}}
+      }:item))
+      setDetail((current:any)=>current?.grupos_inspecao?.processo_id===revised.id?{
+        ...current,
+        it_versao_id:itChanged?revised.it_versao_id:current.it_versao_id,
+        it_versoes:itChanged&&it?{id:it.id,versao:it.versao,instrucoes_trabalho:it.instrucoes_trabalho}:current.it_versoes,
+        documento_gerado_em:itChanged?null:current.documento_gerado_em,
+        grupos_inspecao:{...current.grupos_inspecao,
+          processos:{...current.grupos_inspecao.processos,...revised}}
+      }:current)
+      setEditingInspectionData((current:any)=>current&&detail?.grupos_inspecao?.processo_id===revised.id
+        ?{...current,itVersionId:revised.it_versao_id}:current)
+      setInspection(current=>current.processoId===revised.id?
+        {...current,itVersionId:revised.it_versao_id??''}:current)
+      setWordStatus(null)
+      setEditingProcess(null)
+      setMessage(itChanged?'IT alterada para todo o FST. Revise os critérios da nova IT.':'Processo atualizado.')
+      void refreshLists()
+    }finally{setProcessEditSaving(false)}
   }
 
   async function deleteProcess(p: ProcessRow) {
@@ -1820,6 +1874,8 @@ export default function App() {
 
   async function saveEditingInspectionData() {
     if(!editingInspectionData||!selectedInspectionId||editSaving)return
+    const quantityError=operationalQuantityError(editingInspectionData.itens??[])
+    if(quantityError){setError(quantityError);return}
     const id=selectedInspectionId
     setEditSaving(true);setError('')
     try{
@@ -2031,6 +2087,8 @@ export default function App() {
   async function createInspection(e: React.FormEvent, iniciar:boolean) {
     e.preventDefault()
     if(!canWrite||!userId||inspectionBusy||submitLock.current)return
+    const quantityError=operationalQuantityError(skuRows)
+    if(quantityError){setPopupMessage(quantityError);return}
     submitLock.current=true
     try {
     if(editingInspectionId||editingProcessId){
@@ -4159,7 +4217,13 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div></div>
               <label>Data da inspeção<input type="date" value={editingInspectionData.dataInspecao ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,dataInspecao:e.target.value})}/></label>
               <label>Nível de inspeção<select value={editingInspectionData.inspectionLevel ?? 'I'} onChange={(e)=>setEditingInspectionData({...editingInspectionData,inspectionLevel:e.target.value})}><option value="I">Nível I</option><option value="II">Nível II</option><option value="III">Nível III</option><option value="S1">S1</option><option value="S2">S2</option><option value="S3">S3</option><option value="S4">S4</option></select></label>
-              <label>IT do FST principal<select value={editingInspectionData.itVersionId ?? ''} disabled={!!detail?.grupos_inspecao?.processos?.it_versao_id} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}><option value="">Selecionar IT</option>{itVersions.map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}</select></label>
+              <label>IT do FST principal<select value={editingInspectionData.itVersionId ?? ''} disabled={!!detail?.grupos_inspecao?.processos?.it_versao_id} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}><option value="">Selecionar IT</option>{itVersions.map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}</select>
+                <button type="button" className="secondary small" onClick={()=>{
+                  const p=processes.find(p=>p.id===detail?.grupos_inspecao?.processo_id)
+                  if(p)setEditingProcess({...p,nota_fiscal:null})
+                  else setError('FST não localizado para troca de IT.')
+                }}>Trocar IT do FST</button>
+              </label>
                   <label className="span-2">Observação interna<textarea rows={3} value={editingInspectionData.observacaoInterna ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,observacaoInterna:e.target.value})}/></label>
             </div>
             <div className="edit-items-list">
@@ -4227,9 +4291,17 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <h2>{formatFst(editingProcess.codigo)}</h2>
             <div className="form-grid one">
               <label>Cliente<input value={editingProcess.cliente ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,cliente:e.target.value})}/></label>
-
+              <label>IT utilizada no FST
+                <select value={editingProcess.it_versao_id??''} onChange={e=>setEditingProcess({...editingProcess,it_versao_id:e.target.value})}>
+                  <option value="">Selecione uma IT</option>
+                  {itVersions.filter(it=>it.status==='publicada' || it.id===editingProcess.it_versao_id).map(it=>
+                    <option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo||'IT'} · {it.instrucoes_trabalho?.titulo} · v{it.versao}</option>)}
+                </select>
+              </label>
+              <small className="field-hint">Ao trocar a IT, todos os subprocessos serão atualizados. As evidências anteriores permanecem registradas.</small>
+              {error && <p role="alert" className="error">{error}</p>}
             </div>
-            <button className="primary wide" type="submit">Salvar alterações</button>
+            <button className="primary wide" type="submit" disabled={processEditSaving}>{processEditSaving?'Salvando…':'Salvar alterações'}</button>
           </form>
         </div>
       )}
