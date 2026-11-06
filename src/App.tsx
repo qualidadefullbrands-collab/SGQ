@@ -1796,14 +1796,15 @@ export default function App() {
         ...item,tamanho_lote:p?.lote??item.tamanho_lote,
         tamanho_amostra:p?.amostra??item.tamanho_amostra,
         codigo_amostragem:p?.codigo??item.codigo_amostragem,
-        grupos_inspecao:{...item.grupos_inspecao,
-          nota_fiscal:fastPath?item.grupos_inspecao?.nota_fiscal:editPayload.notaFiscal,
-          processos:{...item.grupos_inspecao?.processos,
-            cliente:fastPath?item.grupos_inspecao?.processos?.cliente:editPayload.cliente,
-            origem:fastPath?item.grupos_inspecao?.processos?.origem:editPayload.origem,
-            transporte:fastPath?item.grupos_inspecao?.processos?.transporte:editPayload.transporte,
-            chegada_cd:fastPath?item.grupos_inspecao?.processos?.chegada_cd:editPayload.chegadaCd}
-        }
+        grupos_inspecao:item.grupos_inspecao?{...item.grupos_inspecao,
+          nota_fiscal:fastPath?item.grupos_inspecao.nota_fiscal:editPayload.notaFiscal,
+          processos:item.grupos_inspecao.processos?{...item.grupos_inspecao.processos,
+            cliente:fastPath?item.grupos_inspecao.processos.cliente:editPayload.cliente,
+            origem:fastPath?item.grupos_inspecao.processos.origem:editPayload.origem,
+            transporte:fastPath?item.grupos_inspecao.processos.transporte:editPayload.transporte,
+            chegada_cd:fastPath?item.grupos_inspecao.processos.chegada_cd:editPayload.chegadaCd
+          }:item.grupos_inspecao.processos
+        }:item.grupos_inspecao
       }:item))
       if(!fastPath){
         const pid=detail?.grupos_inspecao?.processo_id
