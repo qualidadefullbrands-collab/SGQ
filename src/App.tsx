@@ -1625,6 +1625,7 @@ export default function App() {
       setDetail((current:any)=>current?.grupos_inspecao?.processo_id===revised.id?{
         ...current,
         it_versao_id:itChanged?revised.it_versao_id:current.it_versao_id,
+        it_versoes:itChanged&&it?{id:it.id,versao:it.versao,instrucoes_trabalho:it.instrucoes_trabalho}:current.it_versoes,
         documento_gerado_em:itChanged?null:current.documento_gerado_em,
         grupos_inspecao:{...current.grupos_inspecao,
           processos:{...current.grupos_inspecao.processos,...revised}}
@@ -4298,7 +4299,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 </select>
               </label>
               <small className="field-hint">Ao trocar a IT, todos os subprocessos serão atualizados. As evidências anteriores permanecem registradas.</small>
-
+              {error && <p role="alert" className="error">{error}</p>}
             </div>
             <button className="primary wide" type="submit" disabled={processEditSaving}>{processEditSaving?'Salvando…':'Salvar alterações'}</button>
           </form>
