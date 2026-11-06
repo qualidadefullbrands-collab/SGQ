@@ -1645,6 +1645,53 @@ export default function App() {
     void refreshLists()
   }
 
+  async function removeSavedInspectionPhoto(photo:any){
+    if(!canWrite||!selectedInspectionId||photoUploadBusy)return
+    if(!window.confirm('Remover esta foto do subprocesso? Ela sairá da galeria e do laudo, mas será preservada no histórico de auditoria.'))return
+    const id=selectedInspectionId
+    setPhotoUploadBusy(true);setError('')
+    try{
+      const removed=await apiPost<any>(
+        '/api/inspecoes/'+encodeURIComponent(id)+'/fotos/'+encodeURIComponent(photo.id)+'/remover',{})
+      if(removed.error){setError(removed.error.message);return}
+      photosLinksExpiration.current.delete(id)
+      await refreshInspectionPhotoEvidence()
+      setInspections(current=>[...current])
+      setMessage('Foto removida deste subprocesso. Histórico preservado.')
+    }catch(e:any){setError(String(e?.message||'Falha ao remover foto.'))}
+    finally{setPhotoUploadBusy(false)}
+  }
+
+  async function replaceSavedInspectionPhoto(photo:any,file:File|null){
+    if(!file||!canWrite||!selectedInspectionId||photoUploadBusy)return
+    if(!file.type.startsWith('image/'))return setError('Selecione um arquivo de imagem.')
+    if(file.size>20*1024*1024)return setError('A imagem deve ter até 20 MB.')
+    if(detail?.status==='concluida'&&
+       !window.confirm('Substituir uma foto de inspeção concluída? A imagem antiga será arquivada para auditoria.'))return
+    const id=selectedInspectionId
+    setPhotoUploadBusy(true);setError('')
+    const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
+    const path=id+'/gerais/'+crypto.randomUUID()+'-'+safe
+    try{
+      const uploaded=await supabase.storage.from('inspecao-fotos').upload(path,file,{contentType:file.type})
+      if(uploaded.error){setError('Não foi possível enviar a nova imagem: '+uploaded.error.message);return}
+      const swapped=await apiPost<any>(
+        '/api/inspecoes/'+encodeURIComponent(id)+'/fotos/'+encodeURIComponent(photo.id)+'/substituir',
+        {storagePath:path,legenda:photoCaptionDrafts[photo.id]??photo.legenda??''})
+      if(swapped.error){
+        // New upload is not yet evidence in the database; clean up if permitted.
+        void supabase.storage.from('inspecao-fotos').remove([path])
+        setError(swapped.error.message)
+        return
+      }
+      photosLinksExpiration.current.delete(id)
+      await refreshInspectionPhotoEvidence()
+      setInspections(current=>[...current])
+      setMessage('Foto substituída neste subprocesso. Original mantida no histórico.')
+    }catch(e:any){setError(String(e?.message||'Falha ao trocar foto.'))}
+    finally{setPhotoUploadBusy(false)}
+  }
+
   async function savePhotoCaption(photoId:string,currentCaption:string) {
     if(!selectedInspectionId||!canWrite||savingPhotoCaptionId)return
     const caption=String(photoCaptionDrafts[photoId]??currentCaption??'').trim()
@@ -3625,7 +3672,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
             </div>
 
-            {detail.status!=='concluida' && (
+            {canWrite && detail.status!=='cancelada' && (
               <>
                 <label className="upload-box"><Camera size={22}/><span>Selecionar fotos finais</span><input type="file" accept="image/*" multiple onChange={(e)=>addPendingPhotos(e.target.files)}/></label>
                 {!!pendingPhotos.length && <div className="pending-photo-grid">
@@ -3676,6 +3723,17 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                       <span>{p.legenda||'Sem legenda'}</span>
                     )}
                   </div>
+                  {canWrite&&detail.status!=='cancelada'&&<div className="sgq-saved-photo-actions">
+                    <button type="button" className="secondary small" disabled={photoUploadBusy}
+                      onClick={()=>document.getElementById('sgq-photo-replace-'+p.id)?.click()}>
+                      <RefreshCw size={14}/> Trocar foto
+                    </button>
+                    <input id={'sgq-photo-replace-'+p.id} type="file" accept="image/*"
+                      style={{display:'none'}} disabled={photoUploadBusy}
+                      onChange={e=>{const file=e.target.files?.[0]??null;e.target.value='';void replaceSavedInspectionPhoto(p,file)}}/>
+                    <button type="button" className="secondary small" disabled={photoUploadBusy}
+                      onClick={()=>void removeSavedInspectionPhoto(p)}><Trash2 size={14}/> Remover</button>
+                  </div>}
                   {p.nc_id && <span className="nc-photo-tag">Foto de NC</span>}
                 </article>
               ))}
