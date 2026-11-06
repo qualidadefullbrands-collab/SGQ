@@ -38,7 +38,7 @@ BEGIN
   IF anterior IS NOT DISTINCT FROM p_it_versao_id THEN
     RETURN jsonb_build_object('ok',true,'alterada',false,'itVersionId',p_it_versao_id);
   END IF;
-  IF anterior IS NOT NULL AND NOT p_confirmado THEN
+  IF anterior IS NOT NULL AND p_confirmado IS NOT TRUE THEN
     RAISE EXCEPTION 'Confirme a troca da IT do FST e a revisão dos critérios da inspeção';
   END IF;
 
