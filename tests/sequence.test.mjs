@@ -28,8 +28,8 @@ test('all items link to the SAME inspection group',()=>{
 })
 test('sampling keeps kit quantity and combined box counts',()=>{
   assert.match(creation,/var statisticalLot = items\s*\.Select/)
-  assert.match(creation,/items\.Sum\(x => x\.CaixasRecebidas\)/)
-  assert.match(creation,/items\.Sum\(x => x\.CaixasInspecionadas\)/)
+  assert.match(creation,/items\.Sum\(OperationalBoxesReceived\)/)
+  assert.match(creation,/items\.Sum\(OperationalBoxesToEvaluate\)/)
 })
 test('repeat submissions return existing single inspection',()=>{
   assert.match(creation,/request_id=requestId/)

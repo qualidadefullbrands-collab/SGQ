@@ -1,11 +1,11 @@
 import {useEffect,useMemo,useRef,useState} from 'react'
-import {ArrowLeft,Camera,CheckCircle2,ImagePlus,RefreshCw,ShieldCheck,Upload,X} from 'lucide-react'
+import {ArrowLeft,Camera,CheckCircle2,ImagePlus,RefreshCw,ShieldCheck,Trash2,Upload,X} from 'lucide-react'
 import {apiGet,apiPost,supabase} from '../lib/supabase'
 import {readOfflineDraft,saveOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,connectionFailure} from '../lib/offline'
 import './MobileFotos.css'
 
 type Process={id:string;codigo:string;cliente:string|null}
-type Inspection={id:string;numero:string;status:string;grupos_inspecao?:{processo_id:string;nome:string}|null}
+type Inspection={id:string;numero:string;status:string;grupos_inspecao?:{processo_id:string;nome:string;subprocesso_codigo?:string|null;nota_fiscal?:string|null}|null}
 type Photo={id:string;legenda:string;storage_path:string;signed_url?:string|null}
 type PhotoContext={inspecao:{id:string;status:string};photos:Photo[]}
 type Pending={id:string;file:File;preview:string;legenda:string;error?:string}
@@ -81,7 +81,7 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
   const map=new Map<string,Inspection[]>()
   for(const i of inspections){
    const id=i.grupos_inspecao?.processo_id
-   if(!['aberta','em_andamento'].includes(i.status)||!id||!valid.has(id))continue
+   if(i.status==='cancelada'||!id||!valid.has(id))continue
    const list=map.get(id)||[];list.push(i);map.set(id,list)
   }
   return {active:processes.filter(p=>map.has(p.id)),linked:map}
@@ -124,7 +124,7 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
      return
    }
    void saveOfflineDraft(userId,'mobile:context:'+id,details.data).catch(()=>undefined)
-   if(!['aberta','em_andamento'].includes(details.data.inspecao.status)){setContext(null);setError('Esta inspeção não está disponível para fotos.');void onRefresh();return}
+   if(details.data.inspecao.status==='cancelada'){setContext(null);setError('Inspeção cancelada não permite fotos.');void onRefresh();return}
    setContext({...details.data,photos:(details.data.photos||[]).map(p=>({...p,signed_url:urls.data?.photoUrls?.[p.storage_path]||null}))})
   }catch{if(request===sequence.current)setError('Falha de conexão ao carregar fotos.')}
   finally{if(request===sequence.current)setLoading(false)}
@@ -222,6 +222,42 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
   if(failures)setError(failures+' foto(s) não foram salvas. Tente novamente.')
   if(successful.size&&successful.size>queued)void load(inspectionId)
  }
+ async function removeStored(photo:Photo){
+  if(!canWrite||!inspectionId||busyRef.current)return
+  if(!navigator.onLine)return setError('Conecte-se para remover fotos já salvas.')
+  if(!window.confirm('Remover esta foto do subprocesso? O original ficará preservado em auditoria.'))return
+  busyRef.current=true;setBusy(true);setError('')
+  try{
+   const response=await apiPost<any>('/api/inspecoes/'+encodeURIComponent(inspectionId)+
+     '/fotos/'+encodeURIComponent(photo.id)+'/remover',{})
+   if(response.error){setError(response.error.message);return}
+   await load(inspectionId)
+   setMessage('Foto removida do subprocesso. Histórico preservado.')
+  }catch(e:any){setError(String(e?.message||'Não foi possível remover.'))}
+  finally{busyRef.current=false;setBusy(false)}
+ }
+ async function replaceStored(photo:Photo,file:File|null){
+  if(!file||!canWrite||!inspectionId||busyRef.current)return
+  if(!navigator.onLine)return setError('Conecte-se para substituir fotos já salvas.')
+  if(!file.type.startsWith('image/'))return setError('Selecione uma imagem.')
+  if(file.size>25*1024*1024)return setError('Imagem acima de 25 MB.')
+  if(context?.inspecao.status==='concluida'&&!window.confirm('Trocar foto de inspeção concluída? A original será preservada na auditoria.'))return
+  busyRef.current=true;setBusy(true);setError('')
+  const id=inspectionId
+  const path=id+'/gerais/'+crypto.randomUUID()+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
+  try{
+   const data=await compressed(file)
+   const uploaded=await supabase.storage.from('inspecao-fotos').upload(path,data,{contentType:data.type||'image/jpeg'})
+   if(uploaded.error){setError(uploaded.error.message);return}
+   const response=await apiPost<any>('/api/inspecoes/'+encodeURIComponent(id)+
+     '/fotos/'+encodeURIComponent(photo.id)+'/substituir',
+     {storagePath:path,legenda:photo.legenda??''})
+   if(response.error){void (supabase.storage.from('inspecao-fotos') as any).remove?.([path]);setError(response.error.message);return}
+   await load(id)
+   setMessage('Foto substituída, original preservada no histórico.')
+  }catch(e:any){setError(String(e?.message||'Não foi possível substituir.'))}
+  finally{busyRef.current=false;setBusy(false)}
+ }
  return <main className="sgq-mobile-photo">
   <header className="sgq-mobile-photo-header"><div className="sgq-mobile-logo"><ShieldCheck size={24}/><div><strong>SGQ</strong><small>Modo Fotos</small></div></div><button type="button" onClick={()=>{if(clearDraft())onExit()}} disabled={busy}>SGQ completo</button></header>
   <div className="sgq-mobile-body">
@@ -241,7 +277,9 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
    </>}
    {processId&&!inspectionId&&<><p className="sgq-mobile-description">{fst(selected?.codigo||'')} · {selected?.cliente||'Cliente não informado'}</p>
     {childInspections.map(i=><button type="button" className={'sgq-mobile-process '+(i.status==='em_andamento'?'sgq-photo-started':'sgq-photo-not-started')} key={i.id} onClick={()=>selectInspection(i.id)}>
-     <strong>{i.grupos_inspecao?.nome||'Inspeção'}</strong><span>{i.numero||'Inspeção'} · {i.status==='em_andamento'?'Iniciada':'Não iniciada'}</span><b><Camera size={17}/> Fotografar</b>
+     <strong>{i.grupos_inspecao?.subprocesso_codigo?'Subprocesso '+i.grupos_inspecao.subprocesso_codigo+' · ':''}{i.grupos_inspecao?.nome||'Inspeção'}</strong>
+     <span>{i.numero||'Inspeção'} · {i.status==='concluida'?'Concluída':i.status==='em_andamento'?'Iniciada':'Não iniciada'} · NF {i.grupos_inspecao?.nota_fiscal||'não informada'}</span>
+     <b><Camera size={17}/> Ver fotos</b>
     </button>)}
    </>}
    {inspectionId&&<><p className="sgq-mobile-description">{fst(selected?.codigo||'')} · {selected?.cliente||'Cliente não informado'}</p>
@@ -262,7 +300,20 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
       <button className="sgq-mobile-save" type="button" onClick={()=>void save()} disabled={busy||!canWrite}><Upload size={19}/>{busy?'Enviando fotos…':'Enviar '+pending.length+' foto(s) sem legenda'}</button>
      </div>}
      <div className="sgq-mobile-saved"><div className="sgq-mobile-section-head"><strong>Fotos salvas</strong><button type="button" disabled={busy||loading} onClick={()=>void load(inspectionId)}><RefreshCw size={16}/> Atualizar</button></div>
-      {context.photos.length?<div className="sgq-mobile-saved-grid">{context.photos.map(p=><figure key={p.id}>{p.signed_url?<img src={p.signed_url} alt={p.legenda}/>:<div className="sgq-mobile-placeholder"><Camera size={20}/></div>}{p.legenda&&<figcaption>{p.legenda}</figcaption>}</figure>)}</div>:<p>Nenhuma foto enviada ainda.</p>}
+      {context.photos.length?<div className="sgq-mobile-saved-grid">{context.photos.map(p=><figure key={p.id}>
+       {p.signed_url?<img src={p.signed_url} alt={p.legenda}/>:<div className="sgq-mobile-placeholder"><Camera size={20}/></div>}
+       {p.legenda&&<figcaption>{p.legenda}</figcaption>}
+       {canWrite&&<div className="sgq-mobile-photo-actions">
+        <button type="button" disabled={busy} onClick={()=>document.getElementById('mobile-replace-'+p.id)?.click()}>
+         <RefreshCw size={15}/> Trocar
+        </button>
+        <input id={'mobile-replace-'+p.id} type="file" accept="image/*" hidden
+         onChange={e=>{const file=e.target.files?.[0]??null;e.target.value='';void replaceStored(p,file)}}/>
+        <button type="button" disabled={busy} onClick={()=>void removeStored(p)}>
+         <Trash2 size={15}/> Remover
+        </button>
+       </div>}
+      </figure>)}</div>:<p>Nenhuma foto enviada ainda.</p>}
      </div>
     </section>}
     <p className="sgq-mobile-description">As evidências ficam na inspeção original. A conclusão será feita no computador.</p>

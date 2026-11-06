@@ -72,3 +72,7 @@
 .sgq-mobile-batch-photo .sgq-mobile-error{position:absolute;bottom:0;left:0;right:0;padding:4px;background:#fce5e2;font-size:10px}
 .sgq-mobile-batch .sgq-mobile-save{margin-top:14px}
 @media(min-width:600px){.sgq-mobile-batch-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
+.sgq-mobile-photo-actions{display:flex;align-items:center;gap:5px;justify-content:center;flex-wrap:wrap;padding:6px}
+.sgq-mobile-photo-actions button{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:34px;border:1px solid #d3e3ec;border-radius:8px;background:#f5f9fb;color:#2d627e;font-size:12px;font-weight:700;padding:6px 9px}
+.sgq-mobile-photo-actions button:disabled{opacity:.5}

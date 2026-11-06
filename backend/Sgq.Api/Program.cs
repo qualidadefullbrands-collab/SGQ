@@ -589,7 +589,7 @@ app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory f
         var processesTask=RestAsync(client,token,HttpMethod.Get,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id&excluido_em=is.null&order=criado_em.desc");
         var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
+            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
         await Task.WhenAll(profileTask,processesTask,inspectionsTask);
         var (profile,found)=FirstRow(profileTask.Result);
         if(!found)return Results.Json(Error("Usuário sem perfil autorizado no SGQ."),statusCode:403);
@@ -632,7 +632,7 @@ app.MapGet("/api/app/catalogos", async (HttpRequest request,IHttpClientFactory f
         var its=RestAsync(client,token,HttpMethod.Get,"it_versoes",
             "select=id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)&order=criado_em.desc");
         var groups=RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
-            "select=id,nome,codigo,tipo,status,tamanho_lote_estatistico,processo_id,subprocesso_codigo,nota_fiscal,processos(codigo,cliente,excluido_em)&order=criado_em.desc");
+            "select=id,nome,codigo,tipo,status,tamanho_lote_estatistico,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(codigo,cliente,excluido_em)&order=criado_em.desc");
         await Task.WhenAll(its,groups);
         return Results.Ok(new {data=new {itVersions=its.Result,groups=OperationalGroups(groups.Result)},error=(object?)null});
     }
@@ -664,7 +664,7 @@ app.MapGet("/api/app/listas", async (HttpRequest request,IHttpClientFactory fact
         var processes=RestAsync(client,token,HttpMethod.Get,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id&excluido_em=is.null&order=criado_em.desc");
         var inspections=RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
+            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
         await Task.WhenAll(processes,inspections);
         return Results.Ok(new{data=new{processes=processes.Result,
             inspections=OperationalInspections(processes.Result,inspections.Result)},error=(object?)null});
@@ -680,7 +680,7 @@ app.MapGet("/api/inspecoes/{id}/fotos/links", async (string id,HttpRequest reque
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         var photosTask=RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
-            $"select=storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+            $"select=storage_path&inspecao_id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null");
         await photosTask;
         // Signed photo URLs are independent: fetch concurrently with a bounded fan-out.
         var photoUrls=new Dictionary<string,string?>();
@@ -743,7 +743,7 @@ app.MapGet("/api/inspecoes/{id}/detalhe", async (string id,HttpRequest request,I
         var dimConfigsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_dimensional_configuracoes",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
         var testsTask=string.IsNullOrWhiteSpace(itId) ? Task.FromResult<JsonElement?>(null) : RestAsync(client,token,HttpMethod.Get,"it_testes_especiais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
         var testResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_testes_resultados",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
-        var photosTask=RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+        var photosTask=RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&order=criado_em.asc");
         var registersTask=RestAsync(client,token,HttpMethod.Get,"inspecao_registros",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=sequencia.asc");
         var ncsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_nao_conformidades",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
         var retainedTask=RestAsync(client,token,HttpMethod.Get,"amostras",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
@@ -816,9 +816,8 @@ app.MapPost("/api/processos/cadastrar", async (CreateParentProcessRequest input,
             new {
                 codigo=code,cliente=string.IsNullOrWhiteSpace(input.Cliente)?null:input.Cliente.Trim(),
                 nota_fiscal=(string?)null,it_versao_id=input.ItVersionId,
-                origem=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
-                transporte=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
-                chegada_cd=input.ChegadaCd,data_processo=DateOnly.FromDateTime(DateTime.UtcNow),
+                origem=(string?)null,transporte=(string?)null,
+                chegada_cd=(DateOnly?)null,data_processo=DateOnly.FromDateTime(DateTime.UtcNow),
                 status="aberto",criado_por=userId
             },"return=representation");
         var (row,found)=FirstRow(created);
@@ -836,13 +835,8 @@ app.MapPut("/api/processos/{id}", async (string id,ProcessUpdateRequest input,Ht
         var token=Token(request);
         var changed=await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"processos",
             $"select=id&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null",
-            new {
-                cliente=input.Cliente,
-                origem=input.Origem,
-                transporte=input.Transporte,
-                chegada_cd=input.ChegadaCd,
-                atualizado_em=DateTimeOffset.UtcNow
-            },"return=representation");
+            new {cliente=input.Cliente,atualizado_em=DateTimeOffset.UtcNow},
+            "return=representation");
         if(!FirstRow(changed).found)
             return Results.Json(Error("O FST não foi atualizado; confira suas permissões."),statusCode:409);
         return Results.Ok(new {data=new {ok=true},error=(object?)null});
@@ -1114,6 +1108,38 @@ decimal? OperationalUnitsPerBox(CreateInspectionItem item)
         item.QuantidadePorCaixa is >0m?item.QuantidadePorCaixa:null;
 }
 
+// One source of truth for the statistical plan: item quantities are explicit
+// when supplied; otherwise derive warehouse boxes from the saved distribution.
+// Laboratory withdrawals contain units, not boxes, and must be excluded.
+decimal OperationalBoxesReceived(CreateInspectionItem item)
+{
+    if(item.CaixasRecebidas>0m) return item.CaixasRecebidas;
+    return NormalizeComponentDistribution(item)?
+        .Where(x=>x.Tipo is "padrao" or "fracionada")
+        .Sum(x=>x.Caixas) ?? 0m;
+}
+
+decimal BoxesToEvaluate(decimal received)
+{
+    var boxes=(int)Math.Floor(received);
+    if(boxes<=0)return 0m;
+    if(boxes<=2)return boxes;
+    if(boxes<=6)return 3m;
+    if(boxes<=12)return 4m;
+    if(boxes<=20)return 5m;
+    if(boxes<=30)return 6m;
+    if(boxes<=42)return 7m;
+    if(boxes<=56)return 8m;
+    return Math.Min(boxes,(int)Math.Ceiling(Math.Sqrt(boxes+1d)));
+}
+
+decimal OperationalBoxesToEvaluate(CreateInspectionItem item)
+{
+    return item.CaixasInspecionadas>0m
+        ?item.CaixasInspecionadas
+        :BoxesToEvaluate(OperationalBoxesReceived(item));
+}
+
 bool InvalidOperationalUnits(IEnumerable<CreateInspectionItem>? rows)
 {
     return (rows??[]).Any(item =>
@@ -1237,9 +1263,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 new {
                     codigo=processCode,cliente=string.IsNullOrWhiteSpace(input.Cliente)?null:input.Cliente.Trim(),
                     nota_fiscal=(string?)null,
-                    origem=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
-                    transporte=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
-                    chegada_cd=input.ChegadaCd,it_versao_id=effectiveIt,
+                    origem=(string?)null,transporte=(string?)null,
+                    chegada_cd=(DateOnly?)null,it_versao_id=effectiveIt,
                     status="em_inspecao",data_processo=inspectionDate,criado_por=userId
                 },"return=representation");
             var (row,found)=FirstRow(created);
@@ -1277,6 +1302,9 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 codigo = groupCode,
                 subprocesso_codigo = subCode,
                 nota_fiscal = string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim(),
+                origem = string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
+                transporte = string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
+                chegada_cd = input.ChegadaCd,
                 nome = groupName,
                 tipo = isComponentSet ? "kit_componentes" : "individual",
                 tamanho_lote_estatistico = Math.Max(1, statisticalLot),
@@ -1343,8 +1371,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     capacidade = string.IsNullOrWhiteSpace(item.Capacidade) ? null : item.Capacidade.Trim(),
                     quantidade = effectiveQuantity,
                     quantidade_por_caixa = OperationalUnitsPerBox(item),
-                    caixas_recebidas = item.CaixasRecebidas > 0 ? (decimal?)item.CaixasRecebidas : null,
-                    caixas_inspecionadas = item.CaixasInspecionadas > 0 ? (decimal?)item.CaixasInspecionadas : null,
+                    caixas_recebidas = OperationalBoxesReceived(item)>0?(decimal?)OperationalBoxesReceived(item):null,
+                    caixas_inspecionadas = OperationalBoxesToEvaluate(item)>0?(decimal?)OperationalBoxesToEvaluate(item):null,
                     distribuicao_caixas = NormalizeComponentDistribution(item)
                 }, "return=representation");
             var (ir, inf) = FirstRow(itemCreated);
@@ -1366,8 +1394,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 new {grupo_inspecao_id=groupId,it_versao_id=effectiveIt,principal=true},"return=minimal");
 
         var inspectionNumber = $"INS-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
-        var totalBoxesReceived = items.Sum(x => x.CaixasRecebidas);
-        var totalBoxesInspect = items.Sum(x => x.CaixasInspecionadas);
+        var totalBoxesReceived = items.Sum(OperationalBoxesReceived);
+        var totalBoxesInspect = items.Sum(OperationalBoxesToEvaluate);
 
         var createdInspection = await RestAsync(client, token, HttpMethod.Post, "inspecoes", "select=id",
             new {
@@ -1480,8 +1508,8 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
                         $"id=eq.{Uri.EscapeDataString(item.ProcessoItemId!)}",
                         new {
                             quantidade=effectiveQuantity,quantidade_por_caixa=OperationalUnitsPerBox(item),
-                            caixas_recebidas=item.CaixasRecebidas>0?(decimal?)item.CaixasRecebidas:null,
-                            caixas_inspecionadas=item.CaixasInspecionadas>0?(decimal?)item.CaixasInspecionadas:null,
+                            caixas_recebidas=OperationalBoxesReceived(item)>0?(decimal?)OperationalBoxesReceived(item):null,
+                            caixas_inspecionadas=OperationalBoxesToEvaluate(item)>0?(decimal?)OperationalBoxesToEvaluate(item):null,
                             distribuicao_caixas=NormalizeComponentDistribution(item)
                         },"return=minimal"),
                     RestAsync(client,token,HttpMethod.Patch,"grupo_inspecao_itens",
@@ -1498,8 +1526,8 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
         var level=ins.Value.GetProperty("nivel_inspecao").ValueKind==JsonValueKind.String
             ? ins.Value.GetProperty("nivel_inspecao").GetString()??"I":"I";
         var plan=SamplingPlan(lot,level);
-        var totalBoxes=items.Sum(x=>x.CaixasRecebidas);
-        var totalInspect=items.Sum(x=>x.CaixasInspecionadas);
+        var totalBoxes=items.Sum(OperationalBoxesReceived);
+        var totalInspect=items.Sum(OperationalBoxesToEvaluate);
         await Task.WhenAll(
             RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",$"id=eq.{Uri.EscapeDataString(groupId)}",
                 new {tamanho_lote_estatistico=lot},"return=minimal"),
@@ -1528,6 +1556,7 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
         }
         return Results.Ok(new {data=new {ok=true,plano=new {
             lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re,
+            caixasRecebidas=totalBoxes,caixasAvaliar=totalInspect,
         }},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -1594,19 +1623,21 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         }
         if(isSubprocess)
         {
-            // A NF é individual por subprocesso. Cliente, origem, transporte e
-            // chegada pertencem ao FST principal e devem persistir quando editados.
+            // NF, chegada, origem e transporte pertencem exclusivamente ao
+            // subprocesso. Só o cliente e a IT são compartilhados pelo FST.
             var updatedSubprocess=await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",
-                $"select=id,nota_fiscal&id=eq.{Uri.EscapeDataString(groupId)}",
-                new{nota_fiscal=string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim()},
+                $"select=id,nota_fiscal,origem,transporte,chegada_cd&id=eq.{Uri.EscapeDataString(groupId)}",
+                new{
+                    nota_fiscal=string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim(),
+                    origem=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
+                    transporte=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
+                    chegada_cd=input.ChegadaCd
+                },
                 "return=representation");
             if(!FirstRow(updatedSubprocess).found)
                 return Results.Json(Error("Não foi possível salvar a NF do subprocesso."),statusCode:409);
             var parentChanges=new {
                 cliente=string.IsNullOrWhiteSpace(input.Cliente)?null:input.Cliente.Trim(),
-                origem=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
-                transporte=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
-                chegada_cd=input.ChegadaCd,
                 atualizado_em=DateTimeOffset.UtcNow
             };
             var updatedParent=await RestAsync(client,token,HttpMethod.Patch,"processos",
@@ -1666,8 +1697,8 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                         capacidade=string.IsNullOrWhiteSpace(item.Capacidade)?null:item.Capacidade.Trim(),
                         quantidade=quantity,
                         quantidade_por_caixa=OperationalUnitsPerBox(item),
-                        caixas_recebidas=item.CaixasRecebidas>0?(decimal?)item.CaixasRecebidas:null,
-                        caixas_inspecionadas=item.CaixasInspecionadas>0?(decimal?)item.CaixasInspecionadas:null,
+                        caixas_recebidas=OperationalBoxesReceived(item)>0?(decimal?)OperationalBoxesReceived(item):null,
+                        caixas_inspecionadas=OperationalBoxesToEvaluate(item)>0?(decimal?)OperationalBoxesToEvaluate(item):null,
                         distribuicao_caixas=NormalizeComponentDistribution(item)
                     },"return=representation");
                 var (newItem,itemFound)=FirstRow(createdItem);
@@ -1711,8 +1742,8 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 ["capacidade"]=string.IsNullOrWhiteSpace(item.Capacidade)?null:item.Capacidade.Trim(),
                 ["quantidade"]=effectiveQuantity,
                 ["quantidade_por_caixa"]=OperationalUnitsPerBox(item),
-                ["caixas_recebidas"]=item.CaixasRecebidas>0?(decimal?)item.CaixasRecebidas:null,
-                ["caixas_inspecionadas"]=item.CaixasInspecionadas>0?(decimal?)item.CaixasInspecionadas:null,
+                ["caixas_recebidas"]=OperationalBoxesReceived(item)>0?(decimal?)OperationalBoxesReceived(item):null,
+                ["caixas_inspecionadas"]=OperationalBoxesToEvaluate(item)>0?(decimal?)OperationalBoxesToEvaluate(item):null,
                 ["distribuicao_caixas"]=NormalizeComponentDistribution(item)
             };
             if(!string.IsNullOrWhiteSpace(productId)) patch["produto_id"]=productId;
@@ -1771,7 +1802,7 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 app.Logger.LogWarning(logError,"Audit log failed after changing completed inspection {InspectionId}",id);
             }
         }
-        return Results.Ok(new {data=new {ok=true,plano=new {lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re}},error=(object?)null});
+        return Results.Ok(new {data=new {ok=true,plano=new {lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re,caixasRecebidas=totalBoxes,caixasAvaliar=totalInspect}},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao atualizar dados da inspeção.",e.Message),statusCode:500);}
@@ -2583,7 +2614,7 @@ app.MapGet("/api/mobile/fotos/inspecoes/{id}", async (string id,HttpRequest requ
         if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var record=ins!.Value;
         var status=record.GetProperty("status").GetString();
-        if(status is not ("aberta" or "em_andamento"))return Results.Json(Error("Esta inspeção não pode receber fotos."),statusCode:409);
+        if(status is "cancelada")return Results.Json(Error("Esta inspeção está cancelada."),statusCode:409);
         var group=record.GetProperty("grupos_inspecao");
         if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process)
            || process.ValueKind!=JsonValueKind.Object ||
@@ -2591,7 +2622,7 @@ app.MapGet("/api/mobile/fotos/inspecoes/{id}", async (string id,HttpRequest requ
             return Results.Json(Error("Processo arquivado ou indisponível."),statusCode:409);
 
         var photos=await RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
-            $"select=id,storage_path,legenda,criado_em&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+            $"select=id,storage_path,legenda,criado_em&inspecao_id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&order=criado_em.asc");
         return Results.Ok(new {data=new {
             inspecao=new {id,numero=record.GetProperty("numero").GetString(),status},
             photos=photos
@@ -2612,7 +2643,14 @@ app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInsp
         var (ins,found)=FirstRow(inspectionRows);
         if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var record=ins!.Value;
-        if(record.GetProperty("status").GetString() is not ("aberta" or "em_andamento"))return Results.Json(Error("Esta inspeção não pode receber fotos."),statusCode:409);
+        if(record.GetProperty("status").GetString() is "cancelada")
+            return Results.Json(Error("Esta inspeção está cancelada."),statusCode:409);
+        var userId=await CurrentUserId(client,token);
+        var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
+        var (profile,authorized)=FirstRow(profileRows);
+        if(!authorized || profile!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor" or "inspetor"))
+            return Results.Json(Error("Sem permissão para alterar fotos."),statusCode:403);
         var group=record.GetProperty("grupos_inspecao");
         if(group.ValueKind!=JsonValueKind.Object || !group.TryGetProperty("processos",out var process) ||
            process.ValueKind!=JsonValueKind.Object ||
@@ -2709,6 +2747,118 @@ app.MapPut("/api/inspecoes/{id}/fotos/{photoId}/legenda", async (
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Não foi possível atualizar a legenda da foto.",e.Message),statusCode:500);}
+});
+
+// Photo changes preserve original files and audit the change rather than deleting
+// evidence permanently. The report and gallery show only active photo rows.
+app.MapPost("/api/inspecoes/{id}/fotos/{photoId}/remover", async(
+    string id,string photoId,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _)||!Guid.TryParse(photoId,out _))
+            return Results.Json(Error("Foto ou inspeção inválida."),statusCode:400);
+        var token=Token(request);var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
+        var (profile,authorized)=FirstRow(profileRows);
+        if(!authorized||profile!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor" or "inspetor"))
+            return Results.Json(Error("Sem permissão para remover fotos."),statusCode:403);
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,status,grupos_inspecao(processos(excluido_em))&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+        var (ins,found)=FirstRow(insRows);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        if(ins!.Value.GetProperty("status").GetString() is "cancelada")
+            return Results.Json(Error("Inspeção cancelada."),statusCode:409);
+        var group=ins.Value.GetProperty("grupos_inspecao");
+        if(group.ValueKind!=JsonValueKind.Object||!group.TryGetProperty("processos",out var process)||
+           process.ValueKind!=JsonValueKind.Object||
+           (process.TryGetProperty("excluido_em",out var archived)&&archived.ValueKind!=JsonValueKind.Null))
+            return Results.Json(Error("FST arquivado ou indisponível."),statusCode:409);
+        var photoQuery=$"inspecao_id=eq.{Uri.EscapeDataString(id)}&id=eq.{Uri.EscapeDataString(photoId)}&excluido_em=is.null";
+        var before=await RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
+            "select=id,storage_path,legenda,nc_id&"+photoQuery+"&limit=1");
+        var (original,exists)=FirstRow(before);
+        if(!exists)return Results.Json(Error("Esta foto não está ativa nesta inspeção."),statusCode:404);
+        var updated=await RestAsync(client,token,HttpMethod.Patch,"inspecao_fotos",
+            "select=id&"+photoQuery,
+            new{excluido_em=DateTimeOffset.UtcNow,excluido_por=userId},"return=representation");
+        if(!FirstRow(updated).found)return Results.Json(Error("Não foi possível remover a foto."),statusCode:409);
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+            $"id=eq.{Uri.EscapeDataString(id)}",
+            new{documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
+        try{
+            await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+                new{usuario_id=userId,entidade="inspecao_fotos",entidade_id=photoId,
+                    acao="remocao_foto",dados=new{inspecao_id=id,antes=original,registrado_em=DateTimeOffset.UtcNow}},
+                "return=minimal");
+        }catch(Exception e){app.Logger.LogWarning(e,"Photo removal audit log failed {PhotoId}",photoId);}
+        return Results.Ok(new{data=new{ok=true,foto_id=photoId},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível remover a foto.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/inspecoes/{id}/fotos/{photoId}/substituir", async(
+    string id,string photoId,RegisterInspectionPhotoItem input,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _)||!Guid.TryParse(photoId,out _))
+            return Results.Json(Error("Foto ou inspeção inválida."),statusCode:400);
+        var path=(input.StoragePath??"").Trim();
+        if(!path.StartsWith(id+"/gerais/",StringComparison.Ordinal)||input.Legenda?.Length>300)
+            return Results.Json(Error("Selecione uma foto válida desta inspeção."),statusCode:400);
+        var token=Token(request);var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
+        var (profile,authorized)=FirstRow(profileRows);
+        if(!authorized||profile!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor" or "inspetor"))
+            return Results.Json(Error("Sem permissão para substituir fotos."),statusCode:403);
+        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,status,grupos_inspecao(processos(excluido_em))&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+        var (ins,found)=FirstRow(insRows);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        if(ins!.Value.GetProperty("status").GetString() is "cancelada")
+            return Results.Json(Error("Inspeção cancelada."),statusCode:409);
+        var group=ins.Value.GetProperty("grupos_inspecao");
+        if(group.ValueKind!=JsonValueKind.Object||!group.TryGetProperty("processos",out var process)||
+           process.ValueKind!=JsonValueKind.Object||
+           (process.TryGetProperty("excluido_em",out var archived)&&archived.ValueKind!=JsonValueKind.Null))
+            return Results.Json(Error("FST arquivado ou indisponível."),statusCode:409);
+        var photoQuery=$"inspecao_id=eq.{Uri.EscapeDataString(id)}&id=eq.{Uri.EscapeDataString(photoId)}&excluido_em=is.null";
+        var before=await RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",
+            "select=id,storage_path,legenda,nc_id&"+photoQuery+"&limit=1");
+        var (original,exists)=FirstRow(before);
+        if(!exists)return Results.Json(Error("Foto original não encontrada nesta inspeção."),statusCode:404);
+        var ncId=original!.Value.TryGetProperty("nc_id",out var ncProp)&&ncProp.ValueKind==JsonValueKind.String?ncProp.GetString():null;
+        // Insert replacement BEFORE archiving the old photo. If the insertion
+        // fails, the original evidence remains available and unchanged.
+        var inserted=await RestAsync(client,token,HttpMethod.Post,"inspecao_fotos","select=id",
+            new{inspecao_id=id,storage_path=path,
+                legenda=string.IsNullOrWhiteSpace(input.Legenda)?null:input.Legenda.Trim(),
+                nc_id=ncId},"return=representation");
+        var (created,createdOk)=FirstRow(inserted);
+        if(!createdOk)return Results.Json(Error("A nova foto não pôde ser registrada."),statusCode:409);
+        var newId=created!.Value.GetProperty("id").GetString()!;
+        var archivedRows=await RestAsync(client,token,HttpMethod.Patch,"inspecao_fotos",
+            "select=id&"+photoQuery,
+            new{excluido_em=DateTimeOffset.UtcNow,excluido_por=userId,substituida_por=newId},
+            "return=representation");
+        if(!FirstRow(archivedRows).found)
+            return Results.Json(Error("A foto nova foi registrada, mas a anterior continua ativa. Atualize a galeria antes de tentar novamente."),statusCode:409);
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+            $"id=eq.{Uri.EscapeDataString(id)}",
+            new{documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
+        try{
+            await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+                new{usuario_id=userId,entidade="inspecao_fotos",entidade_id=photoId,
+                    acao="substituicao_foto",dados=new{inspecao_id=id,antes=original,
+                        novo_id=newId,novo_caminho=path,registrado_em=DateTimeOffset.UtcNow}},
+                "return=minimal");
+        }catch(Exception e){app.Logger.LogWarning(e,"Photo replacement audit log failed {PhotoId}",photoId);}
+        return Results.Ok(new{data=new{ok=true,foto_id=newId,substituida=photoId},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível substituir a foto.",e.Message),statusCode:500);}
 });
 
 // Situação consolidada do Word: consulta os dados efetivamente gravados,

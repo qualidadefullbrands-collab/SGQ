@@ -68,6 +68,9 @@ type InspectionRow = {
     processo_id: string
     subprocesso_codigo?: string | null
     nota_fiscal?: string | null
+    origem?: string | null
+    transporte?: string | null
+    chegada_cd?: string | null
     processos?: ProcessRow | null
   } | null
   it_versoes?: {
@@ -227,6 +230,30 @@ function formatFst(value: string | null | undefined) {
   const code=fstCode(raw)
   return code ? 'FST'+code : raw
 }
+function inspectionBoxTotal(detail:any,kind:'received'|'evaluate'):number|null {
+  const links=Array.isArray(detail?.items)?detail.items:[]
+  let count=0
+  for(const link of links){
+    const item=link?.processo_itens
+    if(!item)continue
+    const distributed=Array.isArray(item.distribuicao_caixas)
+      ?item.distribuicao_caixas.reduce((sum:number,g:any)=>{
+        const type=String(g?.Tipo??g?.tipo??'').toLowerCase()
+        return type==='padrao'||type==='fracionada'
+          ?sum+Math.max(0,Number(g?.Caixas??g?.caixas??0)):sum
+      },0):0
+    const received=Number(item.caixas_recebidas)>0
+      ?Number(item.caixas_recebidas):distributed
+    const value=kind==='received'?received:
+      Number(item.caixas_inspecionadas)>0
+        ?Number(item.caixas_inspecionadas):received>0?boxesToInspect(received):0
+    count+=value
+  }
+  if(count>0)return count
+  const field=kind==='received'?'caixas_recebidas':'caixas_avaliar'
+  const persisted=Number(detail?.[field])
+  return persisted>0?persisted:null
+}
 function inspectionDisplay(row:{grupos_inspecao?:{subprocesso_codigo?:string|null;processos?:{codigo?:string|null;cliente?:string|null}|null}|null}) {
   const p=row.grupos_inspecao?.processos
   const sub=row.grupos_inspecao?.subprocesso_codigo
@@ -320,7 +347,20 @@ function boxDistributionTotals(row:any) {
 function updateBoxDistributionField(row:any,key:string,value:string) {
   // 'Quantidade por caixa' is the operational standard-box quantity.
   if(key==='unidadesPadrao')return {...row,unidadesPadrao:value,quantidadePorCaixa:value}
-  return {...row,[key]:value}
+  const changed={...row,[key]:value}
+  if(key!=='caixasPadrao'&&key!=='caixasFracionadas')return changed
+  const before=boxDistributionTotals(row).boxes
+  const after=boxDistributionTotals(changed).boxes
+  const explicit=String(row.caixasRecebidas??'').trim()
+  // Preserve manually overridden received boxes; keep automatic counts in sync.
+  if(explicit!==''&&Number(explicit)!==before)return changed
+  const inspected=String(row.caixasInspecionadas??'').trim()
+  return {...changed,
+    caixasRecebidas:after>0?String(after):'',
+    caixasInspecionadas:inspected===''||Number(inspected)===boxesToInspect(before)
+      ?after>0?String(boxesToInspect(after)):''
+      :row.caixasInspecionadas
+  }
 }
 
 function setLaboratoryUnits(row:any,value:string) {
@@ -363,11 +403,16 @@ function patchOperationalSkuRow(row:any,key:string,value:string){
 }
 
 function suggestMissingInspectedBoxes(row:any){
-  // Fill only absent historical values: keep explicit zero and manual overrides.
-  if(String(row.caixasInspecionadas??'').trim()!=='')return row
-  const received=Number(row.caixasRecebidas)
-  return Number.isInteger(received)&&received>0
-    ?{...row,caixasInspecionadas:String(boxesToInspect(received))}:row
+  // Recover box counts from a persisted warehouse distribution (standard +
+  // fractional boxes). Lab withdrawals are units and are excluded.
+  const storedReceived=String(row.caixasRecebidas??'').trim()
+  const distributionBoxes=boxDistributionTotals(row).boxes
+  const received=storedReceived!==''?Number(storedReceived):distributionBoxes
+  const boxesReceived=storedReceived!==''?row.caixasRecebidas:(received>0?String(received):'')
+  const storedEvaluate=String(row.caixasInspecionadas??'').trim()
+  const boxesEvaluate=storedEvaluate!==''?row.caixasInspecionadas:
+    Number.isInteger(received)&&received>0?String(boxesToInspect(received)):''
+  return {...row,caixasRecebidas:boxesReceived,caixasInspecionadas:boxesEvaluate}
 }
 
 function applyBoxGroupsToSku(base:any, groups:any[]|null|undefined) {
@@ -626,6 +671,10 @@ export default function App() {
     inspectionLevel: 'I',
     observacaoInterna: '',
   })
+  const [inheritedReference,setInheritedReference]=useState<{
+    letter:string;invoice:string;origin:string;transport:string;arrival:string;
+    historical:boolean;quantity:string;boxes:string
+  }|null>(null)
   const [skuRows, setSkuRows] = useState([emptySku()])
   const skuRowsRef=useRef(skuRows)
   useEffect(()=>{skuRowsRef.current=skuRows},[skuRows])
@@ -1099,6 +1148,7 @@ export default function App() {
 
   function resetNewInspection() {
     createRequestId.current=crypto.randomUUID()
+    setInheritedReference(null)
     autoNfeRef.current=null
     setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0);setExpandedSkuIndex(0)
     manualItSelection.current=false;lastItSuggested.current='';setItSuggestionNote('');setProcessLookupMessage('')
@@ -1195,24 +1245,47 @@ export default function App() {
     autoNfeRef.current=null
     fstLookupRequest.current++
     setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('')
-    setEditingInspectionId(null);setEditingProcessId(null);
-    setInspection((x) => ({
-      ...x,
-      processoId: p.id,
-      subprocessoCodigo: nextSubprocessFor(p),
+    setEditingInspectionId(null);setEditingProcessId(null)
+    const previous=inspections.filter(i=>i.grupos_inspecao?.processo_id===p.id)
+      .sort((a,b)=>String(a.grupos_inspecao?.subprocesso_codigo??'Z')
+        .localeCompare(String(b.grupos_inspecao?.subprocesso_codigo??'Z')))
+    const first=previous[0]
+    const source=first?.grupos_inspecao
+    const hasChildReference=Boolean(source&&(source.origem||source.transporte||source.chegada_cd))
+    const historical=!!first&&!hasChildReference
+    const reference=first?{
+      letter:source?.subprocesso_codigo??'A',invoice:source?.nota_fiscal??'',
+      origin:hasChildReference?source?.origem??'':p.origem??'',
+      transport:hasChildReference?source?.transporte??'':p.transporte??'',
+      arrival:hasChildReference?source?.chegada_cd??'':p.chegada_cd??'',
+      historical,quantity:String(first.tamanho_lote??''),boxes:''
+    }:null
+    setInheritedReference(reference)
+    setInspection(x=>({
+      ...x,processoId:p.id,subprocessoCodigo:nextSubprocessFor(p),
       itVersionId:p.it_versao_id??x.itVersionId,
-      codigo: fstCode(p.codigo),
-      cliente: p.cliente ?? '',
-      notaFiscal: '',
-      origem: p.origem ?? '',
-      transporte: p.transporte ?? '',
-      chegadaCd: p.chegada_cd ?? '',
-      dataInspecao: '',
+      codigo:fstCode(p.codigo),cliente:p.cliente??'',
+      // Copy child operational values once as editable suggestions, not linked.
+      notaFiscal:'',
+      origem:hasChildReference?source?.origem??'':'',
+      transporte:hasChildReference?source?.transporte??'':'',
+      chegadaCd:hasChildReference?source?.chegada_cd??'':'',
+      dataInspecao:''
     }))
+    if(first){
+      void apiGet<any>('/api/inspecoes/'+encodeURIComponent(first.id)+'/detalhe').then(res=>{
+        if(res.error||!res.data)return
+        const items=res.data.items??[]
+        const quantity=items.reduce((sum:number,link:any)=>sum+Number(link.processo_itens?.quantidade||0),0)
+        const boxes=items.reduce((sum:number,link:any)=>sum+Number(link.processo_itens?.caixas_recebidas||0),0)
+        setInheritedReference(current=>current?.letter===(source?.subprocesso_codigo??'A')
+          ?{...current,quantity:String(quantity||first.tamanho_lote||''),boxes:String(boxes||'')}:current)
+      }).catch(()=>undefined)
+    }
     setExpandedSkuIndex(0)
     setSkuRows([emptySku()])
     setTab('nova')
-    setMessage('Dados gerais reutilizados. Informe o novo código/produto desta inspeção.')
+    setMessage('Nova inspeção independente. Confira os valores sugeridos antes de salvar.')
   }
 
   async function editInspectionFull(id:string){
@@ -1224,6 +1297,7 @@ export default function App() {
       if(!source?.inspecao){setPopupMessage(res.error?.message||'Inspeção indisponível offline.');return}
     }else void saveOfflineDraft(userId||'','full:detail:'+id,source).catch(()=>undefined)
     editingBaseline.current=offlineInspectionVersion(source)
+    setInheritedReference(null)
     const data={...source.inspecao,items:source.items??[]}
     const process=data.grupos_inspecao?.processos??{}
     const items=(data.items??[]).map((link:any)=>{
@@ -1237,7 +1311,8 @@ export default function App() {
     })
     const form={
       codigo:fstCode(process.codigo),cliente:process.cliente??'',notaFiscal:data.grupos_inspecao?.nota_fiscal??process.nota_fiscal??'',
-      origem:process.origem??'',transporte:process.transporte??'',chegadaCd:process.chegada_cd??'',
+      origem:data.grupos_inspecao?.origem??'',transporte:data.grupos_inspecao?.transporte??'',
+      chegadaCd:data.grupos_inspecao?.chegada_cd??'',
       dataInspecao:String(data.data_inspecao??'').slice(0,10),itVersionId:data.it_versao_id??'',
       inspectionLevel:data.nivel_inspecao??'I',observacaoInterna:data.observacao_interna??'',
       itens:items.length?items:[emptySku()]
@@ -1422,8 +1497,8 @@ export default function App() {
       setInspection(old=>parentFstCode(old.codigo)===parentFstCode(code)?{
         ...old,processoId:existing.id,itVersionId:existing.it_versao_id??old.itVersionId,
         subprocessoCodigo:code.match(/-([A-Z])$/)?.[1]??(old.processoId===existing.id?old.subprocessoCodigo:nextSubprocessFor(existing)),cliente:old.cliente||existing.cliente||'',
-        notaFiscal:old.notaFiscal,origem:old.origem||existing.origem||'',
-        transporte:old.transporte||existing.transporte||'',chegadaCd:old.chegadaCd||existing.chegada_cd||''
+        notaFiscal:old.notaFiscal,origem:old.origem,
+        transporte:old.transporte,chegadaCd:old.chegadaCd
       }:old)
     }
     try{
@@ -1496,9 +1571,6 @@ export default function App() {
     const saved=await apiPut<any>(`/api/processos/${editingProcess.id}`,{
       cliente:editingProcess.cliente,
       notaFiscal:null,
-      origem:editingProcess.origem,
-      transporte:editingProcess.transporte,
-      chegadaCd:editingProcess.chegada_cd,
     })
     if (saved.error) return setError(saved.error.message)
     const revised={...editingProcess,nota_fiscal:null}
@@ -1571,6 +1643,53 @@ export default function App() {
     }
     setMessage('Inspeção excluída.')
     void refreshLists()
+  }
+
+  async function removeSavedInspectionPhoto(photo:any){
+    if(!canWrite||!selectedInspectionId||photoUploadBusy)return
+    if(!window.confirm('Remover esta foto do subprocesso? Ela sairá da galeria e do laudo, mas será preservada no histórico de auditoria.'))return
+    const id=selectedInspectionId
+    setPhotoUploadBusy(true);setError('')
+    try{
+      const removed=await apiPost<any>(
+        '/api/inspecoes/'+encodeURIComponent(id)+'/fotos/'+encodeURIComponent(photo.id)+'/remover',{})
+      if(removed.error){setError(removed.error.message);return}
+      photosLinksExpiration.current.delete(id)
+      await refreshInspectionPhotoEvidence()
+      setInspections(current=>[...current])
+      setMessage('Foto removida deste subprocesso. Histórico preservado.')
+    }catch(e:any){setError(String(e?.message||'Falha ao remover foto.'))}
+    finally{setPhotoUploadBusy(false)}
+  }
+
+  async function replaceSavedInspectionPhoto(photo:any,file:File|null){
+    if(!file||!canWrite||!selectedInspectionId||photoUploadBusy)return
+    if(!file.type.startsWith('image/'))return setError('Selecione um arquivo de imagem.')
+    if(file.size>20*1024*1024)return setError('A imagem deve ter até 20 MB.')
+    if(detail?.status==='concluida'&&
+       !window.confirm('Substituir uma foto de inspeção concluída? A imagem antiga será arquivada para auditoria.'))return
+    const id=selectedInspectionId
+    setPhotoUploadBusy(true);setError('')
+    const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
+    const path=id+'/gerais/'+crypto.randomUUID()+'-'+safe
+    try{
+      const uploaded=await supabase.storage.from('inspecao-fotos').upload(path,file,{contentType:file.type})
+      if(uploaded.error){setError('Não foi possível enviar a nova imagem: '+uploaded.error.message);return}
+      const swapped=await apiPost<any>(
+        '/api/inspecoes/'+encodeURIComponent(id)+'/fotos/'+encodeURIComponent(photo.id)+'/substituir',
+        {storagePath:path,legenda:photoCaptionDrafts[photo.id]??photo.legenda??''})
+      if(swapped.error){
+        // New upload is not yet evidence in the database; clean up if permitted.
+        void (supabase.storage.from('inspecao-fotos') as any).remove?.([path])
+        setError(swapped.error.message)
+        return
+      }
+      photosLinksExpiration.current.delete(id)
+      await refreshInspectionPhotoEvidence()
+      setInspections(current=>[...current])
+      setMessage('Foto substituída neste subprocesso. Original mantida no histórico.')
+    }catch(e:any){setError(String(e?.message||'Falha ao trocar foto.'))}
+    finally{setPhotoUploadBusy(false)}
   }
 
   async function savePhotoCaption(photoId:string,currentCaption:string) {
@@ -1686,8 +1805,9 @@ export default function App() {
       return suggestMissingInspectedBoxes(applyBoxGroupsToSku(base,item.distribuicao_caixas))
     })
     const form={
-      codigo:fstCode(process.codigo),cliente:process.cliente ?? '',notaFiscal:detail.grupos_inspecao?.nota_fiscal ?? process.nota_fiscal ?? '',origem:process.origem ?? '',transporte:process.transporte ?? '',
-      chegadaCd:process.chegada_cd ?? '',dataInspecao:String(detail.data_inspecao ?? '').slice(0,10),inspectionLevel:detail.nivel_inspecao ?? 'I',
+      codigo:fstCode(process.codigo),cliente:process.cliente ?? '',notaFiscal:detail.grupos_inspecao?.nota_fiscal ?? '',
+      origem:detail.grupos_inspecao?.origem ?? '',transporte:detail.grupos_inspecao?.transporte ?? '',
+      chegadaCd:detail.grupos_inspecao?.chegada_cd ?? '',dataInspecao:String(detail.data_inspecao ?? '').slice(0,10),inspectionLevel:detail.nivel_inspecao ?? 'I',
       observacaoInterna:detail.observacao_interna ?? '',itVersionId:detail.it_versao_id ?? '',itens:rows,
     }
     setExpandedEditSkuIndex(rows.length>1?null:0)
@@ -1776,6 +1896,8 @@ export default function App() {
         return {...current,items:updated,
           tamanho_lote:p?.lote??current.tamanho_lote,
           tamanho_amostra:p?.amostra??current.tamanho_amostra,
+          caixas_recebidas:p?.caixasRecebidas??itens.reduce((sum:any,x:any)=>sum+x.caixasRecebidas,0),
+          caixas_avaliar:p?.caixasAvaliar??itens.reduce((sum:any,x:any)=>sum+x.caixasInspecionadas,0),
           codigo_amostragem:p?.codigo??current.codigo_amostragem,
           limite_aceitacao:p?.ac??current.limite_aceitacao,
           limite_rejeicao:p?.re??current.limite_rejeicao,
@@ -1784,11 +1906,11 @@ export default function App() {
           observacao_interna:editPayload.observacaoInterna,
           grupos_inspecao:{...current.grupos_inspecao,
             nota_fiscal:fastPath?current.grupos_inspecao?.nota_fiscal:editPayload.notaFiscal,
+            origem:fastPath?current.grupos_inspecao?.origem:editPayload.origem,
+            transporte:fastPath?current.grupos_inspecao?.transporte:editPayload.transporte,
+            chegada_cd:fastPath?current.grupos_inspecao?.chegada_cd:editPayload.chegadaCd,
             processos:{...current.grupos_inspecao?.processos,
-              cliente:fastPath?current.grupos_inspecao?.processos?.cliente:editPayload.cliente,
-              origem:fastPath?current.grupos_inspecao?.processos?.origem:editPayload.origem,
-              transporte:fastPath?current.grupos_inspecao?.processos?.transporte:editPayload.transporte,
-              chegada_cd:fastPath?current.grupos_inspecao?.processos?.chegada_cd:editPayload.chegadaCd}
+              cliente:fastPath?current.grupos_inspecao?.processos?.cliente:editPayload.cliente}
           }
         }
       })
@@ -1798,19 +1920,18 @@ export default function App() {
         codigo_amostragem:p?.codigo??item.codigo_amostragem,
         grupos_inspecao:item.grupos_inspecao?{...item.grupos_inspecao,
           nota_fiscal:fastPath?item.grupos_inspecao.nota_fiscal:editPayload.notaFiscal,
+          origem:fastPath?item.grupos_inspecao.origem:editPayload.origem,
+          transporte:fastPath?item.grupos_inspecao.transporte:editPayload.transporte,
+          chegada_cd:fastPath?item.grupos_inspecao.chegada_cd:editPayload.chegadaCd,
           processos:item.grupos_inspecao.processos?{...item.grupos_inspecao.processos,
-            cliente:fastPath?item.grupos_inspecao.processos.cliente:editPayload.cliente,
-            origem:fastPath?item.grupos_inspecao.processos.origem:editPayload.origem,
-            transporte:fastPath?item.grupos_inspecao.processos.transporte:editPayload.transporte,
-            chegada_cd:fastPath?item.grupos_inspecao.processos.chegada_cd:editPayload.chegadaCd
+            cliente:fastPath?item.grupos_inspecao.processos.cliente:editPayload.cliente
           }:item.grupos_inspecao.processos
         }:item.grupos_inspecao
       }:item))
       if(!fastPath){
         const pid=detail?.grupos_inspecao?.processo_id
         if(pid)setProcesses(current=>current.map(proc=>proc.id===pid?
-          {...proc,cliente:editPayload.cliente,origem:editPayload.origem,
-            transporte:editPayload.transporte,chegada_cd:editPayload.chegadaCd}:proc))
+          {...proc,cliente:editPayload.cliente}:proc))
       }
       setMessage(fastPath?'Quantidades e caixas salvas.':'Dados da inspeção salvos.')
       editLastSavedFingerprint.current=JSON.stringify(editingInspectionData)
@@ -3066,6 +3187,14 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     {Array.from({length:26},(_,i)=>String.fromCharCode(65+i)).map(c=><option key={c} value={c}>{c}</option>)}
                   </select>
                 </label>
+                {inheritedReference&&<div className="sgq-subprocess-inheritance span-2" role="note">
+                  <strong>{inheritedReference.historical?'Referência histórica do FST':'Referência do subprocesso '+inheritedReference.letter}</strong>
+                  <span>{inheritedReference.historical?'Não confirmada para A/B. Informe os dados deste subprocesso.':'Origem, transporte e chegada foram sugeridos; confirme ou altere antes de salvar.'}</span>
+                  <small>NF {inheritedReference.invoice||'—'} · Chegada {inheritedReference.arrival||'—'} ·
+                    Origem {inheritedReference.origin||'—'} · Transporte {inheritedReference.transport||'—'} ·
+                    Quantidade {inheritedReference.quantity||'—'} · Caixas {inheritedReference.boxes||'—'}</small>
+                  <small>NF, quantidade e caixas não são copiadas automaticamente. Alterar este subprocesso não modifica o anterior.</small>
+                </div>}
                 <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
                 <label>NF do subprocesso {inspection.subprocessoCodigo}<input value={inspection.notaFiscal} onChange={(e)=>{autoNfeRef.current=null;setInspection({...inspection,notaFiscal:e.target.value})}}/></label>
                 <label>Chegada no CD<input type="date" value={inspection.chegadaCd} onChange={(e)=>setInspection({...inspection,chegadaCd:e.target.value})}/></label>
@@ -3269,8 +3398,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <div className="inspection-data-summary">
               <div><small>Processo / subprocesso</small><strong>{formatFst(detail.grupos_inspecao?.processos?.codigo)}{detail.grupos_inspecao?.subprocesso_codigo?'-'+detail.grupos_inspecao.subprocesso_codigo:''}</strong></div>
               <div><small>Cliente</small><strong>{detail.grupos_inspecao?.processos?.cliente || '—'}</strong></div>
-              <div><small>Nota fiscal</small><strong>{detail.grupos_inspecao?.nota_fiscal ?? detail.grupos_inspecao?.processos?.nota_fiscal ?? '—'}</strong></div>
-              <div><small>Origem / transporte</small><strong>{detail.grupos_inspecao?.processos?.origem || '—'} · {detail.grupos_inspecao?.processos?.transporte || '—'}</strong></div>
+              <div><small>Nota fiscal</small><strong>{detail.grupos_inspecao?.nota_fiscal || '—'}</strong></div>
+              <div><small>Origem / transporte</small><strong>{detail.grupos_inspecao?.origem || '—'} · {detail.grupos_inspecao?.transporte || '—'}</strong></div>
+              <div><small>Chegada no CD</small><strong>{formatDateBR(detail.grupos_inspecao?.chegada_cd)}</strong></div>
               <div><small>IT / versão</small><strong>{detail.it_versoes?.instrucoes_trabalho?.codigo || 'Não selecionada'} · {detail.it_versoes?.versao || '—'}</strong></div>
               <div><small>Nível da inspeção</small><strong>{detail.nivel_inspecao || '—'}</strong></div>
               <div><small>Data da inspeção</small><strong>{formatDateBR(detail.data_inspecao)}</strong></div>
@@ -3318,8 +3448,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
               <div><small>Ac</small><strong>{detail.limite_aceitacao ?? '—'}</strong></div>
               <div><small>Re</small><strong>{detail.limite_rejeicao ?? '—'}</strong></div>
-              <div><small>Caixas recebidas</small><strong>{detail.caixas_recebidas ?? '—'}</strong></div>
-              <div><small>Caixas a avaliar</small><strong>{detail.caixas_avaliar ?? '—'}</strong></div>
+              <div><small>Caixas recebidas</small><strong>{inspectionBoxTotal(detail,'received')?.toLocaleString('pt-BR') ?? '—'}</strong></div>
+              <div><small>Caixas a avaliar</small><strong>{inspectionBoxTotal(detail,'evaluate')?.toLocaleString('pt-BR') ?? '—'}</strong></div>
             </div>
             {!!detail.limite_rejeicao && detail.total_nao_conforme>=detail.limite_rejeicao && <div className="alert error">Limite de rejeição atingido. Você pode encerrar ou continuar a inspeção; a decisão ficará registrada.</div>}
           </section>
@@ -3542,7 +3672,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
             </div>
 
-            {detail.status!=='concluida' && (
+            {canWrite && detail.status!=='cancelada' && (
               <>
                 <label className="upload-box"><Camera size={22}/><span>Selecionar fotos finais</span><input type="file" accept="image/*" multiple onChange={(e)=>addPendingPhotos(e.target.files)}/></label>
                 {!!pendingPhotos.length && <div className="pending-photo-grid">
@@ -3593,6 +3723,17 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                       <span>{p.legenda||'Sem legenda'}</span>
                     )}
                   </div>
+                  {canWrite&&detail.status!=='cancelada'&&<div className="sgq-saved-photo-actions">
+                    <button type="button" className="secondary small" disabled={photoUploadBusy}
+                      onClick={()=>document.getElementById('sgq-photo-replace-'+p.id)?.click()}>
+                      <RefreshCw size={14}/> Trocar foto
+                    </button>
+                    <input id={'sgq-photo-replace-'+p.id} type="file" accept="image/*"
+                      style={{display:'none'}} disabled={photoUploadBusy}
+                      onChange={e=>{const file=e.target.files?.[0]??null;e.target.value='';void replaceSavedInspectionPhoto(p,file)}}/>
+                    <button type="button" className="secondary small" disabled={photoUploadBusy}
+                      onClick={()=>void removeSavedInspectionPhoto(p)}><Trash2 size={14}/> Remover</button>
+                  </div>}
                   {p.nc_id && <span className="nc-photo-tag">Foto de NC</span>}
                 </article>
               ))}
@@ -4072,9 +4213,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <h2>{formatFst(editingProcess.codigo)}</h2>
             <div className="form-grid one">
               <label>Cliente<input value={editingProcess.cliente ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,cliente:e.target.value})}/></label>
-              <label>Origem<input value={editingProcess.origem ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,origem:e.target.value})}/></label>
-              <label>Transporte<input value={editingProcess.transporte ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,transporte:e.target.value})}/></label>
-              <label>Chegada no CD<input type="date" value={editingProcess.chegada_cd ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,chegada_cd:e.target.value})}/></label>
+
             </div>
             <button className="primary wide" type="submit">Salvar alterações</button>
           </form>
