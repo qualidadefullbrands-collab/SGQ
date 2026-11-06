@@ -38,7 +38,6 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
   const thirty=localDate(new Date(Date.now()+30*86400000))
   const alerts=useMemo(()=>equipments.filter(e=>e.estado==='ativo'&&e.requer_calibracao&&(!e.proxima_calibracao||e.proxima_calibracao<=thirty)),[equipments,thirty])
   const shown=useMemo(()=>equipments.filter(e=>[e.nome,e.codigo,e.fabricante,e.localizacao,e.numero_serie].some(s=>String(s||'').toLowerCase().includes(search.toLowerCase()))),[equipments,search])
-  useEffect(()=>{if(!selected)return;const onEscape=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!saving)setSelected('')};window.addEventListener('keydown',onEscape);return()=>window.removeEventListener('keydown',onEscape)},[selected,saving])
   useEffect(()=>{
     if(!selected){setEvents([]);setEventsError('');return}
     let valid=true
@@ -114,9 +113,9 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
         <div className="equipment-actions"><button className="secondary small" type="button" onClick={()=>{setSelected(selected===e.id?'':e.id);setSection('historico')}}><ClipboardCheck size={15}/> Histórico</button>{canManage&&<button className="secondary small" type="button" onClick={()=>setEditing({...e})}><Wrench size={15}/> Editar</button>}</div>
       </article>})}
     </div>
-    {selected&&<div className="modal-backdrop equipment-history-backdrop" role="presentation" onClick={()=>{if(!saving)setSelected('')}}>
+    {selected&&<div className="modal-backdrop equipment-history-backdrop" role="presentation">
       <section className="sample-detail panel section-card equipment-history" role="dialog" aria-modal="true" aria-labelledby="equipment-history-title" onClick={e=>e.stopPropagation()}>
-      <div className="section-title"><h2 id="equipment-history-title">Histórico do equipamento</h2><button className="secondary small" onClick={()=>{if(!saving)setSelected('')}} type="button" aria-label="Fechar histórico do equipamento" disabled={saving}>Fechar</button></div>
+      <div className="section-title"><h2 id="equipment-history-title">Histórico do equipamento</h2><button className="secondary small" onClick={()=>{if(!saving)setSelected('')}} type="button" aria-label="Fechar histórico do equipamento" title="Fechar histórico do equipamento" disabled={saving}>×</button></div>
       {section==='historico' && <div className="equipment-events">{eventsLoading?<p>Carregando histórico…</p>:eventsError?<p role="alert">{eventsError}</p>:events.length?events.map(e=><div key={e.id}><b>{e.tipo.replaceAll('_',' ')}</b><span>{fmt(e.data_evento)} · {e.resultado}{e.proximo_vencimento?' · Próximo: '+fmt(e.proximo_vencimento):''}</span>{e.observacoes&&<small>{e.observacoes}</small>}{e.documento_url&&<a href={e.documento_url} target="_blank" rel="noreferrer">Certificado / evidência</a>}</div>):<p>Nenhum evento cadastrado.</p>}</div>}
       <div className="equipment-section-tabs">
         {([['historico','Histórico'],['rotina','Verificação de rotina'],['manutencao','Manutenção'],['calibracao','Calibração']] as const).map(([k,label])=><button className={section===k?'active':''} type="button" key={k} onClick={()=>{
@@ -140,7 +139,7 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
       </form>}
       </section>
     </div>}
-    {editing&&<div className="modal-backdrop" onClick={()=>setEditing(null)}><form className="sample-detail inspection-edit-modal equipment-editor" onClick={e=>e.stopPropagation()} onSubmit={saveEquipment}>
+    {editing&&<div className="modal-backdrop"><form className="sample-detail inspection-edit-modal equipment-editor" onClick={e=>e.stopPropagation()} onSubmit={saveEquipment}>
       <button className="close" type="button" onClick={()=>setEditing(null)}>×</button>
       <h2>{editing.id?'Editar equipamento':'Cadastrar equipamento'}</h2>
       <div className="form-grid">
