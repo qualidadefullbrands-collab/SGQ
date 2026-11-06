@@ -4,7 +4,6 @@ import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/sup
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from './lib/offline'
 import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSync'
-import SkuQuantityGrid from './components/SkuQuantityGrid'
 import InventoryPanel from './stock/InventoryPanel'
 import InspectionsKanban from './components/InspectionsKanban'
 
@@ -358,6 +357,14 @@ function patchOperationalSkuRow(row:any,key:string,value:string){
   return {...row,[key]:value}
 }
 
+function suggestMissingInspectedBoxes(row:any){
+  // Fill only absent historical values: keep explicit zero and manual overrides.
+  if(String(row.caixasInspecionadas??'').trim()!=='')return row
+  const received=Number(row.caixasRecebidas)
+  return Number.isInteger(received)&&received>0
+    ?{...row,caixasInspecionadas:String(boxesToInspect(received))}:row
+}
+
 function applyBoxGroupsToSku(base:any, groups:any[]|null|undefined) {
   const next={...base}
   for (const g of groups ?? []) {
@@ -521,6 +528,7 @@ export default function App() {
   const createRequestId=useRef(crypto.randomUUID())
   const [activeProductIndex,setActiveProductIndex]=useState(0)
   const [expandedSkuIndex,setExpandedSkuIndex]=useState<number|null>(0)
+  const [expandedEditSkuIndex,setExpandedEditSkuIndex]=useState<number|null>(0)
   const [editSaving,setEditSaving]=useState(false)
   const [editFeedback,setEditFeedback]=useState('')
   const editLastSavedFingerprint=useRef<string|null>(null)
@@ -1158,12 +1166,12 @@ export default function App() {
     const process=data.grupos_inspecao?.processos??{}
     const items=(data.items??[]).map((link:any)=>{
       const x=link.processo_itens
-      return applyBoxGroupsToSku({...emptySku(),processoItemId:x.id,sku:x.produtos?.sku??'',
+      return suggestMissingInspectedBoxes(applyBoxGroupsToSku({...emptySku(),processoItemId:x.id,sku:x.produtos?.sku??'',
         nome:x.produtos?.nome??'',quantidadePv:x.quantidade_pv==null?'':String(x.quantidade_pv),
         numeroPedidoPv:x.pv_numero??'',fstPv:x.pv_fst??'',lote:x.lote??'',material:x.material??'',capacidade:x.capacidade??'',
         quantidade:String(x.quantidade??''),quantidadePorCaixa:String(x.quantidade_por_caixa??''),
         caixasRecebidas:String(x.caixas_recebidas??''),caixasInspecionadas:String(x.caixas_inspecionadas??''),
-        unidadesPorConjunto:String(link.unidades_por_conjunto??1)},x.distribuicao_caixas)
+        unidadesPorConjunto:String(link.unidades_por_conjunto??1)},x.distribuicao_caixas))
     })
     const form={
       codigo:fstCode(process.codigo),cliente:process.cliente??'',notaFiscal:process.nota_fiscal??'',
@@ -1172,6 +1180,7 @@ export default function App() {
       inspectionLevel:data.nivel_inspecao??'I',observacaoInterna:data.observacao_interna??'',
       itens:items.length?items:[emptySku()]
     }
+    setExpandedEditSkuIndex(items.length>1?null:0)
     editMetadataBaseline.current=editMetadataFingerprint(form)
     setSelectedInspectionId(data.id)
     setEditingInspectionId(null);setEditingProcessId(null)
@@ -1608,13 +1617,14 @@ export default function App() {
       const base={...emptySku(),processoItemId:item.id,sku:item.produtos?.sku ?? '',nome:item.produtos?.nome ?? '',
         quantidadePv:item.quantidade_pv==null?'':String(item.quantidade_pv),
         numeroPedidoPv:item.pv_numero??'',fstPv:item.pv_fst??'',lote:item.lote ?? '',material:item.material ?? '',capacidade:item.capacidade ?? '',quantidade:String(item.quantidade ?? ''),quantidadePorCaixa:String(item.quantidade_por_caixa ?? ''),caixasRecebidas:String(item.caixas_recebidas ?? ''),caixasInspecionadas:String(item.caixas_inspecionadas ?? ''),unidadesPorConjunto:String(link.unidades_por_conjunto ?? 1)}
-      return applyBoxGroupsToSku(base,item.distribuicao_caixas)
+      return suggestMissingInspectedBoxes(applyBoxGroupsToSku(base,item.distribuicao_caixas))
     })
     const form={
       codigo:fstCode(process.codigo),cliente:process.cliente ?? '',notaFiscal:process.nota_fiscal ?? '',origem:process.origem ?? '',transporte:process.transporte ?? '',
       chegadaCd:process.chegada_cd ?? '',dataInspecao:String(detail.data_inspecao ?? '').slice(0,10),inspectionLevel:detail.nivel_inspecao ?? 'I',
       observacaoInterna:detail.observacao_interna ?? '',itVersionId:detail.it_versao_id ?? '',itens:rows,
     }
+    setExpandedEditSkuIndex(rows.length>1?null:0)
     editMetadataBaseline.current=editMetadataFingerprint(form)
     setEditFeedback('')
     editLastSavedFingerprint.current=null
@@ -2964,9 +2974,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <button type="button" className="secondary" onClick={()=>{setExpandedSkuIndex(skuRows.length);setSkuRows([...skuRows,emptySku()])}}><Plus size={16}/> Adicionar código</button>
                 </div>
               </div>
-              {editingInspectionId && <SkuQuantityGrid rows={skuRows}
-                onChange={(i,key,value)=>setSkuRows(current=>current.map((row,j)=>j===i?patchOperationalSkuRow(row,key,value):row))}/>}
-              {!editingInspectionId && <div className="sku-editor">
+              <div className="sku-editor">
                 {skuRows.map((row,i)=>{
                   const boxes=Number(row.caixasRecebidas) || 0
                   const inspect=Number(row.caixasInspecionadas) || 0
@@ -3052,7 +3060,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     </article>
                   )
                 })}
-              </div>}
+              </div>
             </section>
 
             <section className="panel section-card inspection-it-choice">
@@ -3867,13 +3875,56 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <label>IT aplicável<select value={editingInspectionData.itVersionId ?? ''} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}><option value="">Selecionar IT</option>{itVersions.map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}</select></label>
                   <label className="span-2">Observação interna<textarea rows={3} value={editingInspectionData.observacaoInterna ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,observacaoInterna:e.target.value})}/></label>
             </div>
-            <SkuQuantityGrid rows={editingInspectionData.itens??[]}
-              onChange={(i,key,value)=>setEditingInspectionData((current:any)=>current?{
-                ...current,itens:current.itens.map((row:any,j:number)=>j===i?patchOperationalSkuRow(row,key,value):row)
-              }:current)}
-              onAdd={()=>setEditingInspectionData((current:any)=>current?{
-                ...current,itens:[...(current.itens??[]),{...emptySku(),processoItemId:null}]
-              }:current)}/>
+            <div className="edit-items-list">
+              {(editingInspectionData.itens ?? []).map((row:any,i:number)=>{ const d=boxDistributionTotals(row); return <article className="sku-card compact" key={row.processoItemId || i}>
+                <div className="sku-card-head">
+                  <button type="button" className="sgq-sku-toggle"
+                    aria-expanded={expandedEditSkuIndex===i} aria-controls={'sgq-edit-sku-body-'+i}
+                    onClick={()=>setExpandedEditSkuIndex(current=>current===i?null:i)}>
+                    <ChevronDown className={'sgq-sku-chevron '+(expandedEditSkuIndex===i?'open':'')} size={19}/>
+                    <span className="sgq-sku-summary">
+                      <strong>{row.sku||'Novo código'}</strong>
+                      <small>{row.nome||'Em preenchimento'}{row.quantidade?' · '+Number(row.quantidade).toLocaleString('pt-BR')+' un':''}</small>
+                    </span>
+                  </button>
+                </div>
+                <div id={'sgq-edit-sku-body-'+i} className="sgq-sku-collapsible" hidden={expandedEditSkuIndex!==i}>
+                <div className="form-grid">
+                  <label>Código<input value={row.sku} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,sku:e.target.value}:x)})}/></label>
+                  <label>Descrição<input value={row.nome} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,nome:e.target.value}:x)})}/></label>
+                  {row.numeroPedidoPv && <label>Quantidade original PV {row.numeroPedidoPv}<input type="number" readOnly value={row.quantidadePv||''}/></label>}
+                  <label>Lote<input value={row.lote} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,lote:e.target.value}:x)})}/></label>
+                  <label>Material<input value={row.material||''} onChange={e=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,material:e.target.value}:x)})}/></label>
+                  <label>Capacidade<input value={row.capacidade||''} onChange={e=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,capacidade:e.target.value}:x)})}/></label>
+                  <label>Quantidade recebida<input type="number" step="1" value={row.quantidade} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,quantidade:e.target.value}:x)})}/></label>
+                  <label>Caixas recebidas<input type="number" step="1" value={row.caixasRecebidas} onChange={(e)=>{
+                    const received=e.target.value
+                    const suggested=received ? String(boxesToInspect(Number(received))) : ''
+                    setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasRecebidas:received,caixasInspecionadas:suggested}:x)})
+                  }}/></label>
+                  <label>Caixas inspecionadas<input type="number" step="1" value={row.caixasInspecionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,caixasInspecionadas:e.target.value}:x)})}/></label>
+                </div>
+                <div className="field-label"><span>Distribuição para armazenagem · {row.sku || 'Componente '+(i+1)}</span></div>
+                <div className="distribution-grid compact">
+                  <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasPadrao} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'caixasPadrao',e.target.value):x)})}/></label><label>Un/caixa<input type="number" min="0" step="1" value={row.unidadesPadrao||row.quantidadePorCaixa} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?patchOperationalSkuRow(x,'unidadesPadrao',e.target.value):x)})}/></label></div>
+                  <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'caixasFracionadas',e.target.value):x)})}/></label><label>Un/caixa<input type="number" min="0" step="1" value={row.unidadesFracionadas} onChange={(e)=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?updateBoxDistributionField(x,'unidadesFracionadas',e.target.value):x)})}/></label></div>
+                </div>
+                <div className="lab-withdrawal">
+                  <label>Retirada para laboratório (unidades)
+                    <input type="number" min="0" step="1" value={row.unidadesLaboratorio} onChange={e=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?setLaboratoryUnits(x,e.target.value):x)})}/>
+                  </label>
+                  <small>Não acrescenta caixas à armazenagem.</small>
+                </div>
+                {(editingInspectionData.itens??[]).length>1 && <label>Unidades por conjunto<input type="number" min="1" step="1" value={row.unidadesPorConjunto} onChange={e=>setEditingInspectionData({...editingInspectionData,itens:editingInspectionData.itens.map((x:any,j:number)=>j===i?{...x,unidadesPorConjunto:e.target.value}:x)})}/></label>}
+                {!!d.groups.length && <small className={'field-status '+((Math.abs(d.totalUnits-Number(row.quantidade))>0.0001)?'bad':'ok')}>
+                  Armazenagem {d.units.toLocaleString('pt-BR')} un ({d.boxes} caixa(s))
+                  {' + '}laboratório {d.labUnits.toLocaleString('pt-BR')} un
+                  {' = '}{d.totalUnits.toLocaleString('pt-BR')} un recebidas
+                </small>}
+                </div>
+              </article>})}
+            </div>
+            <button className="secondary" type="button" onClick={()=>{setExpandedEditSkuIndex((editingInspectionData.itens??[]).length);setEditingInspectionData({...editingInspectionData,itens:[...(editingInspectionData.itens ?? []),{...emptySku(),processoItemId:null}]})}}><Plus size={16}/> Adicionar produto à inspeção</button>
             <button className="primary wide" type="button" disabled={editSaving} onClick={()=>void saveEditingInspectionData()}>{editSaving?'Salvando…':'Salvar alterações'}</button>
             {editFeedback&&<span className="sgq-inline-save-status" role="status">
               {editLastSavedFingerprint.current===JSON.stringify(editingInspectionData)?editFeedback:'Alterações pendentes de salvamento'}
