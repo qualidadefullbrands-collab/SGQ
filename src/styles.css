@@ -2695,3 +2695,11 @@ body:has(.login-shell) {background:#f3f6fa!important;color:#20374a}
 .sgq-operational-shell .sgq-stock-sku-issue strong{font-size:12px;color:#735238}
 .sgq-operational-shell .sgq-stock-sku-issue span{font-size:12px;color:#6e7e8b}
 .sgq-operational-shell .sgq-stock-sku-issue>div{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+
+/* Subprocess references are suggestions only, never live links to earlier A/B data. */
+.sgq-subprocess-inheritance{display:grid;gap:4px;border:1px solid #dce7ed;border-radius:10px;padding:11px 13px;background:#f8fafc;color:#456477}
+.sgq-subprocess-inheritance strong{font-size:12px;color:#255876}
+.sgq-subprocess-inheritance span{font-size:12px;line-height:1.45}
+.sgq-subprocess-inheritance small{color:#718598;font-size:11px;line-height:1.45}
+.sgq-saved-photo-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.sgq-saved-photo-actions button{display:inline-flex;align-items:center;gap:4px}
