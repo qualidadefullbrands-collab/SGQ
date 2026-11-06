@@ -234,10 +234,10 @@ async def generate_document(execution_id:str,authorization:str|None=Header(defau
         template_bytes=await storage_download(client,token,"auditoria-modelos",template["storage_path"])
 
         answers,findings,objects,messages=await __import__("asyncio").gather(
-            table_rows(client,token,"auditoria_respostas",{"execucao_id":f"eq.{execution_id}","select":"*","order":"criado_em.asc"}),
-            table_rows(client,token,"auditoria_achados",{"execucao_id":f"eq.{execution_id}","select":"*","order":"criado_em.asc"}),
-            table_rows(client,token,"auditoria_objetos",{"execucao_id":f"eq.{execution_id}","select":"*","order":"criado_em.asc"}),
-            table_rows(client,token,"auditoria_mensagens",{"execucao_id":f"eq.{execution_id}","select":"*","order":"criado_em.asc"}),
+            table_rows(client,token,"auditoria_respostas",{"execucao_id":f"eq.{execution_id}","select":"*","excluido_em":"is.null","order":"criado_em.asc"}),
+            table_rows(client,token,"auditoria_achados",{"execucao_id":f"eq.{execution_id}","select":"*","excluido_em":"is.null","order":"criado_em.asc"}),
+            table_rows(client,token,"auditoria_objetos",{"execucao_id":f"eq.{execution_id}","select":"*","excluido_em":"is.null","order":"criado_em.asc"}),
+            table_rows(client,token,"auditoria_mensagens",{"execucao_id":f"eq.{execution_id}","select":"*","excluido_em":"is.null","order":"criado_em.asc"}),
         )
 
         photos=[]
@@ -306,7 +306,7 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
     parent=parents[0]
     groups=await table_rows(client,token,"grupos_inspecao",{
         "processo_id":f"eq.{process_id}",
-        "select":"id,codigo,subprocesso_codigo,nota_fiscal,nome",
+        "select":"id,codigo,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,nome",
         "order":"subprocesso_codigo.asc,codigo.asc"})
     pending=[]
     if not required_text(parent.get("cliente")):
@@ -345,7 +345,7 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
                 "select":"grupo_inspecao_id,processo_itens(id,quantidade,caixas_recebidas,"
                          "caixas_inspecionadas,quantidade_por_caixa,produtos(sku,nome))"}),
             table_rows(client,token,"inspecao_fotos",{
-                "inspecao_id":f"in.({ids})","select":"inspecao_id,storage_path,legenda"}),
+                "inspecao_id":f"in.({ids})","select":"inspecao_id,storage_path,legenda","excluido_em":"is.null"}),
             table_rows(client,token,"inspecao_checklist_resultados",{
                 "inspecao_id":f"in.({ids})","select":"inspecao_id,checklist_id,resultado"}),
             table_rows(client,token,"inspecao_dimensionais",{
@@ -358,6 +358,12 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
         group_rows=by_group.get(group["id"],[])
         if not required_text(group.get("nota_fiscal")):
             pending.append(f"{label}: nota fiscal não informada.")
+        if not group.get("chegada_cd"):
+            pending.append(f"{label}: chegada no CD não confirmada.")
+        if not required_text(group.get("origem")):
+            pending.append(f"{label}: origem não informada.")
+        if not required_text(group.get("transporte")):
+            pending.append(f"{label}: transporte não informado.")
         if not group_rows:
             pending.append(f"{label}: inspeção não cadastrada.")
             continue
@@ -525,7 +531,7 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
             table_rows(client,token,"inspecao_dimensionais",{"inspecao_id":f"eq.{inspection_id}","select":"*","order":"sequencia_amostra.asc"}),
             table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
             table_rows(client,token,"inspecao_testes_resultados",{"inspecao_id":f"eq.{inspection_id}","select":"*"}),
-            table_rows(client,token,"inspecao_fotos",{"inspecao_id":f"eq.{inspection_id}","select":"*","order":"criado_em.asc"}),
+            table_rows(client,token,"inspecao_fotos",{"inspecao_id":f"eq.{inspection_id}","select":"*","excluido_em":"is.null","order":"criado_em.asc"}),
         )
 
         inspector_name=""
@@ -545,12 +551,7 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
             except HTTPException as exc:
                 # Never deliver an apparently complete report with missing evidence.
                 raise HTTPException(status_code=503,detail="Não foi possível incluir todas as fotos da inspeção. Confira os arquivos e tente novamente.") from exc
-        if not photos and product_photo_refs:
-            jobs=[storage_download(client,token,"produto-fotos",path) for path,_ in product_photo_refs]
-            downloaded=await __import__("asyncio").gather(*jobs,return_exceptions=True)
-            for data,(_,caption) in zip(downloaded,product_photo_refs):
-                if isinstance(data,(bytes,bytearray)):
-                    photos.append({"bytes":bytes(data),"caption":caption})
+        # Photo evidence is always inspection-specific, never a shared product fallback.
 
         payload={
             "inspection":inspection,
@@ -659,7 +660,7 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
                 table_rows(client,token,"inspecao_dimensionais",{"inspecao_id":f"eq.{row['id']}","select":"*","order":"sequencia_amostra.asc"}),
                 table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
                 table_rows(client,token,"inspecao_testes_resultados",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
-                table_rows(client,token,"inspecao_fotos",{"inspecao_id":f"eq.{row['id']}","select":"*","order":"criado_em.asc"}),
+                table_rows(client,token,"inspecao_fotos",{"inspecao_id":f"eq.{row['id']}","select":"*","excluido_em":"is.null","order":"criado_em.asc"}),
             )
             items=[]
             for link in links:
