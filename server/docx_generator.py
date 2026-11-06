@@ -444,8 +444,8 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
         "lote": first_item.get("lote") or "",
         "material": first_item.get("material") or "",
         "capacidade": first_item.get("capacidade") or "",
-        "origem": process.get("origem") or "",
-        "transporte": process.get("transporte") or "",
+        "origem": group.get("origem") or "",
+        "transporte": group.get("transporte") or "",
         "quantidade recebida": sku_values("quantidade"),
         "quantidade por caixa": sku_values("quantidade_por_caixa","distinct"),
         "nº de caixas recebidas": sku_values("caixas_recebidas") if multi_sku else whole_number(total_boxes),
@@ -453,7 +453,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
         "caixas recebidas": sku_values("caixas_recebidas") if multi_sku else whole_number(total_boxes),
         "nº caixas recebidas": sku_values("caixas_recebidas") if multi_sku else whole_number(total_boxes),
         "total de caixas recebidas": sku_values("caixas_recebidas") if multi_sku else whole_number(total_boxes),
-        "chegada no cd": fmt_date(process.get("chegada_cd")),
+        "chegada no cd": fmt_date(group.get("chegada_cd")),
         "data da inspeção": fmt_date(inspection.get("data_inspecao")),
     }
 
@@ -618,6 +618,8 @@ def append_subprocess_appendix(doc, payload:dict) -> None:
     title=doc.add_paragraph()
     title.add_run(f"ANEXO DE INSPEÇÃO — SUBPROCESSO {code}").bold=True
     doc.add_paragraph(f"Nota fiscal: {group.get('nota_fiscal') or 'Não informada'}")
+    doc.add_paragraph(f"Chegada no CD: {fmt_date(group.get('chegada_cd'))}")
+    doc.add_paragraph(f"Origem: {group.get('origem') or 'Não informada'} · Transporte: {group.get('transporte') or 'Não informado'}")
     doc.add_paragraph(f"Inspeção: {inspection.get('numero') or ''} · Data: {fmt_date(inspection.get('data_inspecao'))} · Resultado: {str(inspection.get('resultado') or 'pendente').upper()}")
     doc.add_paragraph(f"Amostragem: lote {whole_number(inspection.get('tamanho_lote'))}; amostra {whole_number(inspection.get('tamanho_amostra'))}; nível {inspection.get('nivel_inspecao') or '—'}")
     item_table=doc.add_table(rows=1,cols=7)
