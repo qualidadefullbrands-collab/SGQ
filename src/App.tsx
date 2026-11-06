@@ -68,6 +68,9 @@ type InspectionRow = {
     processo_id: string
     subprocesso_codigo?: string | null
     nota_fiscal?: string | null
+    origem?: string | null
+    transporte?: string | null
+    chegada_cd?: string | null
     processos?: ProcessRow | null
   } | null
   it_versoes?: {
@@ -668,6 +671,10 @@ export default function App() {
     inspectionLevel: 'I',
     observacaoInterna: '',
   })
+  const [inheritedReference,setInheritedReference]=useState<{
+    letter:string;invoice:string;origin:string;transport:string;arrival:string;
+    historical:boolean;quantity:string;boxes:string
+  }|null>(null)
   const [skuRows, setSkuRows] = useState([emptySku()])
   const skuRowsRef=useRef(skuRows)
   useEffect(()=>{skuRowsRef.current=skuRows},[skuRows])
@@ -1141,6 +1148,7 @@ export default function App() {
 
   function resetNewInspection() {
     createRequestId.current=crypto.randomUUID()
+    setInheritedReference(null)
     autoNfeRef.current=null
     setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0);setExpandedSkuIndex(0)
     manualItSelection.current=false;lastItSuggested.current='';setItSuggestionNote('');setProcessLookupMessage('')
@@ -1237,24 +1245,47 @@ export default function App() {
     autoNfeRef.current=null
     fstLookupRequest.current++
     setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('')
-    setEditingInspectionId(null);setEditingProcessId(null);
-    setInspection((x) => ({
-      ...x,
-      processoId: p.id,
-      subprocessoCodigo: nextSubprocessFor(p),
+    setEditingInspectionId(null);setEditingProcessId(null)
+    const previous=inspections.filter(i=>i.grupos_inspecao?.processo_id===p.id)
+      .sort((a,b)=>String(a.grupos_inspecao?.subprocesso_codigo??'Z')
+        .localeCompare(String(b.grupos_inspecao?.subprocesso_codigo??'Z')))
+    const first=previous[0]
+    const source=first?.grupos_inspecao
+    const hasChildReference=Boolean(source&&(source.origem||source.transporte||source.chegada_cd))
+    const historical=!!first&&!hasChildReference
+    const reference=first?{
+      letter:source?.subprocesso_codigo??'A',invoice:source?.nota_fiscal??'',
+      origin:hasChildReference?source?.origem??'':p.origem??'',
+      transport:hasChildReference?source?.transporte??'':p.transporte??'',
+      arrival:hasChildReference?source?.chegada_cd??'':p.chegada_cd??'',
+      historical,quantity:String(first.tamanho_lote??''),boxes:''
+    }:null
+    setInheritedReference(reference)
+    setInspection(x=>({
+      ...x,processoId:p.id,subprocessoCodigo:nextSubprocessFor(p),
       itVersionId:p.it_versao_id??x.itVersionId,
-      codigo: fstCode(p.codigo),
-      cliente: p.cliente ?? '',
-      notaFiscal: '',
-      origem: p.origem ?? '',
-      transporte: p.transporte ?? '',
-      chegadaCd: p.chegada_cd ?? '',
-      dataInspecao: '',
+      codigo:fstCode(p.codigo),cliente:p.cliente??'',
+      // Copy child operational values once as editable suggestions, not linked.
+      notaFiscal:'',
+      origem:hasChildReference?source?.origem??'':'',
+      transporte:hasChildReference?source?.transporte??'':'',
+      chegadaCd:hasChildReference?source?.chegada_cd??'':'',
+      dataInspecao:''
     }))
+    if(first){
+      void apiGet<any>('/api/inspecoes/'+encodeURIComponent(first.id)+'/detalhe').then(res=>{
+        if(res.error||!res.data)return
+        const items=res.data.items??[]
+        const quantity=items.reduce((sum:number,link:any)=>sum+Number(link.processo_itens?.quantidade||0),0)
+        const boxes=items.reduce((sum:number,link:any)=>sum+Number(link.processo_itens?.caixas_recebidas||0),0)
+        setInheritedReference(current=>current?.letter===(source?.subprocesso_codigo??'A')
+          ?{...current,quantity:String(quantity||first.tamanho_lote||''),boxes:String(boxes||'')}:current)
+      }).catch(()=>undefined)
+    }
     setExpandedSkuIndex(0)
     setSkuRows([emptySku()])
     setTab('nova')
-    setMessage('Dados gerais reutilizados. Informe o novo código/produto desta inspeção.')
+    setMessage('Nova inspeção independente. Confira os valores sugeridos antes de salvar.')
   }
 
   async function editInspectionFull(id:string){
@@ -1266,6 +1297,7 @@ export default function App() {
       if(!source?.inspecao){setPopupMessage(res.error?.message||'Inspeção indisponível offline.');return}
     }else void saveOfflineDraft(userId||'','full:detail:'+id,source).catch(()=>undefined)
     editingBaseline.current=offlineInspectionVersion(source)
+    setInheritedReference(null)
     const data={...source.inspecao,items:source.items??[]}
     const process=data.grupos_inspecao?.processos??{}
     const items=(data.items??[]).map((link:any)=>{
@@ -1279,7 +1311,8 @@ export default function App() {
     })
     const form={
       codigo:fstCode(process.codigo),cliente:process.cliente??'',notaFiscal:data.grupos_inspecao?.nota_fiscal??process.nota_fiscal??'',
-      origem:process.origem??'',transporte:process.transporte??'',chegadaCd:process.chegada_cd??'',
+      origem:data.grupos_inspecao?.origem??'',transporte:data.grupos_inspecao?.transporte??'',
+      chegadaCd:data.grupos_inspecao?.chegada_cd??'',
       dataInspecao:String(data.data_inspecao??'').slice(0,10),itVersionId:data.it_versao_id??'',
       inspectionLevel:data.nivel_inspecao??'I',observacaoInterna:data.observacao_interna??'',
       itens:items.length?items:[emptySku()]
@@ -3110,6 +3143,14 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     {Array.from({length:26},(_,i)=>String.fromCharCode(65+i)).map(c=><option key={c} value={c}>{c}</option>)}
                   </select>
                 </label>
+                {inheritedReference&&<div className="sgq-subprocess-inheritance span-2" role="note">
+                  <strong>{inheritedReference.historical?'Referência histórica do FST':'Referência do subprocesso '+inheritedReference.letter}</strong>
+                  <span>{inheritedReference.historical?'Não confirmada para A/B. Informe os dados deste subprocesso.':'Origem, transporte e chegada foram sugeridos; confirme ou altere antes de salvar.'}</span>
+                  <small>NF {inheritedReference.invoice||'—'} · Chegada {inheritedReference.arrival||'—'} ·
+                    Origem {inheritedReference.origin||'—'} · Transporte {inheritedReference.transport||'—'} ·
+                    Quantidade {inheritedReference.quantity||'—'} · Caixas {inheritedReference.boxes||'—'}</small>
+                  <small>NF, quantidade e caixas não são copiadas automaticamente. Alterar este subprocesso não modifica o anterior.</small>
+                </div>}
                 <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
                 <label>NF do subprocesso {inspection.subprocessoCodigo}<input value={inspection.notaFiscal} onChange={(e)=>{autoNfeRef.current=null;setInspection({...inspection,notaFiscal:e.target.value})}}/></label>
                 <label>Chegada no CD<input type="date" value={inspection.chegadaCd} onChange={(e)=>setInspection({...inspection,chegadaCd:e.target.value})}/></label>
