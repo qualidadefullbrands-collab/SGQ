@@ -564,6 +564,7 @@ export default function App() {
   const [offlineError,setOfflineError]=useState('')
   const editingBaseline=useRef<string|null>(null)
   const [editingProcess, setEditingProcess] = useState<ProcessRow | null>(null)
+  const [focusedProcessId,setFocusedProcessId] = useState<string|null>(null)
   const [deletingProcessId,setDeletingProcessId]=useState<string|null>(null)
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null)
   const [activeStage, setActiveStage] = useState<'dados'|'amostragem'|'verificacoes'|'dimensionais'|'testes'|'fotos'|'resultado'|'retencao'>('dados')
@@ -1236,14 +1237,9 @@ export default function App() {
     setMessage('')
   }
   function editProcessFull(p:ProcessRow){
-    const candidate=inspections.find(x=>x.grupos_inspecao?.processo_id===p.id&&x.status!=='concluida')
-    if(candidate){void editInspectionFull(candidate.id);return}
-    setEditingInspectionId(null);setEditingProcessId(p.id)
-    setInspection({processoId:p.id,subprocessoCodigo:'A',codigo:fstCode(p.codigo),cliente:p.cliente??'',
-      notaFiscal:p.nota_fiscal??'',origem:p.origem??'',transporte:p.transporte??'',
-      chegadaCd:p.chegada_cd??'',dataInspecao:'',
-      itVersionId:p.it_versao_id??'',inspectionLevel:'I',observacaoInterna:''})
-    setExpandedSkuIndex(0);setSkuRows([emptySku()]);setTab('nova');setMessage('')
+    // Dados comuns pertencem ao processo, não à inspeção pendente nem à NF de A/B.
+    setError('')
+    setEditingProcess({...p,nota_fiscal:null})
   }
 
   const fstLookupRequest=useRef(0)
@@ -1484,7 +1480,7 @@ export default function App() {
     if (!editingProcess) return
     const saved=await apiPut<any>(`/api/processos/${editingProcess.id}`,{
       cliente:editingProcess.cliente,
-      notaFiscal:editingProcess.nota_fiscal,
+      notaFiscal:null,
       origem:editingProcess.origem,
       transporte:editingProcess.transporte,
       chegadaCd:editingProcess.chegada_cd,
@@ -2832,7 +2828,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <div className="sgq-side-brand"><ShieldCheck size={23}/><div><b>SGQ</b><small>Qualidade · Operações</small></div></div>
         <div className="sgq-side-caption">OPERAÇÃO</div>
         <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={18}/> Painel</button>
-        <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>setTab('inspecoes')}><ClipboardCheck size={18}/> Inspeções</button>
+        <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={18}/> Processos</button>
         <button className="" onClick={()=>setTab('fotos-mobile')}><Camera size={18}/> Modo Fotos</button>
         <button className={tab==='nova'?'selected':''} onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
         <button className={tab==='estoque'?'selected':''} onClick={()=>setTab('estoque')}><Warehouse size={18}/> Estoque</button>
@@ -2848,7 +2844,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <span>SGQ</span>
           <span className="sgq-topbar-separator" aria-hidden="true">/</span>
           <strong>{({
-            painel:'Painel',insights:'Insights',inspecoes:'Inspeções',nova:'Nova inspeção',
+            painel:'Painel',insights:'Insights',inspecoes:'Processos',nova:'Nova inspeção',
             execucao:'Execução da inspeção',estoque:'Estoque',
             auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos',
           } as Record<typeof tab,string>)[tab]}</strong>
@@ -2909,7 +2905,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <button type="button" className={'metric-button '+(dashboardView==='estoque'?'selected':'')} onClick={()=>setDashboardView('estoque')}><Metric icon={Boxes} label="Estoque" value={samples.length}/></button>
             <button type="button" className={'metric-button '+(dashboardView==='concluidas'?'selected':'')} onClick={()=>setDashboardView('concluidas')}><Metric icon={FileText} label="Concluídas" value={inspections.filter((i)=>i.status==='concluida').length}/></button>
           </section>
-          {dashboardView==='processos' && <section className="panel queue"><div className="section-title"><h2>Processos</h2><button className="secondary" type="button" onClick={()=>setTab('inspecoes')}>Ver todos</button></div>
+          {dashboardView==='processos' && <section className="panel queue"><div className="section-title"><h2>Processos</h2><button className="secondary" type="button" onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}>Ver todos</button></div>
             {processes.slice(0,25).map(p=>{
               const children=inspections.filter(i=>i.grupos_inspecao?.processo_id===p.id)
               const overview=children.map(i=>{
@@ -2919,7 +2915,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               return <div className="queue-row" key={p.id}><div>
                 <strong>{formatFst(p.codigo)} - {p.cliente||'Cliente não informado'}</strong>
                 <span>{overview||'Nenhum subprocesso cadastrado'}</span>
-              </div><button className="secondary small" onClick={()=>setTab('inspecoes')}>Inspeções</button></div>
+              </div><button className="secondary small" onClick={()=>{setFocusedProcessId(p.id);setTab('inspecoes')}}>Abrir processo</button></div>
             })}
             {!processes.length&&<p>Nenhum processo ativo no momento. Os registros arquivados permanecem preservados no SGQ.</p>}
           </section>}
@@ -2941,7 +2937,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             onMove={(id,target)=>void moveInspectionOnBoard(id,target)}
             deletingProcessId={deletingProcessId}
             formatFst={formatFst}
-            onViewAll={()=>setTab('inspecoes')}
+            onViewAll={()=>{setFocusedProcessId(null);setTab('inspecoes')}}
             onOpen={id=>void openInspection(id)}
             onCreate={()=>{resetNewInspection();setTab('nova')}}
             onReuseProcess={id=>{const p=processes.find(x=>x.id===id);if(p)reuseProcess(p)}}
@@ -2953,6 +2949,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
       {tab==='inspecoes' && <InspectionsKanban
+        focusProcessId={focusedProcessId}
         inspections={inspections}
         processes={processes}
         canDelete={!!canDelete}
@@ -4025,7 +4022,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <h2>{formatFst(editingProcess.codigo)}</h2>
             <div className="form-grid one">
               <label>Cliente<input value={editingProcess.cliente ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,cliente:e.target.value})}/></label>
-              <label>Nota fiscal<input value={editingProcess.nota_fiscal ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,nota_fiscal:e.target.value})}/></label>
               <label>Origem<input value={editingProcess.origem ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,origem:e.target.value})}/></label>
               <label>Transporte<input value={editingProcess.transporte ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,transporte:e.target.value})}/></label>
               <label>Chegada no CD<input type="date" value={editingProcess.chegada_cd ?? ''} onChange={(e)=>setEditingProcess({...editingProcess,chegada_cd:e.target.value})}/></label>
