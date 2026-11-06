@@ -104,7 +104,7 @@ test('new and edit forms expose only laboratory units, and reconcile received vs
  assert.match(app,/Retirada em unidades, sem acrescentar caixas à armazenagem/)
  assert.match(app,/setLaboratoryUnits\(r,e\.target\.value\)/)
  assert.match(app,/if\(key==='unidadesLaboratorio'\)return setLaboratoryUnits\(row,value\)/)
- assert.match(app,/patchOperationalSkuRow\(row,key,value\)/)
+ assert.match(app,/patchOperationalSkuRow\(x,'unidadesPadrao',e\.target\.value\)/)
  assert.match(app,/d\.totalUnits-Number\(row\.quantidade\)/)
  assert.match(app,/Distribuição para armazenagem · \{row\.sku/)
  assert.match(app,/Por componente \/ SKU/)
