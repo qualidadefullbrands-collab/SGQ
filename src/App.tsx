@@ -1680,7 +1680,7 @@ export default function App() {
         {storagePath:path,legenda:photoCaptionDrafts[photo.id]??photo.legenda??''})
       if(swapped.error){
         // New upload is not yet evidence in the database; clean up if permitted.
-        void supabase.storage.from('inspecao-fotos').remove([path])
+        void (supabase.storage.from('inspecao-fotos') as any).remove?.([path])
         setError(swapped.error.message)
         return
       }
