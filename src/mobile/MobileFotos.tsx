@@ -252,7 +252,7 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
    const response=await apiPost<any>('/api/inspecoes/'+encodeURIComponent(id)+
      '/fotos/'+encodeURIComponent(photo.id)+'/substituir',
      {storagePath:path,legenda:photo.legenda??''})
-   if(response.error){void supabase.storage.from('inspecao-fotos').remove([path]);setError(response.error.message);return}
+   if(response.error){void (supabase.storage.from('inspecao-fotos') as any).remove?.([path]);setError(response.error.message);return}
    await load(id)
    setMessage('Foto substituída, original preservada no histórico.')
   }catch(e:any){setError(String(e?.message||'Não foi possível substituir.'))}
