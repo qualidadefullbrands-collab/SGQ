@@ -227,6 +227,30 @@ function formatFst(value: string | null | undefined) {
   const code=fstCode(raw)
   return code ? 'FST'+code : raw
 }
+function inspectionBoxTotal(detail:any,kind:'received'|'evaluate'):number|null {
+  const links=Array.isArray(detail?.items)?detail.items:[]
+  let count=0
+  for(const link of links){
+    const item=link?.processo_itens
+    if(!item)continue
+    const distributed=Array.isArray(item.distribuicao_caixas)
+      ?item.distribuicao_caixas.reduce((sum:number,g:any)=>{
+        const type=String(g?.Tipo??g?.tipo??'').toLowerCase()
+        return type==='padrao'||type==='fracionada'
+          ?sum+Math.max(0,Number(g?.Caixas??g?.caixas??0)):sum
+      },0):0
+    const received=Number(item.caixas_recebidas)>0
+      ?Number(item.caixas_recebidas):distributed
+    const value=kind==='received'?received:
+      Number(item.caixas_inspecionadas)>0
+        ?Number(item.caixas_inspecionadas):received>0?boxesToInspect(received):0
+    count+=value
+  }
+  if(count>0)return count
+  const field=kind==='received'?'caixas_recebidas':'caixas_avaliar'
+  const persisted=Number(detail?.[field])
+  return persisted>0?persisted:null
+}
 function inspectionDisplay(row:{grupos_inspecao?:{subprocesso_codigo?:string|null;processos?:{codigo?:string|null;cliente?:string|null}|null}|null}) {
   const p=row.grupos_inspecao?.processos
   const sub=row.grupos_inspecao?.subprocesso_codigo
@@ -320,7 +344,20 @@ function boxDistributionTotals(row:any) {
 function updateBoxDistributionField(row:any,key:string,value:string) {
   // 'Quantidade por caixa' is the operational standard-box quantity.
   if(key==='unidadesPadrao')return {...row,unidadesPadrao:value,quantidadePorCaixa:value}
-  return {...row,[key]:value}
+  const changed={...row,[key]:value}
+  if(key!=='caixasPadrao'&&key!=='caixasFracionadas')return changed
+  const before=boxDistributionTotals(row).boxes
+  const after=boxDistributionTotals(changed).boxes
+  const explicit=String(row.caixasRecebidas??'').trim()
+  // Preserve manually overridden received boxes; keep automatic counts in sync.
+  if(explicit!==''&&Number(explicit)!==before)return changed
+  const inspected=String(row.caixasInspecionadas??'').trim()
+  return {...changed,
+    caixasRecebidas:after>0?String(after):'',
+    caixasInspecionadas:inspected===''||Number(inspected)===boxesToInspect(before)
+      ?after>0?String(boxesToInspect(after)):''
+      :row.caixasInspecionadas
+  }
 }
 
 function setLaboratoryUnits(row:any,value:string) {
@@ -363,11 +400,16 @@ function patchOperationalSkuRow(row:any,key:string,value:string){
 }
 
 function suggestMissingInspectedBoxes(row:any){
-  // Fill only absent historical values: keep explicit zero and manual overrides.
-  if(String(row.caixasInspecionadas??'').trim()!=='')return row
-  const received=Number(row.caixasRecebidas)
-  return Number.isInteger(received)&&received>0
-    ?{...row,caixasInspecionadas:String(boxesToInspect(received))}:row
+  // Recover box counts from a persisted warehouse distribution (standard +
+  // fractional boxes). Lab withdrawals are units and are excluded.
+  const storedReceived=String(row.caixasRecebidas??'').trim()
+  const distributionBoxes=boxDistributionTotals(row).boxes
+  const received=storedReceived!==''?Number(storedReceived):distributionBoxes
+  const boxesReceived=storedReceived!==''?row.caixasRecebidas:(received>0?String(received):'')
+  const storedEvaluate=String(row.caixasInspecionadas??'').trim()
+  const boxesEvaluate=storedEvaluate!==''?row.caixasInspecionadas:
+    Number.isInteger(received)&&received>0?String(boxesToInspect(received)):''
+  return {...row,caixasRecebidas:boxesReceived,caixasInspecionadas:boxesEvaluate}
 }
 
 function applyBoxGroupsToSku(base:any, groups:any[]|null|undefined) {
@@ -1776,6 +1818,8 @@ export default function App() {
         return {...current,items:updated,
           tamanho_lote:p?.lote??current.tamanho_lote,
           tamanho_amostra:p?.amostra??current.tamanho_amostra,
+          caixas_recebidas:p?.caixasRecebidas??itens.reduce((sum:any,x:any)=>sum+x.caixasRecebidas,0),
+          caixas_avaliar:p?.caixasAvaliar??itens.reduce((sum:any,x:any)=>sum+x.caixasInspecionadas,0),
           codigo_amostragem:p?.codigo??current.codigo_amostragem,
           limite_aceitacao:p?.ac??current.limite_aceitacao,
           limite_rejeicao:p?.re??current.limite_rejeicao,
@@ -3318,8 +3362,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
               <div><small>Ac</small><strong>{detail.limite_aceitacao ?? '—'}</strong></div>
               <div><small>Re</small><strong>{detail.limite_rejeicao ?? '—'}</strong></div>
-              <div><small>Caixas recebidas</small><strong>{detail.caixas_recebidas ?? '—'}</strong></div>
-              <div><small>Caixas a avaliar</small><strong>{detail.caixas_avaliar ?? '—'}</strong></div>
+              <div><small>Caixas recebidas</small><strong>{inspectionBoxTotal(detail,'received')?.toLocaleString('pt-BR') ?? '—'}</strong></div>
+              <div><small>Caixas a avaliar</small><strong>{inspectionBoxTotal(detail,'evaluate')?.toLocaleString('pt-BR') ?? '—'}</strong></div>
             </div>
             {!!detail.limite_rejeicao && detail.total_nao_conforme>=detail.limite_rejeicao && <div className="alert error">Limite de rejeição atingido. Você pode encerrar ou continuar a inspeção; a decisão ficará registrada.</div>}
           </section>
