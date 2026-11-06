@@ -1265,11 +1265,12 @@ export default function App() {
       ...x,processoId:p.id,subprocessoCodigo:nextSubprocessFor(p),
       itVersionId:p.it_versao_id??x.itVersionId,
       codigo:fstCode(p.codigo),cliente:p.cliente??'',
-      // Copy child operational values once as editable suggestions, not linked.
+      // Never persist child A/B operational values into a new child implicitly.
+      // The first inspection's values are shown separately as a read-only reference.
       notaFiscal:'',
-      origem:hasChildReference?source?.origem??'':'',
-      transporte:hasChildReference?source?.transporte??'':'',
-      chegadaCd:hasChildReference?source?.chegada_cd??'':'',
+      origem:'',
+      transporte:'',
+      chegadaCd:'',
       dataInspecao:''
     }))
     if(first){
@@ -3188,12 +3189,24 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   </select>
                 </label>
                 {inheritedReference&&<div className="sgq-subprocess-inheritance span-2" role="note">
-                  <strong>{inheritedReference.historical?'Referência histórica do FST':'Referência do subprocesso '+inheritedReference.letter}</strong>
-                  <span>{inheritedReference.historical?'Não confirmada para A/B. Informe os dados deste subprocesso.':'Origem, transporte e chegada foram sugeridos; confirme ou altere antes de salvar.'}</span>
+                  <strong>{inheritedReference.historical?'Referência histórica do FST':'Herdado de referência · Subprocesso '+inheritedReference.letter}</strong>
+                  <span>{inheritedReference.historical?
+                    'Valores antigos do FST; não são dados confirmados deste subprocesso.':
+                    'Valores informativos da primeira inspeção. Nada é copiado ou salvo automaticamente.'}</span>
                   <small>NF {inheritedReference.invoice||'—'} · Chegada {inheritedReference.arrival||'—'} ·
                     Origem {inheritedReference.origin||'—'} · Transporte {inheritedReference.transport||'—'} ·
                     Quantidade {inheritedReference.quantity||'—'} · Caixas {inheritedReference.boxes||'—'}</small>
-                  <small>NF, quantidade e caixas não são copiadas automaticamente. Alterar este subprocesso não modifica o anterior.</small>
+                  <small>NF, datas, quantidade e caixas pertencem exclusivamente a este subprocesso. Alterar aqui não modifica os demais.</small>
+                  {!inheritedReference.historical&&
+                    (inheritedReference.origin||inheritedReference.transport||inheritedReference.arrival)&&
+                    <button className="secondary small" type="button"
+                      onClick={()=>setInspection(current=>({...current,
+                        origem:current.origem||inheritedReference.origin,
+                        transporte:current.transporte||inheritedReference.transport,
+                        chegadaCd:current.chegadaCd||inheritedReference.arrival
+                      }))}>
+                      Usar referência de origem, transporte e chegada
+                    </button>}
                 </div>}
                 <label>Cliente<input value={inspection.cliente} onChange={(e)=>setInspection({...inspection,cliente:e.target.value})}/></label>
                 <label>NF do subprocesso {inspection.subprocessoCodigo}<input value={inspection.notaFiscal} onChange={(e)=>{autoNfeRef.current=null;setInspection({...inspection,notaFiscal:e.target.value})}}/></label>
