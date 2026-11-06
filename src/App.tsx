@@ -3003,7 +3003,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                           {row.suggesting && <small className="field-status">Buscando sugestões…</small>}
                           {!!row.suggestions?.length && <div className="product-suggestions">
                             {row.suggestions.map((s:any,k:number)=><button type="button" key={s.sku+'-'+k} onMouseDown={(e)=>e.preventDefault()} onClick={()=>chooseProductSuggestion(i,s)}><b>{s.sku}</b><span>{s.nome}</span></button>)}
-                          </div}
+                          </div>}
                         </label>
                         <label>Descrição
                           <input value={row.nome} onChange={e=>setSkuRows(old=>old.map((r,j)=>j===i?{...r,nome:e.target.value}:r))} placeholder="Descrição do produto (Omie ou manual)"/>
