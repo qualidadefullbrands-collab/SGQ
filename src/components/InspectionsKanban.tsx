@@ -93,29 +93,6 @@ export default function InspectionsKanban({
   const [overLane,setOverLane]=useState<string|null>(null)
   const pageSize=mode==='panel'?8:24
   const search=normalized(query)
-  const processById=useMemo(()=>new Map(processes.map(p=>[p.id,p])),[processes])
-  const visible=useMemo(()=>{
-    // Cancelled/archived records do not occupy an operational Kanban lane.
-    const sorted=inspections.filter(i=>i.status!=='cancelada').sort((a,b)=>
-      String(b.criado_em||'').localeCompare(String(a.criado_em||'')))
-    if(!search)return sorted
-    return sorted.filter(item=>{
-      const process=processById.get(item.grupos_inspecao?.processo_id??'')
-      const p=item.grupos_inspecao?.processos
-      return normalized([
-        item.numero,item.grupos_inspecao?.nome,process?.codigo,p?.codigo,
-        item.grupos_inspecao?.subprocesso_codigo,
-        item.grupos_inspecao?.nota_fiscal,
-        (process?.codigo??p?.codigo??'')+(item.grupos_inspecao?.subprocesso_codigo?'-'+item.grupos_inspecao?.subprocesso_codigo:''),
-        process?.cliente,p?.cliente,process?.nota_fiscal,p?.nota_fiscal
-      ].join(' ')).includes(search)
-    })
-  },[inspections,processById,search])
-  const columnsToShow=useMemo(()=>{
-    const base=columns.map(c=>({...c,items:visible.filter(i=>i.status===c.status)}))
-    const others=visible.filter(i=>!columns.some(c=>c.status===i.status))
-    return others.length?[...base,{status:'other',label:'Outras',tone:'other',items:others}]:base
-  },[visible])
   const processTree=useMemo(()=>{
     const active=inspections.filter(item=>item.status!=='cancelada')
     return processes.map(process=>{
@@ -148,10 +125,19 @@ export default function InspectionsKanban({
     }).filter(entry=>!search||entry.searchable.includes(search))
       .sort((a,b)=>Number(b.process.id===focusProcessId)-Number(a.process.id===focusProcessId))
   },[inspections,processes,search,focusProcessId])
-  const activeProcessIds=useMemo(()=>new Set(inspections.map(i=>i.grupos_inspecao?.processo_id).filter(Boolean)),[inspections])
-  const emptyProcesses=processes.filter(p=>!activeProcessIds.has(p.id)&&
-    (!search||normalized([p.codigo,p.cliente,p.nota_fiscal].join(' ')).includes(search)))
-  const totalMatches=visible.length+emptyProcesses.length
+  // Cada FST ocupa uma única coluna, mesmo quando possui subprocessos em fases diferentes.
+  // Concluído apenas quando todas as inspeções do processo estiverem concluídas.
+  const groupedBoard=useMemo(()=>processTree.map(entry=>{
+    const children=entry.subprocesses.flatMap(sub=>sub.items)
+    const lane=children.length===0||children.every(item=>item.status==='aberta')
+      ?'aberta':children.every(item=>item.status==='concluida')
+      ?'concluida':'em_andamento'
+    return {...entry,lane}
+  }),[processTree])
+  const columnsToShow=useMemo(()=>columns.map(c=>({
+    ...c,items:groupedBoard.filter(entry=>entry.lane===c.status)
+  })),[groupedBoard])
+  const totalMatches=groupedBoard.length
   const canMoveCard=(item:Inspection)=>Boolean(canMove&&onMove&&!movingInspectionId&&
     (item.status==='aberta'||item.status==='em_andamento'))
   const moveCard=(id:string,target:'aberta'|'em_andamento')=>{
@@ -283,60 +269,74 @@ export default function InspectionsKanban({
           <span className="sgq-kanban-lane-count">{column.items.length}</span>
         </div>
         <div className="sgq-kanban-lane-content">
-          {column.items.slice(0,shownByLane[column.status]??pageSize).map(item=>{
-            const group=item.grupos_inspecao
-            const process=processById.get(group?.processo_id??'')
-            const linked=group?.processos
-            const fst=formatFst(process?.codigo??linked?.codigo)+(group?.subprocesso_codigo?'-'+group.subprocesso_codigo:'')
-            const client=process?.cliente??linked?.cliente
-            const target=Number(item.tamanho_amostra)||0
-            const inspected=Number(item.total_inspecionado)||0
-            const percent=target>0?Math.min(100,Math.max(0,(inspected/target)*100)):0
-            const done=item.status==='concluida'
-            const active=item.status==='em_andamento'
-            const result=item.resultado==='aprovado'?'Aprovado':item.resultado==='reprovado'?'Reprovado':null
-            return <article className="sgq-kanban-card" key={item.id}
-              draggable={canMoveCard(item)}
-              data-dragging={draggingId===item.id}
-              onDragStart={e=>{
-                if(!canMoveCard(item)){e.preventDefault();return}
-                e.dataTransfer.setData('text/plain',item.id)
-                e.dataTransfer.effectAllowed='move'
-                setDraggingId(item.id)
-              }}
-              onDragEnd={()=>{setDraggingId(null);setOverLane(null)}}>
+          {column.items.slice(0,shownByLane[column.status]??pageSize).map(entry=>{
+            const process=entry.process
+            const fst=formatFst(process.codigo)
+            return <article className="sgq-kanban-card sgq-kanban-process-card" key={process.id}>
               <div className="sgq-kanban-card-top">
                 <span className="sgq-kanban-fst">{fst}</span>
-                <InspectionMenu inspection={item} process={process} canDelete={canDelete} deletingProcessId={deletingProcessId}
-                  onReuseProcess={onReuseProcess} onEditProcess={onEditProcess}
-                  onDeleteProcess={onDeleteProcess} onDeleteInspection={onDeleteInspection}/>
-              </div>
-              <h3 title={client||'Cliente não informado'}>{client||'Cliente não informado'}</h3>
-              {group?.nome&&<p className="sgq-kanban-group" title={group.nome}>{group.nome}</p>}
-              {group?.subprocesso_codigo&&<p className="sgq-kanban-group">{group.nota_fiscal?'NF '+group.nota_fiscal:'NF não informada'}</p>}
-              {(active||done)&&target>0&&<div className="sgq-kanban-progress">
-                <div className="sgq-kanban-progress-label"><span>Amostra</span><strong>{formatQuantity(inspected)} / {formatQuantity(target)}</strong></div>
-                <div className="sgq-kanban-progress-track" role="progressbar"
-                  aria-label={'Amostragem '+fst} aria-valuenow={Math.round(percent)} aria-valuemin={0} aria-valuemax={100}>
-                  <span style={{width:percent+'%'}}/>
+                <div className="sgq-kanban-process-actions">
+                  <button type="button" title={'Novo subprocesso em '+fst} onClick={()=>onReuseProcess(process.id)}><Plus size={15}/></button>
+                  <button type="button" title={'Editar '+fst} onClick={()=>onEditProcess(process.id)}><Edit3 size={15}/></button>
+                  {canDelete&&<button type="button" title={'Excluir '+fst} disabled={deletingProcessId!==null} onClick={()=>onDeleteProcess(process.id)}><Trash2 size={15}/></button>}
                 </div>
-              </div>}
-              <div className="sgq-kanban-card-bottom">
-                {result?<span className={'sgq-kanban-result '+(item.resultado==='aprovado'?'is-approved':'is-rejected')}>
-                  {result}
-                </span>:<span className="sgq-kanban-card-spacer"/>}
-                {canMove&&onMove&&(active||item.status==='aberta')&&
-                  <button className="sgq-kanban-move" type="button"
-                    disabled={!!movingInspectionId}
-                    title={active?'Voltar para Não iniciadas':'Mover para Em andamento'}
-                    aria-label={(active?'Voltar para Não iniciadas':'Mover para Em andamento')+' · '+fst}
-                    onClick={()=>moveCard(item.id,active?'aberta':'em_andamento')}>
-                    <ArrowRightLeft size={15}/>
-                  </button>}
-                <button className="sgq-kanban-open" type="button" onClick={()=>onOpen(item.id)}>
-                  {active?<Play size={14}/>:done?<CheckCircle2 size={15}/>:<ChevronRight size={16}/>}
-                  {active?'Continuar':'Abrir'}
-                </button>
+              </div>
+              <h3 title={process.cliente||'Cliente não informado'}>{process.cliente||'Cliente não informado'}</h3>
+              <p className="sgq-kanban-group">{entry.subprocesses.length} subprocesso(s) · {entry.inspectionCount} inspeção(ões)</p>
+              <div className="sgq-kanban-subprocess-list">
+                {entry.subprocesses.map(sub=><section className="sgq-kanban-subprocess" key={sub.key}>
+                  <div className="sgq-kanban-subprocess-heading">
+                    <strong>{sub.letter?'Subprocesso '+sub.letter:'Inspeção vinculada'}</strong>
+                    <span>{sub.invoice?'NF '+sub.invoice:'NF não informada'}</span>
+                  </div>
+                  {sub.items.map(item=>{
+                    const target=Number(item.tamanho_amostra)||0
+                    const inspected=Number(item.total_inspecionado)||0
+                    const percent=target>0?Math.min(100,Math.max(0,inspected/target*100)):0
+                    const active=item.status==='em_andamento'
+                    const done=item.status==='concluida'
+                    return <div className="sgq-kanban-subprocess-item" key={item.id}
+                      draggable={canMoveCard(item)}
+                      onDragStart={e=>{
+                        if(!canMoveCard(item)){e.preventDefault();return}
+                        e.dataTransfer.setData('text/plain',item.id)
+                        e.dataTransfer.effectAllowed='move'
+                        setDraggingId(item.id)
+                      }}
+                      onDragEnd={()=>{setDraggingId(null);setOverLane(null)}}>
+                      <div className="sgq-kanban-subprocess-identity">
+                        <span>{item.numero}</span>
+                        <span className={'sgq-process-status '+(done?'is-complete':'')}>{done?'Concluída':active?'Em andamento':'Não iniciada'}</span>
+                      </div>
+                      {target>0&&<div className="sgq-kanban-progress">
+                        <div className="sgq-kanban-progress-label"><span>Amostra</span><strong>{formatQuantity(inspected)} / {formatQuantity(target)}</strong></div>
+                        <div className="sgq-kanban-progress-track" role="progressbar" aria-label={'Amostragem '+fst+'-'+sub.letter}
+                          aria-valuenow={Math.round(percent)} aria-valuemin={0} aria-valuemax={100}>
+                          <span style={{width:percent+'%'}}/>
+                        </div>
+                      </div>}
+                      <div className="sgq-kanban-subprocess-buttons">
+                        {canMove&&onMove&&canMoveCard(item)&&<button type="button" className="sgq-kanban-move"
+                          disabled={!!movingInspectionId} onClick={()=>moveCard(item.id,active?'aberta':'em_andamento')}
+                          aria-label={(active?'Voltar para Não iniciadas':'Mover para Em andamento')+' · '+fst+'-'+sub.letter}>
+                          <ArrowRightLeft size={15}/>
+                        </button>}
+                        <InspectionMenu inspection={item} process={process} canDelete={canDelete}
+                          deletingProcessId={deletingProcessId} onReuseProcess={onReuseProcess}
+                          onEditProcess={onEditProcess} onDeleteProcess={onDeleteProcess}
+                          onDeleteInspection={onDeleteInspection}/>
+                        <button type="button" className="sgq-kanban-open" onClick={()=>onOpen(item.id)}>
+                          {done?<CheckCircle2 size={15}/>:active?<Play size={14}/>:<ChevronRight size={15}/>}
+                          Abrir
+                        </button>
+                      </div>
+                    </div>
+                  })}
+                </section>)}
+                {!entry.subprocesses.length&&<div className="sgq-process-empty">
+                  Nenhum subprocesso cadastrado.
+                  <button type="button" onClick={()=>onReuseProcess(process.id)}>Adicionar subprocesso A</button>
+                </div>}
               </div>
             </article>
           })}
@@ -345,23 +345,10 @@ export default function InspectionsKanban({
               onClick={()=>setShownByLane(current=>({...current,[column.status]:(current[column.status]??pageSize)+pageSize}))}>
               Ver mais
             </button>}
-          {!column.items.length&&<div className="sgq-kanban-empty">Nenhuma inspeção</div>}
+          {!column.items.length&&<div className="sgq-kanban-empty">Nenhum processo</div>}
         </div>
       </section>)}
     </div>}
-    {mode==='page'&&view==='kanban'&&emptyProcesses.length>0&&<section className="sgq-kanban-unassigned" aria-label="Processos sem inspeção">
-      <div className="sgq-kanban-unassigned-head"><ClipboardCheck size={17}/><h2>Processos sem inspeção</h2><span>{emptyProcesses.length}</span></div>
-      <div className="sgq-kanban-unassigned-list">
-        {emptyProcesses.map(process=><article className="sgq-kanban-unassigned-card" key={process.id}>
-          <div><strong>{formatFst(process.codigo)}</strong><span>{process.cliente||'Cliente não informado'}</span></div>
-          <div className="sgq-kanban-unassigned-actions">
-            <button type="button" onClick={()=>onReuseProcess(process.id)} title="Nova inspeção neste processo" aria-label={'Nova inspeção em '+formatFst(process.codigo)}><Plus size={16}/></button>
-            <button type="button" onClick={()=>onEditProcess(process.id)} title="Editar processo" aria-label={'Editar '+formatFst(process.codigo)}><Edit3 size={16}/></button>
-            {canDelete&&<button type="button" onClick={()=>onDeleteProcess(process.id)} className="danger-item" disabled={deletingProcessId!==null} title="Excluir processo" aria-label={'Excluir '+formatFst(process.codigo)}><Trash2 size={15}/></button>}
-          </div>
-        </article>)}
-      </div>
-    </section>}
     {mode==='page'&&view==='kanban'&&!totalMatches&&search&&<div className="sgq-kanban-no-results">Nenhum resultado para “{query}”.</div>}
   </section>
 }
