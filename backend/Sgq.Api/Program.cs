@@ -2741,6 +2741,56 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
     catch(Exception e){return Results.Json(Error("Falha ao gerar Word pelo modelo oficial da IT.",e.Message),statusCode:500);}
 });
 
+app.MapPost("/api/processos/{id}/laudo", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("FST inválido."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+
+        // Generate the official template on demand and send it straight to the browser.
+        // Supabase Storage is NOT required; do not re-use stale laudo records.
+        HttpResponseMessage? res=null;
+        byte[] bytes=[];
+        var delays=new[]{1200,2000,3500,5000};
+        for(var attempt=0;attempt<delays.Length;attempt++)
+        {
+            using var msg=new HttpRequestMessage(HttpMethod.Get,
+                $"{auditDocsUrl}/generate-process/{Uri.EscapeDataString(id)}");
+            msg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
+            res=await client.SendAsync(msg);
+            bytes=await res.Content.ReadAsByteArrayAsync();
+            var retry=(int)res.StatusCode is 502 or 503 or 504;
+            if(!retry || attempt==delays.Length-1)break;
+            res.Dispose();
+            res=null;
+            await Task.Delay(delays[attempt]);
+        }
+        if(res is null || !res.IsSuccessStatusCode)
+        {
+            if(res is not null && (int)res.StatusCode is not (502 or 503 or 504))
+                return Results.Text(Encoding.UTF8.GetString(bytes),"application/json",statusCode:(int)res.StatusCode);
+            return Results.Json(Error("Não foi possível gerar o Word agora.","O serviço de documentos está indisponível."),statusCode:503);
+        }
+        using(res)
+        {
+            if(bytes.Length<100 || bytes[0]!=0x50 || bytes[1]!=0x4B)
+                return Results.Json(Error("O serviço não retornou um Word válido."),statusCode:502);
+            var contentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            var fileName=res.Headers.TryGetValues("X-SGQ-File-Name",out var names)
+                ? Uri.UnescapeDataString(names.FirstOrDefault()??"")
+                : "";
+            if(string.IsNullOrWhiteSpace(fileName)||!fileName.EndsWith(".docx",StringComparison.OrdinalIgnoreCase))
+                fileName=$"Inspecao-{id}.docx";
+            return Results.File(bytes,contentType,fileName);
+        }
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao gerar Word pelo modelo oficial da IT.",e.Message),statusCode:500);}
+});
+
 // Optional Power Automate delivery generates fresh bytes on demand as well.
 // Neither ordinary downloads nor SharePoint uploads depend on a laudos storage object.
 // POST via SGQ: documento armazenado no Supabase -> Power Automate -> SharePoint.
