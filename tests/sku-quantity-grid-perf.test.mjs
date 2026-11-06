@@ -4,8 +4,6 @@ import {readFileSync} from 'node:fs'
 const file=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8')
 const app=file('src/App.tsx')
 const api=file('backend/Sgq.Api/Program.cs')
-const grid=file('src/components/SkuQuantityGrid.tsx')
-const css=file('src/components/SkuQuantityGrid.css')
 const word=file('server/docx_generator.py')
 function segment(s,first,last){
  const start=s.indexOf(first),end=s.indexOf(last,start+first.length)
@@ -37,15 +35,20 @@ test('editing saves without leaving screen or synchronous detail reload',()=>{
  assert.match(edit,/setEditingInspectionData\(form\)/)
  assert.doesNotMatch(edit,/setTab\('nova'\)/)
 })
-test('grid shows all SKUs with per-row warehouse and lot values',()=>{
- for(const key of ['sku','nome','lote','material','capacidade','quantidade','caixasRecebidas','caixasInspecionadas',
-  'caixasPadrao','unidadesPadrao','caixasFracionadas','unidadesFracionadas','unidadesLaboratorio','unidadesPorConjunto'])
-  assert.match(grid,new RegExp(key))
- assert.match(grid,/rows\.map\(/)
- assert.match(grid,/data-mismatch=/)
- assert.match(css,/overflow-x:auto/)
- assert.match(css,/position:sticky/)
- assert.doesNotMatch(grid,/codigoCliente|Código do cliente/)
+test('existing inspection quantities use the original card editor and suggested boxes',()=>{
+ const modal=segment(app,'<article className="sample-detail inspection-edit-modal"','{editingProcess && (')
+ assert.match(modal,/className="edit-items-list"/)
+ assert.match(modal,/\(editingInspectionData\.itens \?\? \[\]\)\.map\(/)
+ assert.match(modal,/className="sku-card compact"/)
+ assert.match(modal,/Caixas recebidas<input type="number" step="1"/)
+ assert.match(modal,/Caixas inspecionadas<input type="number" step="1"/)
+ assert.match(modal,/const suggested=received \? String\(boxesToInspect\(Number\(received\)\)\) : ''/)
+ assert.match(modal,/Distribuição para armazenagem/)
+ assert.match(modal,/Retirada para laboratório \(unidades\)/)
+ assert.match(app,/function suggestMissingInspectedBoxes\(row:any\)/)
+ assert.match(app,/String\(row\.caixasInspecionadas\?\?''\)\.trim\(\)!==''/)
+ assert.doesNotMatch(app,/<SkuQuantityGrid/)
+ assert.doesNotMatch(modal,/Código do cliente/)
 })
 test('client code in templates is mapped to SKU with no duplicate frontend field',()=>{
  assert.match(word,/"código do cliente": "\\n"\.join\(all_skus\)/)
