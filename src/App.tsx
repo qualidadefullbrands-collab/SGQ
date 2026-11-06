@@ -1486,6 +1486,14 @@ export default function App() {
       chegadaCd:editingProcess.chegada_cd,
     })
     if (saved.error) return setError(saved.error.message)
+    const revised={...editingProcess,nota_fiscal:null}
+    setProcesses(current=>current.map(p=>p.id===revised.id?{...p,...revised}:p))
+    setInspections(current=>current.map(item=>item.grupos_inspecao?.processo_id===revised.id?
+      {...item,grupos_inspecao:{...item.grupos_inspecao,
+        processos:{...item.grupos_inspecao?.processos,...revised}}}:item))
+    setDetail((current:any)=>current?.grupos_inspecao?.processo_id===revised.id?
+      {...current,grupos_inspecao:{...current.grupos_inspecao,
+        processos:{...current.grupos_inspecao.processos,...revised}}}:current)
     setEditingProcess(null)
     setMessage('Processo atualizado.')
     void refreshLists()
@@ -1663,7 +1671,7 @@ export default function App() {
       return suggestMissingInspectedBoxes(applyBoxGroupsToSku(base,item.distribuicao_caixas))
     })
     const form={
-      codigo:fstCode(process.codigo),cliente:process.cliente ?? '',notaFiscal:process.nota_fiscal ?? '',origem:process.origem ?? '',transporte:process.transporte ?? '',
+      codigo:fstCode(process.codigo),cliente:process.cliente ?? '',notaFiscal:detail.grupos_inspecao?.nota_fiscal ?? process.nota_fiscal ?? '',origem:process.origem ?? '',transporte:process.transporte ?? '',
       chegadaCd:process.chegada_cd ?? '',dataInspecao:String(detail.data_inspecao ?? '').slice(0,10),inspectionLevel:detail.nivel_inspecao ?? 'I',
       observacaoInterna:detail.observacao_interna ?? '',itVersionId:detail.it_versao_id ?? '',itens:rows,
     }
@@ -1759,19 +1767,35 @@ export default function App() {
           documento_gerado_em:null,
           data_inspecao:editPayload.dataInspecao,
           observacao_interna:editPayload.observacaoInterna,
-          grupos_inspecao:{...current.grupos_inspecao,processos:{
-            ...current.grupos_inspecao?.processos,
-            codigo:editPayload.codigo,cliente:editPayload.cliente,
-            nota_fiscal:editPayload.notaFiscal,origem:editPayload.origem,
-            transporte:editPayload.transporte,chegada_cd:editPayload.chegadaCd
-          }}
+          grupos_inspecao:{...current.grupos_inspecao,
+            nota_fiscal:fastPath?current.grupos_inspecao?.nota_fiscal:editPayload.notaFiscal,
+            processos:{...current.grupos_inspecao?.processos,
+              cliente:fastPath?current.grupos_inspecao?.processos?.cliente:editPayload.cliente,
+              origem:fastPath?current.grupos_inspecao?.processos?.origem:editPayload.origem,
+              transporte:fastPath?current.grupos_inspecao?.processos?.transporte:editPayload.transporte,
+              chegada_cd:fastPath?current.grupos_inspecao?.processos?.chegada_cd:editPayload.chegadaCd}
+          }
         }
       })
       setInspections(current=>current.map(item=>item.id===id?{
         ...item,tamanho_lote:p?.lote??item.tamanho_lote,
         tamanho_amostra:p?.amostra??item.tamanho_amostra,
-        codigo_amostragem:p?.codigo??item.codigo_amostragem
+        codigo_amostragem:p?.codigo??item.codigo_amostragem,
+        grupos_inspecao:{...item.grupos_inspecao,
+          nota_fiscal:fastPath?item.grupos_inspecao?.nota_fiscal:editPayload.notaFiscal,
+          processos:{...item.grupos_inspecao?.processos,
+            cliente:fastPath?item.grupos_inspecao?.processos?.cliente:editPayload.cliente,
+            origem:fastPath?item.grupos_inspecao?.processos?.origem:editPayload.origem,
+            transporte:fastPath?item.grupos_inspecao?.processos?.transporte:editPayload.transporte,
+            chegada_cd:fastPath?item.grupos_inspecao?.processos?.chegada_cd:editPayload.chegadaCd}
+        }
       }:item))
+      if(!fastPath){
+        const pid=detail?.grupos_inspecao?.processo_id
+        if(pid)setProcesses(current=>current.map(proc=>proc.id===pid?
+          {...proc,cliente:editPayload.cliente,origem:editPayload.origem,
+            transporte:editPayload.transporte,chegada_cd:editPayload.chegadaCd}:proc))
+      }
       setMessage(fastPath?'Quantidades e caixas salvas.':'Dados da inspeção salvos.')
       editLastSavedFingerprint.current=JSON.stringify(editingInspectionData)
       setEditFeedback('Alterações salvas')
@@ -1780,9 +1804,14 @@ export default function App() {
         if(!r.error&&r.data?.inspecao){
           editingBaseline.current=offlineInspectionVersion(r.data)
           void saveOfflineDraft(userId||'','full:detail:'+id,r.data).catch(()=>undefined)
+          // Reconcile the summary, SKUs and invoice with actual persisted values.
+          setDetail((current:any)=>current?.id===id?{
+            ...current,...r.data.inspecao,items:r.data.items??current.items,
+            grupos_inspecao:r.data.inspecao.grupos_inspecao??current.grupos_inspecao
+          }:current)
         }
       }).catch(()=>undefined)
-      if(!fastPath)void refreshLists()
+      void refreshLists()
     }catch(e:any){setError(String(e?.message||'Não foi possível salvar.'))}
     finally{setEditSaving(false)}
   }
@@ -3217,9 +3246,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {canWrite && <button className="secondary small" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados e IT</button>}
             </div>
             <div className="inspection-data-summary">
-              <div><small>Processo</small><strong>{formatFst(detail.grupos_inspecao?.processos?.codigo)}</strong></div>
+              <div><small>Processo / subprocesso</small><strong>{formatFst(detail.grupos_inspecao?.processos?.codigo)}{detail.grupos_inspecao?.subprocesso_codigo?'-'+detail.grupos_inspecao.subprocesso_codigo:''}</strong></div>
               <div><small>Cliente</small><strong>{detail.grupos_inspecao?.processos?.cliente || '—'}</strong></div>
-              <div><small>Nota fiscal</small><strong>{detail.grupos_inspecao?.processos?.nota_fiscal || '—'}</strong></div>
+              <div><small>Nota fiscal</small><strong>{detail.grupos_inspecao?.nota_fiscal ?? detail.grupos_inspecao?.processos?.nota_fiscal ?? '—'}</strong></div>
               <div><small>Origem / transporte</small><strong>{detail.grupos_inspecao?.processos?.origem || '—'} · {detail.grupos_inspecao?.processos?.transporte || '—'}</strong></div>
               <div><small>IT / versão</small><strong>{detail.it_versoes?.instrucoes_trabalho?.codigo || 'Não selecionada'} · {detail.it_versoes?.versao || '—'}</strong></div>
               <div><small>Nível da inspeção</small><strong>{detail.nivel_inspecao || '—'}</strong></div>
@@ -3943,9 +3972,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <h2>Editar inspeção</h2>
             <p className="muted">Altere os campos necessários e salve.</p>
             <div className="form-grid">
-              <label>Processo<input value={editingInspectionData.codigo ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,codigo:e.target.value})}/></label>
+              <label>FST principal<input value={editingInspectionData.codigo ?? ''} readOnly title="Para alterar o código do FST, edite o processo principal."/></label>
               <label>Cliente<input value={editingInspectionData.cliente ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,cliente:e.target.value})}/></label>
-              <label>Nota fiscal<input value={editingInspectionData.notaFiscal ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,notaFiscal:e.target.value})}/></label>
+              <label>NF deste subprocesso<input value={editingInspectionData.notaFiscal ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,notaFiscal:e.target.value})}/></label>
               <label>Chegada no CD<input type="date" value={editingInspectionData.chegadaCd ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,chegadaCd:e.target.value})}/></label>
               <label>Origem<input value={editingInspectionData.origem ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,origem:e.target.value})}/></label>
               <div className="field-label"><span>Transporte</span><div className="transport-checks">
