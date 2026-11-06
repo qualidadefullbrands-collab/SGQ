@@ -834,16 +834,17 @@ app.MapPut("/api/processos/{id}", async (string id,ProcessUpdateRequest input,Ht
     try
     {
         var token=Token(request);
-        await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"processos",
-            $"id=eq.{Uri.EscapeDataString(id)}",
+        var changed=await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"processos",
+            $"select=id&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null",
             new {
                 cliente=input.Cliente,
-                nota_fiscal=input.NotaFiscal,
                 origem=input.Origem,
                 transporte=input.Transporte,
                 chegada_cd=input.ChegadaCd,
                 atualizado_em=DateTimeOffset.UtcNow
-            },"return=minimal");
+            },"return=representation");
+        if(!FirstRow(changed).found)
+            return Results.Json(Error("O FST não foi atualizado; confira suas permissões."),statusCode:409);
         return Results.Ok(new {data=new {ok=true},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -1592,10 +1593,34 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 "resolution=ignore-duplicates,return=minimal");
         }
         if(isSubprocess)
-            await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",$"id=eq.{Uri.EscapeDataString(groupId)}",
-                new{nota_fiscal=string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim()},"return=minimal");
+        {
+            // A NF é individual por subprocesso. Cliente, origem, transporte e
+            // chegada pertencem ao FST principal e devem persistir quando editados.
+            var updatedSubprocess=await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",
+                $"select=id,nota_fiscal&id=eq.{Uri.EscapeDataString(groupId)}",
+                new{nota_fiscal=string.IsNullOrWhiteSpace(input.NotaFiscal)?null:input.NotaFiscal.Trim()},
+                "return=representation");
+            if(!FirstRow(updatedSubprocess).found)
+                return Results.Json(Error("Não foi possível salvar a NF do subprocesso."),statusCode:409);
+            var parentChanges=new {
+                cliente=string.IsNullOrWhiteSpace(input.Cliente)?null:input.Cliente.Trim(),
+                origem=string.IsNullOrWhiteSpace(input.Origem)?null:input.Origem.Trim(),
+                transporte=string.IsNullOrWhiteSpace(input.Transporte)?null:input.Transporte.Trim(),
+                chegada_cd=input.ChegadaCd,
+                atualizado_em=DateTimeOffset.UtcNow
+            };
+            var updatedParent=await RestAsync(client,token,HttpMethod.Patch,"processos",
+                $"select=id&id=eq.{Uri.EscapeDataString(processId)}",parentChanges,"return=representation");
+            if(!FirstRow(updatedParent).found)
+                return Results.Json(Error("Não foi possível salvar os dados compartilhados do FST."),statusCode:409);
+        }
         else
-            await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(processId)}",processUpdate,"return=minimal");
+        {
+            var updatedParent=await RestAsync(client,token,HttpMethod.Patch,"processos",
+                $"select=id&id=eq.{Uri.EscapeDataString(processId)}",processUpdate,"return=representation");
+            if(!FirstRow(updatedParent).found)
+                return Results.Json(Error("Não foi possível salvar o FST."),statusCode:409);
+        }
 
         if(InvalidOperationalUnits(input.Itens))
             return Results.Json(Error("Caixas e peças devem ser números inteiros; use caixas fracionadas."),statusCode:400);
