@@ -1780,7 +1780,7 @@ export default function App() {
     for (const link of next.items as any[]) {
       const item=link.processo_itens
       const existing=(next.retained as any[]).find((x:any)=>x.produto_id===item?.produto_id)
-      retention[item.id]={retain:!existing,qty:'',address:'',photoFile:null,photoPreview:''}
+      retention[item.id]={retain:false,qty:'',address:'',photoFile:null,photoPreview:''}
     }
     const suggestedQty=retentionQuantityFromText(next.observacao_interna)
     if (suggestedQty!=null) {
@@ -2636,7 +2636,7 @@ export default function App() {
     const pendencias:string[]=finished.data?.pendencias ?? []
     setMessage(pendencias.length
       ? 'Inspeção finalizada com pendências registradas.'
-      : 'Inspeção finalizada. Agora defina a retenção das amostras.')
+      : 'Inspeção finalizada. A retenção de amostras é opcional.')
     void refreshLists()
     await openInspection(selectedInspectionId)
   }
@@ -2646,10 +2646,9 @@ export default function App() {
     const selected = (detail.items ?? []).filter((link:any) => retentionRows[link.processo_itens.id]?.retain)
 
     if (!selected.length) {
-      if (!retentionReason.trim()) return setError('Informe o motivo para não reter amostra.')
       const saved=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/retencao`,{motivoSemRetencao:retentionReason.trim(),itens:[]})
       if (saved.error) return setError(saved.error.message)
-      setMessage('Inspeção encerrada sem retenção, com justificativa registrada.')
+      setMessage('Decisão de não reter registrada. Nenhuma amostra foi movimentada.')
       await openInspection(selectedInspectionId)
       return
     }
@@ -3391,7 +3390,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               ['verificacoes','Verificações',checklistDone],['dimensionais','Dimensionais',dimsDone],
               ['testes','Testes',testsDone],['fotos','Fotos',Boolean(detail.photos?.length)],
               ['resultado','Resultado',detail.status==='concluida'],
-              ['retencao','Retenção',detail.retencao_decisao!=null],
+              ['retencao','Retenção (opcional)',detail.retencao_decisao!=null],
             ] as Array<[typeof activeStage,string,boolean]>).map(([key,label,done])=>(
               <button key={key} type="button" role="tab" aria-selected={activeStage===key}
                 className={'inspection-stage-tab'+(activeStage===key?' active':'')+(done?' done':'')}
@@ -3778,7 +3777,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           {detail.status!=='concluida' && activeStage==='retencao' && detail.status!=='aberta' && (
             <section className="panel section-card inspection-stage">
               <h2>Retenção de amostras</h2>
-              <p>A decisão de retenção ficará disponível após a conclusão da inspeção.</p>
+              <p>A retenção é opcional e pode ser registrada depois da conclusão, sem bloquear o laudo.</p>
               <button className="secondary" type="button" onClick={()=>selectInspectionStage('resultado')}>Ir para resultado</button>
             </section>
           )}
@@ -3786,21 +3785,22 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <section className="panel section-card inspection-stage">
               <div className="section-title"><h2>Resultado final</h2><span className={'result-badge '+detail.resultado}>{statusLabel(detail.resultado)}</span></div>
               <p>{detail.observacoes || 'Nenhuma observação final registrada.'}</p>
-              <button className="secondary" type="button" onClick={()=>selectInspectionStage('retencao')}>Ver retenção</button>
+              <button className="secondary" type="button" onClick={()=>selectInspectionStage('retencao')}>Ver retenção opcional</button>
             </section>
           )}
           {detail.status==='concluida' && (
             <section className={'panel section-card retention-panel inspection-stage'+(activeStage==='retencao'?'':' inspection-stage-hidden')}>
               <div className="section-title">
-                <h2>Retenção após finalização</h2>
+                <h2>Retenção de amostras (opcional)</h2>
                 <span className={'result-badge '+detail.resultado}>{statusLabel(detail.resultado)}</span>
               </div>
+              <p className="section-note">Esta etapa não é obrigatória. Você pode pular sem justificar e registrar amostras depois, se necessário.</p>
               {(detail.retained ?? []).length>0 && <div className="alert success">Já existem {(detail.retained ?? []).length} amostra(s) deste registro no estoque.</div>}
               {retentionSuggestion.quantidade!=null && <div className="retention-suggestion"><Sparkles size={15}/><span>Sugestão de retenção: <b>{retentionSuggestion.quantidade} un.</b> com base na observação interna.</span></div>}
               {(detail.items ?? []).map((link:any)=>{
                 const item=link.processo_itens
                 const existing=detail.retained?.find((x:any)=>x.produto_id===item.produto_id)
-                const draft=retentionRows[item.id] || {retain:true,qty:'',address:'',photoFile:null,photoPreview:''}
+                const draft=retentionRows[item.id] || {retain:false,qty:'',address:'',photoFile:null,photoPreview:''}
                 return (
                   <div className="retention-row" key={item.id}>
                     <label className="switch-line">
@@ -3816,10 +3816,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   </div>
                 )
               })}
-              {!Object.values(retentionRows).some((x)=>x.retain) && <label>Motivo para não reter<textarea rows={3} value={retentionReason} onChange={(e)=>setRetentionReason(e.target.value)}/></label>}
+              {!Object.values(retentionRows).some((x)=>x.retain) && <label>Motivo para não reter (opcional)<textarea rows={3} value={retentionReason} onChange={(e)=>setRetentionReason(e.target.value)}/></label>}
               <div className="actions">
-                <button className="primary" onClick={saveRetention}><Warehouse size={16}/> Enviar retenção ao estoque</button>
-                <button className="secondary" disabled={wordDownloading} onClick={downloadInspectionWord}><FileDown size={16}/> Gerar Word</button>
+                <button className={Object.values(retentionRows).some(x=>x.retain)?'primary':'secondary'} type="button" onClick={saveRetention}><Warehouse size={16}/>{Object.values(retentionRows).some(x=>x.retain)?'Enviar amostras ao estoque':'Registrar sem retenção (opcional)'}</button>
+                <button className="secondary" type="button" onClick={()=>setTab('inspecoes')}>Pular retenção e voltar aos processos</button>
+                <button className="secondary" type="button" disabled={wordDownloading||!wordStatus?.ready} onClick={downloadInspectionWord}><FileDown size={16}/> Gerar Word do FST</button>
               </div>
             </section>
           )}
