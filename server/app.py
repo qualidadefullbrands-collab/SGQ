@@ -234,10 +234,10 @@ async def generate_document(execution_id:str,authorization:str|None=Header(defau
         template_bytes=await storage_download(client,token,"auditoria-modelos",template["storage_path"])
 
         answers,findings,objects,messages=await __import__("asyncio").gather(
-            table_rows(client,token,"auditoria_respostas",{"execucao_id":f"eq.{execution_id}","select":"*","excluido_em":"is.null","order":"criado_em.asc"}),
-            table_rows(client,token,"auditoria_achados",{"execucao_id":f"eq.{execution_id}","select":"*","excluido_em":"is.null","order":"criado_em.asc"}),
-            table_rows(client,token,"auditoria_objetos",{"execucao_id":f"eq.{execution_id}","select":"*","excluido_em":"is.null","order":"criado_em.asc"}),
-            table_rows(client,token,"auditoria_mensagens",{"execucao_id":f"eq.{execution_id}","select":"*","excluido_em":"is.null","order":"criado_em.asc"}),
+            table_rows(client,token,"auditoria_respostas",{"execucao_id":f"eq.{execution_id}","select":"*","order":"criado_em.asc"}),
+            table_rows(client,token,"auditoria_achados",{"execucao_id":f"eq.{execution_id}","select":"*","order":"criado_em.asc"}),
+            table_rows(client,token,"auditoria_objetos",{"execucao_id":f"eq.{execution_id}","select":"*","order":"criado_em.asc"}),
+            table_rows(client,token,"auditoria_mensagens",{"execucao_id":f"eq.{execution_id}","select":"*","order":"criado_em.asc"}),
         )
 
         photos=[]
