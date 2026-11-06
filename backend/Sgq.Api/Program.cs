@@ -1114,6 +1114,38 @@ decimal? OperationalUnitsPerBox(CreateInspectionItem item)
         item.QuantidadePorCaixa is >0m?item.QuantidadePorCaixa:null;
 }
 
+// One source of truth for the statistical plan: item quantities are explicit
+// when supplied; otherwise derive warehouse boxes from the saved distribution.
+// Laboratory withdrawals contain units, not boxes, and must be excluded.
+decimal OperationalBoxesReceived(CreateInspectionItem item)
+{
+    if(item.CaixasRecebidas>0m) return item.CaixasRecebidas;
+    return NormalizeComponentDistribution(item)?
+        .Where(x=>x.Tipo is "padrao" or "fracionada")
+        .Sum(x=>x.Caixas) ?? 0m;
+}
+
+decimal BoxesToEvaluate(decimal received)
+{
+    var boxes=(int)Math.Floor(received);
+    if(boxes<=0)return 0m;
+    if(boxes<=2)return boxes;
+    if(boxes<=6)return 3m;
+    if(boxes<=12)return 4m;
+    if(boxes<=20)return 5m;
+    if(boxes<=30)return 6m;
+    if(boxes<=42)return 7m;
+    if(boxes<=56)return 8m;
+    return Math.Min(boxes,(int)Math.Ceiling(Math.Sqrt(boxes+1d)));
+}
+
+decimal OperationalBoxesToEvaluate(CreateInspectionItem item)
+{
+    return item.CaixasInspecionadas>0m
+        ?item.CaixasInspecionadas
+        :BoxesToEvaluate(OperationalBoxesReceived(item));
+}
+
 bool InvalidOperationalUnits(IEnumerable<CreateInspectionItem>? rows)
 {
     return (rows??[]).Any(item =>
@@ -1343,8 +1375,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     capacidade = string.IsNullOrWhiteSpace(item.Capacidade) ? null : item.Capacidade.Trim(),
                     quantidade = effectiveQuantity,
                     quantidade_por_caixa = OperationalUnitsPerBox(item),
-                    caixas_recebidas = item.CaixasRecebidas > 0 ? (decimal?)item.CaixasRecebidas : null,
-                    caixas_inspecionadas = item.CaixasInspecionadas > 0 ? (decimal?)item.CaixasInspecionadas : null,
+                    caixas_recebidas = OperationalBoxesReceived(item)>0?(decimal?)OperationalBoxesReceived(item):null,
+                    caixas_inspecionadas = OperationalBoxesToEvaluate(item)>0?(decimal?)OperationalBoxesToEvaluate(item):null,
                     distribuicao_caixas = NormalizeComponentDistribution(item)
                 }, "return=representation");
             var (ir, inf) = FirstRow(itemCreated);
@@ -1366,8 +1398,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 new {grupo_inspecao_id=groupId,it_versao_id=effectiveIt,principal=true},"return=minimal");
 
         var inspectionNumber = $"INS-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
-        var totalBoxesReceived = items.Sum(x => x.CaixasRecebidas);
-        var totalBoxesInspect = items.Sum(x => x.CaixasInspecionadas);
+        var totalBoxesReceived = items.Sum(OperationalBoxesReceived);
+        var totalBoxesInspect = items.Sum(OperationalBoxesToEvaluate);
 
         var createdInspection = await RestAsync(client, token, HttpMethod.Post, "inspecoes", "select=id",
             new {
@@ -1480,8 +1512,8 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
                         $"id=eq.{Uri.EscapeDataString(item.ProcessoItemId!)}",
                         new {
                             quantidade=effectiveQuantity,quantidade_por_caixa=OperationalUnitsPerBox(item),
-                            caixas_recebidas=item.CaixasRecebidas>0?(decimal?)item.CaixasRecebidas:null,
-                            caixas_inspecionadas=item.CaixasInspecionadas>0?(decimal?)item.CaixasInspecionadas:null,
+                            caixas_recebidas=OperationalBoxesReceived(item)>0?(decimal?)OperationalBoxesReceived(item):null,
+                            caixas_inspecionadas=OperationalBoxesToEvaluate(item)>0?(decimal?)OperationalBoxesToEvaluate(item):null,
                             distribuicao_caixas=NormalizeComponentDistribution(item)
                         },"return=minimal"),
                     RestAsync(client,token,HttpMethod.Patch,"grupo_inspecao_itens",
@@ -1498,8 +1530,8 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
         var level=ins.Value.GetProperty("nivel_inspecao").ValueKind==JsonValueKind.String
             ? ins.Value.GetProperty("nivel_inspecao").GetString()??"I":"I";
         var plan=SamplingPlan(lot,level);
-        var totalBoxes=items.Sum(x=>x.CaixasRecebidas);
-        var totalInspect=items.Sum(x=>x.CaixasInspecionadas);
+        var totalBoxes=items.Sum(OperationalBoxesReceived);
+        var totalInspect=items.Sum(OperationalBoxesToEvaluate);
         await Task.WhenAll(
             RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",$"id=eq.{Uri.EscapeDataString(groupId)}",
                 new {tamanho_lote_estatistico=lot},"return=minimal"),
@@ -1528,6 +1560,7 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
         }
         return Results.Ok(new {data=new {ok=true,plano=new {
             lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re,
+            caixasRecebidas=totalBoxes,caixasAvaliar=totalInspect,
         }},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -1666,8 +1699,8 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                         capacidade=string.IsNullOrWhiteSpace(item.Capacidade)?null:item.Capacidade.Trim(),
                         quantidade=quantity,
                         quantidade_por_caixa=OperationalUnitsPerBox(item),
-                        caixas_recebidas=item.CaixasRecebidas>0?(decimal?)item.CaixasRecebidas:null,
-                        caixas_inspecionadas=item.CaixasInspecionadas>0?(decimal?)item.CaixasInspecionadas:null,
+                        caixas_recebidas=OperationalBoxesReceived(item)>0?(decimal?)OperationalBoxesReceived(item):null,
+                        caixas_inspecionadas=OperationalBoxesToEvaluate(item)>0?(decimal?)OperationalBoxesToEvaluate(item):null,
                         distribuicao_caixas=NormalizeComponentDistribution(item)
                     },"return=representation");
                 var (newItem,itemFound)=FirstRow(createdItem);
@@ -1711,8 +1744,8 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 ["capacidade"]=string.IsNullOrWhiteSpace(item.Capacidade)?null:item.Capacidade.Trim(),
                 ["quantidade"]=effectiveQuantity,
                 ["quantidade_por_caixa"]=OperationalUnitsPerBox(item),
-                ["caixas_recebidas"]=item.CaixasRecebidas>0?(decimal?)item.CaixasRecebidas:null,
-                ["caixas_inspecionadas"]=item.CaixasInspecionadas>0?(decimal?)item.CaixasInspecionadas:null,
+                ["caixas_recebidas"]=OperationalBoxesReceived(item)>0?(decimal?)OperationalBoxesReceived(item):null,
+                ["caixas_inspecionadas"]=OperationalBoxesToEvaluate(item)>0?(decimal?)OperationalBoxesToEvaluate(item):null,
                 ["distribuicao_caixas"]=NormalizeComponentDistribution(item)
             };
             if(!string.IsNullOrWhiteSpace(productId)) patch["produto_id"]=productId;
@@ -1771,7 +1804,7 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 app.Logger.LogWarning(logError,"Audit log failed after changing completed inspection {InspectionId}",id);
             }
         }
-        return Results.Ok(new {data=new {ok=true,plano=new {lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re}},error=(object?)null});
+        return Results.Ok(new {data=new {ok=true,plano=new {lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re,caixasRecebidas=totalBoxes,caixasAvaliar=totalInspect}},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao atualizar dados da inspeção.",e.Message),statusCode:500);}
