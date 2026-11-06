@@ -569,6 +569,21 @@ export default function App() {
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null)
   const [activeStage, setActiveStage] = useState<'dados'|'amostragem'|'verificacoes'|'dimensionais'|'testes'|'fotos'|'resultado'|'retencao'>('dados')
   const [detail, setDetail] = useState<any>(null)
+  const [wordStatus,setWordStatus]=useState<{ready:boolean;pending:string[]}|null>(null)
+  useEffect(()=>{
+    const processId=detail?.grupos_inspecao?.processo_id as string|undefined
+    if(!processId){setWordStatus(null);return}
+    let active=true
+    setWordStatus(null)
+    void apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status')
+      .then(response=>{
+        if(active)setWordStatus(response.error?
+          {ready:false,pending:[response.error.message||'Não foi possível validar o laudo.']}:
+          {ready:response.data?.ready===true,pending:response.data?.pending??[]})
+      })
+      .catch(()=>{if(active)setWordStatus({ready:false,pending:['Não foi possível validar o laudo.']})})
+    return()=>{active=false}
+  },[detail?.grupos_inspecao?.processo_id,detail?.status,inspections])
   const [finalObservation, setFinalObservation] = useState('')
   const [internalObservation, setInternalObservation] = useState('')
   const [retentionRows, setRetentionRows] = useState<Record<string,{
@@ -2382,6 +2397,7 @@ export default function App() {
 
   async function sendWordToPowerAutomate(){
     if(!selectedInspectionId||sharepointBusy)return
+    if(!wordStatus?.ready){setPopupMessage('Conclua e preencha todos os subprocessos antes de enviar o laudo único.');return}
     setSharepointBusy(true)
     const r=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/enviar-automate`,{})
     setSharepointBusy(false)
@@ -2747,6 +2763,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   async function downloadInspectionWord() {
     if(!detail||!selectedInspectionId||wordDownloading)return
     setError('')
+    if(!wordStatus?.ready)return setError('O laudo ficará disponível quando todas as inspeções do FST estiverem concluídas e preenchidas.')
     if(!detail.it_versao_id){
       return setError('Esta inspeção não possui IT vinculada. Vincule uma IT para gerar o Word oficial.')
     }
@@ -3216,8 +3233,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <span className="pill">{statusLabel(detail.status)}</span>
               {canWrite && <button className="secondary" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados</button>}
 
-              {detail.status==='concluida' && <button className="secondary" disabled={wordDownloading} onClick={downloadInspectionWord}><FileDown size={16}/> Word preenchido</button>}
-              {detail.status==='concluida' && <button className="secondary" type="button" disabled={sharepointBusy} onClick={()=>void sendWordToPowerAutomate()}><FileText size={16}/>{sharepointBusy?'Enviando…':'Enviar ao SharePoint'}</button>}
+              {detail.status==='concluida' && <button className="secondary" disabled={wordDownloading||!wordStatus?.ready} title={wordStatus?.ready?'Gerar laudo único do FST':wordStatus?.pending?.[0]||'Validando subprocessos'} onClick={downloadInspectionWord}><FileDown size={16}/> Word do FST</button>}
+              {detail.status==='concluida' && <button className="secondary" type="button" disabled={sharepointBusy||!wordStatus?.ready} onClick={()=>void sendWordToPowerAutomate()}><FileText size={16}/>{sharepointBusy?'Enviando…':'Enviar ao SharePoint'}</button>}
+              {detail.status==='concluida'&&!wordStatus?.ready&&<small className="sgq-inline-save-status" role="status">
+                {wordStatus?wordStatus.pending.slice(0,2).join(' · '):'Validando preenchimento do FST…'}
+              </small>}
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
           </div>
