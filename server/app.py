@@ -8,7 +8,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .docx_generator import generate, file_name, generate_inspection, inspection_file_name, append_filled_inspection_form, dimensional_evaluations
+from .docx_generator import generate, file_name, generate_inspection, inspection_file_name, append_filled_inspection_form, update_consolidated_page_totals, dimensional_evaluations
 
 SUPABASE_URL=os.environ.get("SUPABASE_URL","").rstrip("/")
 SUPABASE_KEY=os.environ.get("SUPABASE_PUBLISHABLE_KEY","")
@@ -676,6 +676,7 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
                 raise HTTPException(status_code=502,detail=
                     f"Não foi possível preencher a ficha oficial do subprocesso {group.get('subprocesso_codigo') or group.get('codigo')}.")
             append_filled_inspection_form(doc,filled.body)
+        update_consolidated_page_totals(doc)
         out=BytesIO()
         doc.save(out)
         filename=f"FST{str(parent.get('codigo') or '').removeprefix('FST')} - Laudo consolidado.docx"
