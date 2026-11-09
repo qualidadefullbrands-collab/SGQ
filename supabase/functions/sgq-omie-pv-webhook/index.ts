@@ -8,6 +8,7 @@ const APP_HASH = "full-qq4aej8";
 const ALLOWED = new Set(["VendaProduto.Incluida", "VendaProduto.Alterada", "VendaProduto.Cancelada"]);
 const ORDER_URL = "https://app.omie.com.br/api/v1/produtos/pedido/";
 const CLIENT_URL = "https://app.omie.com.br/api/v1/geral/clientes/";
+const PROJECT_URL = "https://app.omie.com.br/api/v1/geral/projetos/";
 const response = (value: unknown, code = 200) => Response.json(value, { status: code, headers: { "Cache-Control": "no-store" } });
 
 async function secret(name: string): Promise<string> {
@@ -114,6 +115,18 @@ async function processEvent(messageId: string, topic: string, body: any): Promis
     }
     const info = order?.informacoes_adicionais || {};
     const projeto = Number(info.codProj || 0);
+    let fstReferencia = extractFst(order);
+    if (projeto > 0 && !fstReferencia) {
+      // Relação fiscal explícita PV → Projeto Omie; consultar nome pelo ID.
+      // Não deduzir FST por cliente, SKU ou proximidade de código.
+      try {
+        const linkedProject = await omie(PROJECT_URL, "ConsultarProjeto", { codigo: projeto }, key, sec);
+        const nome = String(linkedProject?.nome || "").trim().toUpperCase();
+        if (/^FST\\d{4,9}(?:-[A-Z])?$/.test(nome) && linkedProject?.inativo !== "S") {
+          fstReferencia = nome;
+        }
+      } catch (e) { console.warn("Projeto Omie indisponível para PV", pedidoId, String(e)); }
+    }
     const number = String(cab.numero_pedido || event?.numero_pedido || pedidoId);
     const items = extractItems(order);
     const status = topic === "VendaProduto.Cancelada" ? "cancelado" :
@@ -121,7 +134,7 @@ async function processEvent(messageId: string, topic: string, body: any): Promis
     const { error } = await admin.from("sgq_omie_pedidos").upsert({
       app_hash: APP_HASH, omie_codigo_pedido: pedidoId, numero_pedido: number,
       codigo_cliente_omie: clientId || null, cliente, codigo_projeto_omie: projeto || null,
-      fst_referencia: extractFst(order), status, itens: items, numero_itens: items.length,
+      fst_referencia: fstReferencia, status, itens: items, numero_itens: items.length,
       origem_omie: String(cab.origem_pedido || ""), ultimo_evento: topic,
       atualizado_em: new Date().toISOString(), erro: null
     }, { onConflict: "omie_codigo_pedido" });
