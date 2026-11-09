@@ -377,13 +377,17 @@ def emphasize_sampling_tables(doc,inspection):
                   ("caixas a avaliar" in scope or "caixas para avaliar" in scope or
                    "caixas avaliadas" in scope or "caixas a inspecionar" in scope))
         if is_lot and lot is not None:
+            level=str(inspection.get("nivel_inspecao") or "I").strip().upper()
             for row in table.rows:
-                if not any(_range_matches(c.text,lot) for c in row.cells): continue
-                for cell in row.cells: mark_cell(cell)
-                if code and len(code)<=3:
-                    for cell in row.cells:
-                        if re.fullmatch(re.escape(code),cell.text.strip(),re.I):
-                            mark_cell(cell,"BED9EF")
+                if not any(_range_matches(c.text,lot) for c in row.cells):continue
+                # Quadro NQA 1,5%: lote + 3 colunas do nível escolhido.
+                # Nível I = lote,código,amostra,Ac/Re; nível II = lote + colunas 5,6,7.
+                if len(row.cells)>=7 and level in ("I","II"):
+                    selected=[0,1,2,3] if level=="I" else [0,4,5,6]
+                else:
+                    selected=list(range(len(row.cells)))
+                for index in selected:
+                    mark_cell(row.cells[index])
                 break
         if not is_boxes or boxes is None: continue
         # Official horizontal 2-row matrix: header = received-box ranges,
