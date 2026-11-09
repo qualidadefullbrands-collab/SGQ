@@ -40,5 +40,5 @@ test('Word readiness does not depend on voluntary sample-retention decision',()=
   assert.doesNotMatch(block,/retencao_decisao|retencao_motivo|retained/)
   assert.match(app,/disabled=\{wordDownloading\}/)
   assert.match(app,/id="sgq-word-pendencias"/)
-  assert.match(app,/Gerar Word do FST/)
+  assert.match(app,/Gerar Laudo/)
 })
