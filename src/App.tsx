@@ -2511,13 +2511,25 @@ export default function App() {
 
   function dimensionSummary(itemId:string,paramId:string) {
     const rows=(detail?.dimResults ?? []).filter((x:any)=>x.processo_item_id===itemId && x.parametro_id===paramId)
-    const nc=rows.filter((x:any)=>x.conforme===false).length
-    const c=rows.filter((x:any)=>x.conforme===true).length
-    let decision='Pendente'
-    if (rows.length===10) {
-      decision=rows.some((x:any)=>x.conforme==null)?'Sem tolerância':nc>0?'Reprovado':'Aprovado'
-    }
-    return { total:rows.length, nc, c, decision }
+    const bySample=new Map<number,number>()
+    rows.forEach((x:any)=>{
+      const index=Number(x.sequencia_amostra)
+      const value=Number(x.valor)
+      if(Number.isInteger(index)&&index>=1&&index<=10&&x.valor!=null&&Number.isFinite(value))bySample.set(index,value)
+    })
+    const values=[...bySample.values()]
+    const average=values.length?values.reduce((sum,val)=>sum+val,0)/values.length:null
+    const cfg=getDimConfig(itemId,paramId)
+    const minimum=cfg?.minimo_aceitavel == null?null:Number(cfg.minimo_aceitavel)
+    const maximum=cfg?.maximo_aceitavel == null?null:Number(cfg.maximo_aceitavel)
+    const hasTolerance=minimum!=null||maximum!=null
+    const nc=hasTolerance?values.filter(v=>(minimum!=null&&v<minimum)||(maximum!=null&&v>maximum)).length:0
+    const c=hasTolerance?values.length-nc:0
+    const decision=cfg?.nao_aplicavel?'Não aplicável'
+      :values.length<10?'Pendente'
+      :!hasTolerance?'Aprovado pela média'
+      :nc>0?'Reprovado':'Aprovado'
+    return {total:values.length,nc,c,average,decision,hasTolerance}
   }
 
 
@@ -3599,7 +3611,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
           <section id="sec-dimensionais" className={'panel section-card inspection-stage'+(activeStage==='dimensionais' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
             <div className="section-title">
-              <div><h2>Análises dimensionais</h2><span className="section-note">Especificação, instrumento, desvio aceitável e 10 medições por parâmetro.</span></div>
+              <div><h2>Análises dimensionais</h2><span className="section-note">10 medições por parâmetro. Sem desvio aprovado, o sistema calcula a média e aprova por critério interno.</span></div>
               {detail.dimensionais_finalizados && <span className="pill">Concluído</span>}
               {detail.status==='concluida' && canManageIts && !allowDimensionalRectification &&
                 <button className="secondary small" type="button" onClick={()=>{
@@ -3701,10 +3713,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                           </div>
 
                           <div className="tolerance-strip">
-                            <span>Faixa aceitável <b>{min ?? '—'} a {max ?? '—'} {cfg.unidade ?? p.unidade ?? ''}</b></span>
+                            <span>Critério <b>{cfg.nao_aplicavel?'NA':!summary.hasTolerance?'Sem tolerância aprovada':(min ?? '—')+' a '+(max ?? '—')+' '+(cfg.unidade ?? p.unidade ?? '')}</b></span>
                             <span>Medições <b>{summary.total}/10</b></span>
-                            <span>Conformes <b>{summary.c}</b></span>
-                            <span>NC <b>{summary.nc}</b></span>
+                            <span>Média <b>{summary.average==null?'—':Number(summary.average.toFixed(3)).toLocaleString('pt-BR',{maximumFractionDigits:3})} {cfg.unidade ?? p.unidade ?? ''}</b></span>
+                            <span>Conformes <b>{summary.hasTolerance?summary.c:'—'}</b></span>
+                            <span>NC <b>{summary.hasTolerance?summary.nc:'—'}</b></span>
                             <span>Decisão <b className={'dim-decision '+summary.decision.toLowerCase()}>{summary.decision}</b></span>
                           </div>
 

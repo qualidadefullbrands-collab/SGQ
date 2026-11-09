@@ -386,6 +386,95 @@ def emphasize_sampling_tables(doc,inspection):
         # Summary fields (e.g. 'Caixas avaliadas: 10') are intentionally neutral.
 
 
+def format_dimensional_mean(value:Decimal|None) -> str:
+    if value is None:
+        return "—"
+    return format(value.quantize(Decimal("0.001"),rounding=ROUND_HALF_UP).normalize(),"f").replace(".",",")
+
+
+def dimensional_evaluations(items:list[dict], params:list[dict], configurations:list[dict],
+                            measurements:list[dict]) -> list[dict]:
+    """Regra SGQ: 10 medições por item/parâmetro; sem tolerância aprovada, aprovar pela média.
+    O modo de aprovação não afirma conformidade individual com limites inexistentes.
+    """
+    configs={(str(c.get("processo_item_id")),str(c.get("parametro_id"))):c for c in configurations}
+    reading_map={}
+    for r in measurements:
+        item_id=str(r.get("processo_item_id"))
+        param_id=str(r.get("parametro_id"))
+        try:
+            seq=int(r.get("sequencia_amostra"))
+            value=Decimal(str(r.get("valor")).replace(",","."))
+        except (TypeError,ValueError,InvalidOperation):
+            continue
+        if 1<=seq<=10 and value.is_finite():
+            reading_map.setdefault((item_id,param_id),{})[seq]=value
+
+    results=[]
+    for item in items:
+        item_id=str(item.get("id") or "")
+        product=item.get("produto") or item.get("produtos") or {}
+        sku=product.get("sku") or item.get("codigo_cliente") or item_id[:8]
+        if not item_id:
+            continue
+        for param in params:
+            param_id=str(param.get("id"))
+            cfg=configs.get((item_id,param_id),{})
+            values=reading_map.get((item_id,param_id),{})
+            average=sum(values.values(),Decimal(0))/Decimal(len(values)) if values else None
+            min_raw=cfg.get("minimo_aceitavel")
+            max_raw=cfg.get("maximo_aceitavel")
+            minimum=Decimal(str(min_raw)) if min_raw is not None else None
+            maximum=Decimal(str(max_raw)) if max_raw is not None else None
+            if cfg.get("nao_aplicavel") is True:
+                status="nao_aplicavel"
+            elif len(values)<10:
+                status="pendente"
+            elif minimum is None and maximum is None:
+                status="aprovado_media"
+            elif any((minimum is not None and val<minimum) or
+                     (maximum is not None and val>maximum) for val in values.values()):
+                status="reprovado"
+            else:
+                status="aprovado"
+            results.append({
+                "item_id":item_id,"sku":sku,"parametro_id":param_id,
+                "parametro":param.get("nome") or param_id,
+                "unidade":cfg.get("unidade") or param.get("unidade") or "",
+                "quantidade":len(values),"media":average,
+                "limite_minimo":minimum,"limite_maximo":maximum,
+                "status":status
+            })
+    return results
+
+
+def add_dimensional_mean_summary(doc, items:list[dict], params:list[dict],
+                                 configs:list[dict], readings:list[dict]) -> None:
+    evaluations=dimensional_evaluations(items,params,configs,readings)
+    if not evaluations:
+        return
+    doc.add_paragraph("RESUMO DIMENSIONAL — CRITÉRIOS E MÉDIAS")
+    table=doc.add_table(rows=1,cols=5)
+    for cell,val in zip(table.rows[0].cells,["SKU","Parâmetro","Medições","Média","Avaliação"]):
+        set_cell(cell,val,7,bold=True)
+    labels={
+        "aprovado_media":"APROVADO PELA MÉDIA (sem tolerância aprovada)",
+        "aprovado":"APROVADO (dentro dos limites)",
+        "reprovado":"REPROVADO (fora dos limites)",
+        "nao_aplicavel":"NÃO APLICÁVEL",
+        "pendente":"PENDENTE (medições insuficientes)",
+    }
+    for row in evaluations:
+        average=format_dimensional_mean(row["media"])
+        unit=row["unidade"]
+        add_row(table,[
+            row["sku"],row["parametro"],
+            "NA" if row["status"]=="nao_aplicavel" else f'{row["quantidade"]}/10',
+            "—" if row["status"]=="nao_aplicavel" else f"{average} {unit}".strip(),
+            labels[row["status"]],
+        ],7)
+
+
 def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
     doc=Document(BytesIO(template_bytes))
     inspection=payload.get("inspection") or {}
@@ -543,10 +632,14 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                         unit=hit.get("unidade") or cfg.get("unidade") or param.get("unidade") or ""
                         labeled_cell(cell,str(seq),f"{filled(value)} {unit}".strip(),7.5)
 
-    evaluated_dim=[x for x in dim_results if x.get("conforme") is not None]
+    dimensional_summary=dimensional_evaluations(items,dim_params,dim_configs,dim_results)
     dim_choice=""
-    if evaluated_dim:
-        dim_choice="REPROVADO" if any(x.get("conforme") is False for x in evaluated_dim) else "APROVADO"
+    if dimensional_summary:
+        evaluated=[r for r in dimensional_summary if r["status"]!="nao_aplicavel"]
+        if any(r["status"]=="reprovado" for r in evaluated):
+            dim_choice="REPROVADO"
+        elif all(r["status"] in ("aprovado","aprovado_media") for r in evaluated):
+            dim_choice="APROVADO"
     for table in doc.tables:
         for row in table.rows:
             if row.cells and _norm(row.cells[0].text)=="resultado dimensional":
@@ -599,6 +692,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             trPr=row._tr.get_or_add_trPr()
             if trPr.find(qn("w:cantSplit")) is None: trPr.append(OxmlElement("w:cantSplit"))
 
+    add_dimensional_mean_summary(doc,items,dim_params,dim_configs,dim_results)
     out=BytesIO(); doc.save(out); return out.getvalue()
 
 def append_subprocess_appendix(doc, payload:dict) -> None:
@@ -610,6 +704,7 @@ def append_subprocess_appendix(doc, payload:dict) -> None:
     check_results=payload.get("check_results") or []
     dimensionals=payload.get("dim_results") or []
     params=payload.get("dim_params") or []
+    configs=payload.get("dim_configs") or []
     tests=payload.get("tests") or []
     test_results=payload.get("test_results") or []
     photos=payload.get("photos") or []
@@ -655,7 +750,8 @@ def append_subprocess_appendix(doc, payload:dict) -> None:
             add_row(table,[names.get(str(row.get("parametro_id"))) or "Parâmetro",
                 item_names.get(str(row.get("processo_item_id"))) or "",
                 row.get("sequencia_amostra") or "",row.get("valor") or "",
-                "C" if row.get("conforme") is True else "NC" if row.get("conforme") is False else ""],7)
+                "C" if row.get("conforme") is True else "NC" if row.get("conforme") is False else "—"],7)
+    add_dimensional_mean_summary(doc,items,params,configs,dimensionals)
     if tests:
         doc.add_paragraph("Testes especiais")
         by_id={str(r.get("teste_id")):r for r in test_results}

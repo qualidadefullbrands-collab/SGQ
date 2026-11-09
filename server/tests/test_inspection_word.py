@@ -9,7 +9,8 @@ from docx.shared import Inches
 from PIL import Image
 from server.docx_generator import (
     add_photo, emphasize_sampling_tables, fst_code, generate_inspection,
-    inspection_file_name, whole_number,
+    inspection_file_name, whole_number, dimensional_evaluations,
+    format_dimensional_mean,
 )
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -201,5 +202,42 @@ class InspectionWordTests(unittest.TestCase):
                 reloaded=io.BytesIO()
                 doc.save(reloaded)
                 self.assertGreater(len(reloaded.getvalue()),1500)
+
+    def test_no_tolerance_approves_by_mean_and_keeps_na_excluded(self):
+        items=[{"id":"item-A","produto":{"sku":"SKU-A"}}]
+        params=[{"id":"peso","nome":"Peso","unidade":"g"},
+                {"id":"diametro","nome":"Diâmetro externo","unidade":"mm"}]
+        configs=[{"processo_item_id":"item-A","parametro_id":"diametro","nao_aplicavel":True},
+                 {"processo_item_id":"item-A","parametro_id":"peso",
+                  "minimo_aceitavel":None,"maximo_aceitavel":None}]
+        readings=[{"processo_item_id":"item-A","parametro_id":"peso",
+                   "sequencia_amostra":i,"valor":95.1 if i in (1,2,3) else 95,
+                   "conforme":None} for i in range(1,11)]
+        result=dimensional_evaluations(items,params,configs,readings)
+        self.assertEqual(result[0]["status"],"aprovado_media")
+        self.assertEqual(result[0]["quantidade"],10)
+        self.assertEqual(format_dimensional_mean(result[0]["media"]),"95,03")
+        self.assertEqual(result[1]["status"],"nao_aplicavel")
+        fewer=dimensional_evaluations(items,params,configs,readings[:-1])
+        self.assertEqual(fewer[0]["status"],"pendente")
+        limited=[{"processo_item_id":"item-A","parametro_id":"peso",
+                  "minimo_aceitavel":90,"maximo_aceitavel":95}]
+        outside=dimensional_evaluations(items,params,limited,readings)
+        self.assertEqual(outside[0]["status"],"reprovado")
+        within=dimensional_evaluations(items,params,limited,[dict(r,valor=94) for r in readings])
+        self.assertEqual(within[0]["status"],"aprovado")
+
+    def test_word_records_approval_by_mean(self):
+        payload=sample_payload()
+        payload["dim_params"]=[{"id":"peso","nome":"Peso","unidade":"g"}]
+        payload["dim_configs"]=[]
+        payload["dim_results"]=[{"processo_item_id":"item-1","parametro_id":"peso",
+                                "sequencia_amostra":i,"valor":81,"conforme":None}
+                                for i in range(1,11)]
+        template=(ROOT/"templates"/"IT001.docx").read_bytes()
+        doc=Document(io.BytesIO(generate_inspection(template,payload)))
+        cells=[cell.text for table in doc.tables for row in table.rows for cell in row.cells]
+        self.assertIn("APROVADO PELA MÉDIA (sem tolerância aprovada)",cells)
+        self.assertIn("81 g",cells)
 
 if __name__=="__main__": unittest.main()
