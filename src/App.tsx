@@ -632,10 +632,10 @@ export default function App() {
   async function loadOmieInbox(){
     if(!userId||!navigator.onLine)return
     const [orders,seen]=await Promise.all([
-      supabase.from('sgq_omie_pedidos')
+      authClient.from('sgq_omie_pedidos')
         .select('id,omie_codigo_pedido,numero_pedido,cliente,fst_referencia,status,itens,numero_itens,recebido_em,atualizado_em')
         .order('recebido_em',{ascending:false}).limit(40),
-      supabase.from('sgq_omie_pedidos_lidos')
+      authClient.from('sgq_omie_pedidos_lidos')
         .select('pedido_id').eq('usuario_id',userId).limit(200)
     ])
     if(orders.error){setOmieInboxError('Não foi possível carregar os PVs do Omie.');return}
@@ -673,7 +673,7 @@ export default function App() {
     setTab('nova')
     setMessage('PV '+order.numero_pedido+' pré-preenchido. Confirme o FST, selecione a IT e registre o recebimento físico antes de salvar.')
     if(userId){
-      const result=await supabase.from('sgq_omie_pedidos_lidos').upsert({
+      const result=await authClient.from('sgq_omie_pedidos_lidos').upsert({
         pedido_id:order.id,usuario_id:userId,lido_em:new Date().toISOString()
       },{onConflict:'pedido_id,usuario_id'})
       if(!result.error)setOmieInboxSeen(old=>new Set([...old,order.id]))
