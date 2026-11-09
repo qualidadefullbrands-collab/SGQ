@@ -272,6 +272,17 @@ def fst_code(value):
     raw=re.sub(r"\s+","",raw)
     return raw if raw.startswith("FST") else "FST"+raw
 
+def consolidated_report_filename(it_code:str,process_code:str,issued_on)->str:
+    """Padrão SGQ: IT001- FST26125 - 09-11-2026.docx (data de emissão local)."""
+    it=re.sub(r"[^A-Za-z0-9]","",str(it_code or "")).upper()
+    if not it.startswith("IT") or not re.fullmatch(r"IT[0-9]+[A-Z]?",it):
+        raise ValueError("Código da IT ausente ou inválido para nomear o laudo.")
+    fst=fst_code(process_code)
+    if fst=="–" or not re.fullmatch(r"FST[0-9]+(?:-[A-Z])?",fst):
+        raise ValueError("Código FST ausente ou inválido para nomear o laudo.")
+    return f"{it}- {fst} - {issued_on.strftime('%d-%m-%Y')}.docx"
+
+
 def subprocess_fst_code(process:dict,group:dict)->str:
     """Identificação operacional sempre vinculada ao subprocesso, nunca ao FST pai isolado."""
     parent=fst_code((process or {}).get("codigo"))
