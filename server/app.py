@@ -4,11 +4,12 @@ from io import BytesIO
 from docx import Document
 from pathlib import Path
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .docx_generator import generate, file_name, generate_inspection, inspection_file_name, append_filled_inspection_form, update_consolidated_page_totals, dimensional_evaluations
+from .docx_generator import generate, file_name, generate_inspection, inspection_file_name, append_filled_inspection_form, update_consolidated_page_totals, dimensional_evaluations, consolidated_report_filename
 
 SUPABASE_URL=os.environ.get("SUPABASE_URL","").rstrip("/")
 SUPABASE_KEY=os.environ.get("SUPABASE_PUBLISHABLE_KEY","")
@@ -679,9 +680,18 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
         update_consolidated_page_totals(doc)
         out=BytesIO()
         doc.save(out)
-        filename=f"FST{str(parent.get('codigo') or '').removeprefix('FST')} - Laudo consolidado.docx"
-        clean=re.sub(r'[\\/:*?"<>|]+'," ",filename)
-        encoded=urllib.parse.quote(clean,safe="")
+        version_rows=await table_rows(client,token,"it_versoes",{
+            "id":f"eq.{parent_version}",
+            "select":"id,instrucoes_trabalho(codigo)",
+            "limit":"1",
+        })
+        instruction=(version_rows[0].get("instrucoes_trabalho") or {}) if version_rows else {}
+        it_code=instruction.get("codigo")
+        if not it_code:
+            raise HTTPException(status_code=409,detail="Código da IT não encontrado; impossível nomear o laudo.")
+        filename=consolidated_report_filename(
+            it_code,parent.get("codigo"),datetime.now(ZoneInfo("America/Sao_Paulo")).date())
+        encoded=urllib.parse.quote(filename,safe="")
         return Response(content=out.getvalue(),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={"Content-Disposition":f"attachment; filename*=UTF-8''{encoded}",
