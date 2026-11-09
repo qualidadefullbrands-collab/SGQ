@@ -982,11 +982,25 @@ def append_filled_inspection_form(doc,filled_docx:bytes)->None:
         if any((t.text or "").strip() for t in node.iter(qn("w:t"))):break
         if any(True for _ in node.iter(qn("w:drawing"))):break
         body.remove(node)
-    doc.add_page_break()
+    # A própria primeira linha da ficha B inicia a página. Uma segunda quebra
+    # explícita aqui criava páginas vazias quando a ficha A terminava em foto.
     image_id=max((int(x.get("id") or 0) for x in body.iter(qn("wp:docPr"))),default=0)
-    for original in elements[start:]:
+    for index,original in enumerate(elements[start:]):
         if original.tag==qn("w:sectPr"):continue
         cloned=deepcopy(original)
+        if index==0 and cloned.tag==qn("w:p"):
+            pPr=cloned.find(qn("w:pPr"))
+            if pPr is None:
+                pPr=OxmlElement("w:pPr")
+                cloned.insert(0,pPr)
+            page_break=pPr.find(qn("w:pageBreakBefore"))
+            if page_break is None:
+                page_break=OxmlElement("w:pageBreakBefore")
+                pPr.append(page_break)
+            page_break.set(qn("w:val"),"true")
+            for br in list(cloned.iter(qn("w:br"))):
+                if br.get(qn("w:type"))=="page":
+                    br.getparent().remove(br)
         # Ids de imagens precisam ser exclusivos em todo o documento consolidado.
         for property_node in cloned.iter(qn("wp:docPr")):
             image_id+=1
