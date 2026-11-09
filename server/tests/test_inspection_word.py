@@ -1,6 +1,7 @@
 from __future__ import annotations
 import io
 import re
+from datetime import date
 import unittest
 from pathlib import Path
 from docx import Document
@@ -11,7 +12,7 @@ from PIL import Image
 from server.docx_generator import (
     add_photo, emphasize_sampling_tables, fst_code, generate_inspection,
     inspection_file_name, whole_number, dimensional_evaluations,
-    format_dimensional_mean, append_filled_inspection_form, update_consolidated_page_totals,
+    format_dimensional_mean, append_filled_inspection_form, update_consolidated_page_totals, consolidated_report_filename,
 )
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -354,8 +355,69 @@ class InspectionWordTests(unittest.TestCase):
         footer_table.cell(0,0).text="Página 10 de 9"
         update_consolidated_page_totals(doc)
         xml=doc.sections[0].footer._element.xml
-        self.assertIn('w:instr="PAGE"',xml)
-        self.assertIn('w:instr="NUMPAGES"',xml)
+        self.assertIn('w:instr="PAGE \\* MERGEFORMAT"',xml)
+        self.assertIn('w:instr="NUMPAGES \\* MERGEFORMAT"',xml)
+        self.assertGreaterEqual(xml.count('w:ascii="Calibri"'),2)
+        self.assertGreaterEqual(xml.count('w:hAnsi="Calibri"'),2)
         self.assertNotIn("Página 10 de 9",xml)
+
+    def test_consolidated_filename_uses_it_parent_fst_and_local_issue_date(self):
+        self.assertEqual(
+            consolidated_report_filename("IT 001","26125",date(2026,11,9)),
+            "IT001- FST26125 - 09-11-2026.docx")
+        self.assertEqual(
+            consolidated_report_filename("IT008","FST26152",date(2026,12,1)),
+            "IT008- FST26152 - 01-12-2026.docx")
+        with self.assertRaises(ValueError):
+            consolidated_report_filename("", "26125",date(2026,11,9))
+
+    def test_photo_frames_match_across_both_subprocesses(self):
+        template=(ROOT/"templates"/"IT001.docx").read_bytes()
+        photo=Image.new("RGB",(1100,350),(55,150,190))
+        buff=io.BytesIO();photo.save(buff,format="PNG")
+        a=sample_payload();a["group"]={"subprocesso_codigo":"A"}
+        a["photos"]=[{"bytes":buff.getvalue(),"caption":"A"}]
+        b=sample_payload();b["group"]={"subprocesso_codigo":"B"}
+        b["photos"]=[{"bytes":buff.getvalue(),"caption":str(i)}
+                    for i in range(1,5)]
+        doc=Document(io.BytesIO(generate_inspection(template,a)))
+        append_filled_inspection_form(doc,generate_inspection(template,b))
+        shapes=doc.inline_shapes
+        self.assertEqual(len(shapes),5)
+        self.assertEqual(len({(shape.width,shape.height) for shape in shapes}),1)
+        all_photos=[
+            table for table in doc.tables if
+            any("FOTOS DA INSPEÇÃO" in cell.text.upper()
+                for row in table.rows for cell in row.cells)]
+        self.assertEqual(len(all_photos),2)
+        for table in all_photos:
+            title=table.cell(0,0)
+            self.assertTrue(any(
+                p.paragraph_format.page_break_before
+                for p in title.paragraphs))
+        # As fichas A/B são anexadas sem um parágrafo de quebra de página adicional.
+        xml=doc._element.body.xml
+        self.assertNotIn('w:type="page"',xml)
+
+    def test_dimensional_result_is_kept_with_last_measurement_not_next_sku(self):
+        payload=sample_payload()
+        payload["items"].append({
+            "id":"item-2","produto":{"sku":"SKU-2","nome":"COMPONENTE 2"},
+            "quantidade":100,"quantidade_por_caixa":10,"caixas_recebidas":10})
+        payload["dim_params"]=[{"id":"peso","nome":"Peso","unidade":"g"}]
+        payload["dim_results"]=[
+            {"processo_item_id":item_id,"parametro_id":"peso","sequencia_amostra":i,
+             "valor":80+i/10,"unidade":"g","conforme":None}
+            for item_id in ("item-1","item-2") for i in range(1,11)]
+        doc=Document(io.BytesIO(generate_inspection(
+            (ROOT/"templates"/"IT001.docx").read_bytes(),payload)))
+        labels=[t for t in doc.tables if t.rows and
+                "Resultado dimensional" in t.cell(0,0).text]
+        self.assertEqual(len(labels),2)
+        for table in labels:
+            for cell in table.rows[0].cells:
+                self.assertTrue(all(p.paragraph_format.keep_with_next is False
+                                    for p in cell.paragraphs))
+        self.assertGreaterEqual(doc._element.body.xml.count("w:keepNext"),1)
 
 if __name__=="__main__": unittest.main()
