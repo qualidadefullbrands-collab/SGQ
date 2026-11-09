@@ -3516,7 +3516,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 if(window.confirm('Editar inspeção concluída? Será possível corrigir medições, critérios, testes, verificações e resultado, com registro no histórico.'))setAllowDimensionalRectification(true)
               }}><Edit3 size={16}/>{allowDimensionalRectification?'Encerrar edição':'Editar inspeção concluída'}</button>}
 
-              {detail.status==='concluida' && <button className="secondary" type="button" disabled={wordDownloading} title={wordStatus?.ready?'Baixar o laudo Word do FST':'Ver o motivo pelo qual o Word ainda não está disponível'} onClick={()=>void downloadInspectionWord()}><FileDown size={16}/>{wordDownloading?'Gerando laudo…':'Gerar Laudo'}</button>}
+              {detail.status==='concluida' && <button className="secondary" type="button" disabled={wordDownloading} title={wordStatus?.ready?'Gerar e baixar o laudo de inspeção':'Ver o motivo pelo qual o Word ainda não está disponível'} onClick={()=>void downloadInspectionWord()}><FileDown size={16}/>{wordDownloading?'Gerando laudo…':'Gerar Laudo'}</button>}
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
           </div>
