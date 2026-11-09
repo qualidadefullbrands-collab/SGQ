@@ -549,6 +549,49 @@ def apply_dimensional_result(table,item:dict,params:list[dict],
                 choice_cell(cell,decision,8)
 
 
+def _keep_dimensional_result_with_measurements(clones, doc) -> None:
+    """Vincula a última tabela medida ao resultado de seu SKU (sem ligar ao SKU seguinte)."""
+    result_index=next((idx for idx,node in enumerate(clones)
+        if node is not None and node.tag==qn("w:tbl")
+        and "resultadodimensional" in canonical_dimension_label(
+            " ".join(t.text or "" for t in node.iter(qn("w:t"))))),None)
+    if result_index is None:return
+    result_table=Table(clones[result_index],doc._body)
+    for row in result_table.rows:
+        trPr=row._tr.get_or_add_trPr()
+        if trPr.find(qn("w:cantSplit")) is None:
+            trPr.append(OxmlElement("w:cantSplit"))
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                paragraph.paragraph_format.page_break_before=False
+                paragraph.paragraph_format.keep_together=True
+                paragraph.paragraph_format.keep_with_next=False
+    # A IT usa tabelas separadas para as amostras e a linha de resultado.
+    # keepNext nas últimas medições impede o Word de deixar só o resultado na página seguinte.
+    last_measurement=next((node for node in reversed(clones[:result_index])
+        if node is not None and node.tag==qn("w:tbl")
+        and any(re.search(r"(?<!\\d)10\\.",(t.text or ""))
+                for t in node.iter(qn("w:t")))),None)
+    if last_measurement is not None:
+        table=Table(last_measurement,doc._body)
+        for row in table.rows:
+            trPr=row._tr.get_or_add_trPr()
+            if trPr.find(qn("w:cantSplit")) is None:
+                trPr.append(OxmlElement("w:cantSplit"))
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    paragraph.paragraph_format.keep_with_next=True
+
+
+def _dimension_group_separator(doc, before) -> None:
+    """Espaço claro entre SKUs, sem manter o resultado vinculado ao próximo componente."""
+    spacer=doc.add_paragraph()
+    spacer.paragraph_format.space_after=Pt(8)
+    spacer.paragraph_format.keep_with_next=False
+    spacer.paragraph_format.page_break_before=False
+    before.addprevious(spacer._p)
+
+
 def render_dimension_tables_by_sku(doc,items:list[dict],params:list[dict],
                                    configs:list[dict],readings:list[dict])->None:
     """Repete os blocos oficiais da IT para cada SKU medido, sem linhas/tabelas NA.
@@ -608,8 +651,15 @@ def render_dimension_tables_by_sku(doc,items:list[dict],params:list[dict],
                     if fill_dimensional_table_for_item(table,item,params,configs,readings)==0:
                         cloned.getparent().remove(cloned) if cloned.getparent() is not None else None
                         clones[clones.index(cloned)]=None
+        # Elimina os parágrafos vazios que separavam o resultado das últimas medições.
+        clones=[None if node is not None and node.tag==qn("w:p")
+                and not "".join(t.text or "" for t in node.iter(qn("w:t"))).strip()
+                and not any(True for _ in node.iter(qn("w:drawing")))
+                else node for node in clones]
+        _keep_dimensional_result_with_measurements(clones,doc)
         for cloned in clones:
             if cloned is not None:original_first.addprevious(cloned)
+        _dimension_group_separator(doc,original_first)
     for original in source_nodes:
         if original.getparent() is not None:
             original.getparent().remove(original)
