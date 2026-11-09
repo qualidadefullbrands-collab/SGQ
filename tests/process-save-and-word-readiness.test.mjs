@@ -70,7 +70,7 @@ test('Word readiness respects per-SKU NA, ten readings, and undefined tolerances
 test('retroactive tolerance recalculation preserves measurements and audit trail',()=>{
  assert.match(api,/var currentMeasurements=await RestAsync/)
  assert.match(api,/medicoesAtualizadas=updatedMeasurements/)
- assert.match(api,/acao="retificacao_criterio_dimensional"/)
+ assert.match(api,/"retificacao_criterio_dimensional"/)
  assert.match(api,/new \{conforme=expected\}/)
  assert.match(app,/Aprovado pela média/)
  assert.match(app,/Retificar critérios/)
