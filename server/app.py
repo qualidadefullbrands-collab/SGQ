@@ -8,7 +8,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .docx_generator import generate, file_name, generate_inspection, inspection_file_name, append_subprocess_appendix
+from .docx_generator import generate, file_name, generate_inspection, inspection_file_name, append_subprocess_appendix, dimensional_evaluations
 
 SUPABASE_URL=os.environ.get("SUPABASE_URL","").rstrip("/")
 SUPABASE_KEY=os.environ.get("SUPABASE_PUBLISHABLE_KEY","")
@@ -297,6 +297,30 @@ def required_text(value) -> bool:
 def group_label(group:dict) -> str:
     return "Subprocesso "+str(group.get("subprocesso_codigo") or group.get("codigo") or "?")
 
+
+def dimensional_pendencies(label: str, inspection: dict, products: list[dict],
+                           params: list[dict], configurations: list[dict],
+                           readings: list[dict]) -> list[str]:
+    """Mesmo critério do laudo: NA não bloqueia, 10 medições sem tolerância são aprovadas pela média."""
+    if not params:
+        return []
+    pending=[]
+    if not inspection.get("dimensionais_finalizados"):
+        pending.append(f"{label}: etapa dimensional não finalizada.")
+    ident=str(inspection["id"])
+    evaluations=dimensional_evaluations(
+        products,params,
+        [c for c in configurations if str(c.get("inspecao_id"))==ident],
+        [m for m in readings if str(m.get("inspecao_id"))==ident],
+    )
+    for evaluation in evaluations:
+        if evaluation["status"]=="pendente":
+            missing=10-evaluation["quantidade"]
+            pending.append(
+                f'{label} · SKU {evaluation["sku"]} · {evaluation["parametro"]}: '
+                f'{missing} medições faltantes.')
+    return pending
+
 async def process_word_status(client:httpx.AsyncClient, token:str, process_id:str)->dict:
     """Valida integralidade no banco; status concluída isoladamente não libera Word."""
     parents=await table_rows(client,token,"processos",{
@@ -335,9 +359,9 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
     if version_id:
         checks,dims,tests=await __import__("asyncio").gather(
             table_rows(client,token,"it_checklist",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}),
-            table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}),
+            table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id,nome"}),
             table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}))
-    links,photos,check_results,dim_results,test_results=([],[],[],[],[])
+    links,photos,check_results,dim_results,test_results,dim_configs=([],[],[],[],[],[])
     if ids:
         links,photos,check_results,dim_results,test_results=await __import__("asyncio").gather(
             table_rows(client,token,"grupo_inspecao_itens",{
@@ -349,9 +373,12 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
             table_rows(client,token,"inspecao_checklist_resultados",{
                 "inspecao_id":f"in.({ids})","select":"inspecao_id,checklist_id,resultado"}),
             table_rows(client,token,"inspecao_dimensionais",{
-                "inspecao_id":f"in.({ids})","select":"inspecao_id,parametro_id,valor,conforme"}),
+                "inspecao_id":f"in.({ids})","select":"inspecao_id,processo_item_id,parametro_id,sequencia_amostra,valor,conforme"}),
             table_rows(client,token,"inspecao_testes_resultados",{
-                "inspecao_id":f"in.({ids})","select":"inspecao_id,teste_id,resultado"}))
+                "inspecao_id":f"in.({ids})","select":"inspecao_id,teste_id,resultado"}),
+            table_rows(client,token,"inspecao_dimensional_configuracoes",{
+                "inspecao_id":f"in.({ids})",
+                "select":"inspecao_id,processo_item_id,parametro_id,nao_aplicavel,minimo_aceitavel,maximo_aceitavel"}))
     completed=0
     for group in groups:
         label=group_label(group)
@@ -410,12 +437,8 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
                              if c.get("inspecao_id")==ident and required_text(c.get("resultado"))}
             if any(str(c["id"]) not in recorded_checks for c in checks):
                 pending.append(f"{label}: verificações obrigatórias incompletas.")
-            recorded_dims={str(d["parametro_id"]) for d in dim_results if
-                           d.get("inspecao_id")==ident and d.get("valor") is not None
-                           and d.get("conforme") is not None}
-            if dims and (not row.get("dimensionais_finalizados")
-                         or any(str(d["id"]) not in recorded_dims for d in dims)):
-                pending.append(f"{label}: dimensionais incompletos.")
+            pending.extend(dimensional_pendencies(
+                label, row, child_links, dims, dim_configs, dim_results))
             recorded_tests={str(t["teste_id"]) for t in test_results if
                             t.get("inspecao_id")==ident and required_text(t.get("resultado"))}
             if tests and (not row.get("testes_finalizados")
@@ -652,11 +675,12 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
         for group in groups[1:]:
             row=by_group[group["id"]]
             gid=group["id"]
-            links,checks,check_results,params,dimensionals,tests,test_results,photo_rows=await __import__("asyncio").gather(
+            links,checks,check_results,params,configs,dimensionals,tests,test_results,photo_rows=await __import__("asyncio").gather(
                 table_rows(client,token,"grupo_inspecao_itens",{"grupo_inspecao_id":f"eq.{gid}","select":"processo_itens(*,produtos(*))"}),
                 table_rows(client,token,"it_checklist",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
                 table_rows(client,token,"inspecao_checklist_resultados",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
                 table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
+                table_rows(client,token,"inspecao_dimensional_configuracoes",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
                 table_rows(client,token,"inspecao_dimensionais",{"inspecao_id":f"eq.{row['id']}","select":"*","order":"sequencia_amostra.asc"}),
                 table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
                 table_rows(client,token,"inspecao_testes_resultados",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
@@ -682,7 +706,7 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
             append_subprocess_appendix(doc,{
                 "inspection":row,"group":group,"items":items,
                 "checklist":checks,"check_results":check_results,
-                "dim_params":params,"dim_results":dimensionals,
+                "dim_params":params,"dim_configs":configs,"dim_results":dimensionals,
                 "tests":tests,"test_results":test_results,"photos":photos,
             })
         out=BytesIO()
