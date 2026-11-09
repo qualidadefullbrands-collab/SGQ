@@ -134,3 +134,11 @@ test('Word errors and actual pending items are visible and retryable without byp
  assert.match(app,/if\(!wordStatus\?\.ready\)/)
  assert.match(app,/document\.getElementById\('sgq-word-pendencias'\)/)
 })
+
+test('Word retains photo evidence while allowing numbered captions when empty',()=>{
+ assert.match(docs,/if not photo_rows:/)
+ assert.match(docs,/fotografias sem arquivo\./)
+ assert.doesNotMatch(docs,/fotografias sem arquivo ou legenda/)
+ const generator=source('server/docx_generator.py')
+ assert.match(generator,/photo\.get\("caption"\) or f"Foto \{index\+1\}"/)
+})
