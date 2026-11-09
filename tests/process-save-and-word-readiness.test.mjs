@@ -60,8 +60,8 @@ test('all subprocesses and mandatory inspection evidence must be ready before Wo
 
 test('Word readiness respects per-SKU NA, ten readings, and undefined tolerances',()=>{
  assert.match(docs,/def dimensional_pendencies\(/)
- assert.match(docs,/config\.get\("nao_aplicavel"\) is True/)
- assert.match(docs,/len\(measurements\) < 10/)
+ assert.match(source('server/docx_generator.py'),/cfg\.get\("nao_aplicavel"\) is True/)
+ assert.match(source('server/docx_generator.py'),/len\(values\)<10/)
  assert.match(docs,/dimensional_evaluations\(/)
  assert.match(docs,/evaluation\["status"\]=="pendente"/)
  assert.match(docs,/pending\.extend\(dimensional_pendencies\(/)
