@@ -122,7 +122,7 @@ async function processEvent(messageId: string, topic: string, body: any): Promis
       try {
         const linkedProject = await omie(PROJECT_URL, "ConsultarProjeto", { codigo: projeto }, key, sec);
         const nome = String(linkedProject?.nome || "").trim().toUpperCase();
-        if (/^FST\\d{4,9}(?:-[A-Z])?$/.test(nome) && linkedProject?.inativo !== "S") {
+        if (/^FST\d{4,9}(?:-[A-Z])?$/.test(nome) && linkedProject?.inativo !== "S") {
           fstReferencia = nome;
         }
       } catch (e) { console.warn("Projeto Omie indisponível para PV", pedidoId, String(e)); }
