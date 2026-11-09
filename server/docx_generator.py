@@ -891,7 +891,7 @@ def update_consolidated_page_totals(doc)->None:
                     if identifier in handled:continue
                     handled.add(identifier)
                     original=str(cell.text or "")
-                    if not re.search(r"página",original,re.I) or not re.search(r"de\\s+\\d+\\b",original,re.I):
+                    if not re.search(r"página",original,re.I) or not re.search(r"de\s+\d+\b",original,re.I):
                         continue
                     p=cell.paragraphs[0]
                     clear_paragraph(p)
