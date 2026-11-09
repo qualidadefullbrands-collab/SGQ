@@ -363,7 +363,7 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
             table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}))
     links,photos,check_results,dim_results,test_results,dim_configs=([],[],[],[],[],[])
     if ids:
-        links,photos,check_results,dim_results,test_results=await __import__("asyncio").gather(
+        links,photos,check_results,dim_results,test_results,dim_configs=await __import__("asyncio").gather(
             table_rows(client,token,"grupo_inspecao_itens",{
                 "grupo_inspecao_id":f"in.({group_ids})",
                 "select":"grupo_inspecao_id,processo_itens(id,quantidade,caixas_recebidas,"
