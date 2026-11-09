@@ -11,7 +11,7 @@ from PIL import Image
 from server.docx_generator import (
     add_photo, emphasize_sampling_tables, fst_code, generate_inspection,
     inspection_file_name, whole_number, dimensional_evaluations,
-    format_dimensional_mean, append_filled_inspection_form,
+    format_dimensional_mean, append_filled_inspection_form, update_consolidated_page_totals,
 )
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -347,5 +347,15 @@ class InspectionWordTests(unittest.TestCase):
                 for idx,t in enumerate(doc.tables) if any(
                     "foto" in str(c.text).lower() for row in t.rows for c in row.cells)])
         self.assertEqual(photo_headers,[])
+
+    def test_consolidated_footer_uses_total_page_field(self):
+        doc=Document()
+        footer_table=doc.sections[0].footer.add_table(rows=1,cols=1,width=Inches(3))
+        footer_table.cell(0,0).text="Página 10 de 9"
+        update_consolidated_page_totals(doc)
+        xml=doc.sections[0].footer._element.xml
+        self.assertIn('w:instr="PAGE"',xml)
+        self.assertIn('w:instr="NUMPAGES"',xml)
+        self.assertNotIn("Página 10 de 9",xml)
 
 if __name__=="__main__": unittest.main()
