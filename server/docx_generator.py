@@ -570,7 +570,7 @@ def _keep_dimensional_result_with_measurements(clones, doc) -> None:
     # keepNext nas últimas medições impede o Word de deixar só o resultado na página seguinte.
     last_measurement=next((node for node in reversed(clones[:result_index])
         if node is not None and node.tag==qn("w:tbl")
-        and any(re.search(r"(?<!\\d)10\\.",(t.text or ""))
+        and any(re.search(r"(?<!\d)10\.",(t.text or ""))
                 for t in node.iter(qn("w:t")))),None)
     if last_measurement is not None:
         table=Table(last_measurement,doc._body)
