@@ -8,7 +8,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .docx_generator import generate, file_name, generate_inspection, inspection_file_name, append_subprocess_appendix
+from .docx_generator import generate, file_name, generate_inspection, inspection_file_name, append_subprocess_appendix, dimensional_evaluations
 
 SUPABASE_URL=os.environ.get("SUPABASE_URL","").rstrip("/")
 SUPABASE_KEY=os.environ.get("SUPABASE_PUBLISHABLE_KEY","")
@@ -301,48 +301,24 @@ def group_label(group:dict) -> str:
 def dimensional_pendencies(label: str, inspection: dict, products: list[dict],
                            params: list[dict], configurations: list[dict],
                            readings: list[dict]) -> list[str]:
-    """Confere por SKU e parâmetro: NA explícito, 10 medições e tolerâncias verificáveis."""
+    """Mesmo critério do laudo: NA não bloqueia, 10 medições sem tolerância são aprovadas pela média."""
     if not params:
         return []
-    pending = []
+    pending=[]
     if not inspection.get("dimensionais_finalizados"):
         pending.append(f"{label}: etapa dimensional não finalizada.")
-    inspection_id = str(inspection["id"])
-    by_config = {
-        (str(c.get("processo_item_id")), str(c.get("parametro_id"))): c
-        for c in configurations if str(c.get("inspecao_id")) == inspection_id
-    }
-    for product in products:
-        product_id = str(product.get("id") or "")
-        if not product_id:
-            continue
-        sku = (product.get("produtos") or {}).get("sku") or product_id[:8]
-        for param in params:
-            param_id = str(param["id"])
-            config = by_config.get((product_id, param_id), {})
-            if config.get("nao_aplicavel") is True:
-                continue
-            name = param.get("nome") or param_id
-            prefix = f"{label} · SKU {sku} · {name}"
-            measurements = {
-                int(r["sequencia_amostra"]): r
-                for r in readings
-                if str(r.get("inspecao_id")) == inspection_id
-                and str(r.get("processo_item_id")) == product_id
-                and str(r.get("parametro_id")) == param_id
-                and r.get("sequencia_amostra") is not None
-                and 1 <= int(r["sequencia_amostra"]) <= 10
-                and r.get("valor") is not None
-            }
-            if len(measurements) < 10:
-                pending.append(f"{prefix}: {10 - len(measurements)} medições faltantes.")
-                continue
-            if (config.get("minimo_aceitavel") is None
-                    and config.get("maximo_aceitavel") is None):
-                pending.append(f"{prefix}: tolerância não informada; conformidade indeterminada.")
-                continue
-            if any(r.get("conforme") is None for r in measurements.values()):
-                pending.append(f"{prefix}: conformidade não calculada; reavalie as medições.")
+    ident=str(inspection["id"])
+    evaluations=dimensional_evaluations(
+        products,params,
+        [c for c in configurations if str(c.get("inspecao_id"))==ident],
+        [m for m in readings if str(m.get("inspecao_id"))==ident],
+    )
+    for evaluation in evaluations:
+        if evaluation["status"]=="pendente":
+            missing=10-evaluation["quantidade"]
+            pending.append(
+                f'{label} · SKU {evaluation["sku"]} · {evaluation["parametro"]}: '
+                f'{missing} medições faltantes.')
     return pending
 
 async def process_word_status(client:httpx.AsyncClient, token:str, process_id:str)->dict:
@@ -699,11 +675,12 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
         for group in groups[1:]:
             row=by_group[group["id"]]
             gid=group["id"]
-            links,checks,check_results,params,dimensionals,tests,test_results,photo_rows=await __import__("asyncio").gather(
+            links,checks,check_results,params,configs,dimensionals,tests,test_results,photo_rows=await __import__("asyncio").gather(
                 table_rows(client,token,"grupo_inspecao_itens",{"grupo_inspecao_id":f"eq.{gid}","select":"processo_itens(*,produtos(*))"}),
                 table_rows(client,token,"it_checklist",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
                 table_rows(client,token,"inspecao_checklist_resultados",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
                 table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
+                table_rows(client,token,"inspecao_dimensional_configuracoes",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
                 table_rows(client,token,"inspecao_dimensionais",{"inspecao_id":f"eq.{row['id']}","select":"*","order":"sequencia_amostra.asc"}),
                 table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
                 table_rows(client,token,"inspecao_testes_resultados",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
@@ -729,7 +706,7 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
             append_subprocess_appendix(doc,{
                 "inspection":row,"group":group,"items":items,
                 "checklist":checks,"check_results":check_results,
-                "dim_params":params,"dim_results":dimensionals,
+                "dim_params":params,"dim_configs":configs,"dim_results":dimensionals,
                 "tests":tests,"test_results":test_results,"photos":photos,
             })
         out=BytesIO()
