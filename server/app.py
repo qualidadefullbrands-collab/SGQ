@@ -297,6 +297,54 @@ def required_text(value) -> bool:
 def group_label(group:dict) -> str:
     return "Subprocesso "+str(group.get("subprocesso_codigo") or group.get("codigo") or "?")
 
+
+def dimensional_pendencies(label: str, inspection: dict, products: list[dict],
+                           params: list[dict], configurations: list[dict],
+                           readings: list[dict]) -> list[str]:
+    """Confere por SKU e parâmetro: NA explícito, 10 medições e tolerâncias verificáveis."""
+    if not params:
+        return []
+    pending = []
+    if not inspection.get("dimensionais_finalizados"):
+        pending.append(f"{label}: etapa dimensional não finalizada.")
+    inspection_id = str(inspection["id"])
+    by_config = {
+        (str(c.get("processo_item_id")), str(c.get("parametro_id"))): c
+        for c in configurations if str(c.get("inspecao_id")) == inspection_id
+    }
+    for product in products:
+        product_id = str(product.get("id") or "")
+        if not product_id:
+            continue
+        sku = (product.get("produtos") or {}).get("sku") or product_id[:8]
+        for param in params:
+            param_id = str(param["id"])
+            config = by_config.get((product_id, param_id), {})
+            if config.get("nao_aplicavel") is True:
+                continue
+            name = param.get("nome") or param_id
+            prefix = f"{label} · SKU {sku} · {name}"
+            measurements = {
+                int(r["sequencia_amostra"]): r
+                for r in readings
+                if str(r.get("inspecao_id")) == inspection_id
+                and str(r.get("processo_item_id")) == product_id
+                and str(r.get("parametro_id")) == param_id
+                and r.get("sequencia_amostra") is not None
+                and 1 <= int(r["sequencia_amostra"]) <= 10
+                and r.get("valor") is not None
+            }
+            if len(measurements) < 10:
+                pending.append(f"{prefix}: {10 - len(measurements)} medições faltantes.")
+                continue
+            if (config.get("minimo_aceitavel") is None
+                    and config.get("maximo_aceitavel") is None):
+                pending.append(f"{prefix}: tolerância não informada; conformidade indeterminada.")
+                continue
+            if any(r.get("conforme") is None for r in measurements.values()):
+                pending.append(f"{prefix}: conformidade não calculada; reavalie as medições.")
+    return pending
+
 async def process_word_status(client:httpx.AsyncClient, token:str, process_id:str)->dict:
     """Valida integralidade no banco; status concluída isoladamente não libera Word."""
     parents=await table_rows(client,token,"processos",{
@@ -335,9 +383,9 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
     if version_id:
         checks,dims,tests=await __import__("asyncio").gather(
             table_rows(client,token,"it_checklist",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}),
-            table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}),
+            table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id,nome"}),
             table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}))
-    links,photos,check_results,dim_results,test_results=([],[],[],[],[])
+    links,photos,check_results,dim_results,test_results,dim_configs=([],[],[],[],[],[])
     if ids:
         links,photos,check_results,dim_results,test_results=await __import__("asyncio").gather(
             table_rows(client,token,"grupo_inspecao_itens",{
@@ -349,9 +397,12 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
             table_rows(client,token,"inspecao_checklist_resultados",{
                 "inspecao_id":f"in.({ids})","select":"inspecao_id,checklist_id,resultado"}),
             table_rows(client,token,"inspecao_dimensionais",{
-                "inspecao_id":f"in.({ids})","select":"inspecao_id,parametro_id,valor,conforme"}),
+                "inspecao_id":f"in.({ids})","select":"inspecao_id,processo_item_id,parametro_id,sequencia_amostra,valor,conforme"}),
             table_rows(client,token,"inspecao_testes_resultados",{
-                "inspecao_id":f"in.({ids})","select":"inspecao_id,teste_id,resultado"}))
+                "inspecao_id":f"in.({ids})","select":"inspecao_id,teste_id,resultado"}),
+            table_rows(client,token,"inspecao_dimensional_configuracoes",{
+                "inspecao_id":f"in.({ids})",
+                "select":"inspecao_id,processo_item_id,parametro_id,nao_aplicavel,minimo_aceitavel,maximo_aceitavel"}))
     completed=0
     for group in groups:
         label=group_label(group)
@@ -410,12 +461,8 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
                              if c.get("inspecao_id")==ident and required_text(c.get("resultado"))}
             if any(str(c["id"]) not in recorded_checks for c in checks):
                 pending.append(f"{label}: verificações obrigatórias incompletas.")
-            recorded_dims={str(d["parametro_id"]) for d in dim_results if
-                           d.get("inspecao_id")==ident and d.get("valor") is not None
-                           and d.get("conforme") is not None}
-            if dims and (not row.get("dimensionais_finalizados")
-                         or any(str(d["id"]) not in recorded_dims for d in dims)):
-                pending.append(f"{label}: dimensionais incompletos.")
+            pending.extend(dimensional_pendencies(
+                label, row, child_links, dims, dim_configs, dim_results))
             recorded_tests={str(t["teste_id"]) for t in test_results if
                             t.get("inspecao_id")==ident and required_text(t.get("resultado"))}
             if tests and (not row.get("testes_finalizados")

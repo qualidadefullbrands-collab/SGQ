@@ -2188,8 +2188,28 @@ app.MapPut("/api/inspecoes/{id}/dimensionais/{itemId}/{paramId}/config", async (
     {
         var token=Token(request);
         var client=factory.CreateClient("supabase");
+        var inspectionRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=status&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+        var (inspection,inspectionFound)=FirstRow(inspectionRows);
+        if(!inspectionFound)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var completed=inspection!.Value.GetProperty("status").GetString()=="concluida";
+        string? actingUser=null;
+        if(completed)
+        {
+            actingUser=await CurrentUserId(client,token);
+            var roleRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+                $"select=perfil,ativo&id=eq.{Uri.EscapeDataString(actingUser)}&limit=1");
+            var (role,hasRole)=FirstRow(roleRows);
+            if(!hasRole || role!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor")
+                || (role.Value.TryGetProperty("ativo",out var active)&&active.ValueKind==JsonValueKind.False))
+                return Results.Json(Error("A retificação de dimensionais concluídos exige gestor ou administrador."),statusCode:403);
+        }
+        var previousRows=await RestAsync(client,token,HttpMethod.Get,"inspecao_dimensional_configuracoes",
+            $"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&processo_item_id=eq.{Uri.EscapeDataString(itemId)}&parametro_id=eq.{Uri.EscapeDataString(paramId)}&limit=1");
+        var (previous,hasPrevious)=FirstRow(previousRows);
         decimal? min=null,max=null;
         var deviation=input.Desvio ?? input.DesvioMais ?? input.DesvioMenos;
+        if(deviation<0)return Results.Json(Error("O desvio dimensional não pode ser negativo."),statusCode:400);
         if(input.ValorNominal.HasValue && deviation.HasValue)
         {
             min=input.ValorNominal.Value-deviation.Value;
@@ -2221,7 +2241,44 @@ app.MapPut("/api/inspecoes/{id}/dimensionais/{itemId}/{paramId}/config", async (
                 atualizado_em=DateTimeOffset.UtcNow
             },"resolution=merge-duplicates,return=representation");
         var (row,found)=FirstRow(saved);
-        return Results.Ok(new {data=found?row:(object?)null,error=(object?)null});
+        var updatedMeasurements=new List<object>();
+        var currentMeasurements=await RestAsync(client,token,HttpMethod.Get,"inspecao_dimensionais",
+            $"select=id,valor,conforme&inspecao_id=eq.{Uri.EscapeDataString(id)}&processo_item_id=eq.{Uri.EscapeDataString(itemId)}&parametro_id=eq.{Uri.EscapeDataString(paramId)}");
+        if(currentMeasurements is {ValueKind:JsonValueKind.Array})
+        {
+            foreach(var measured in currentMeasurements.Value.EnumerateArray())
+            {
+                if(!measured.TryGetProperty("valor",out var measuredValue) || measuredValue.ValueKind!=JsonValueKind.Number)
+                    continue;
+                var value=measuredValue.GetDecimal();
+                bool? expected=input.NaoAplicavel || (min is null && max is null) ? null
+                    : (min is null || value>=min.Value) && (max is null || value<=max.Value);
+                bool? actual=measured.TryGetProperty("conforme",out var conf)
+                    ? conf.ValueKind==JsonValueKind.True ? true : conf.ValueKind==JsonValueKind.False ? false : null
+                    : null;
+                if(expected==actual)continue;
+                var measurementId=measured.GetProperty("id").GetString()!;
+                await RestAsync(client,token,HttpMethod.Patch,"inspecao_dimensionais",
+                    $"id=eq.{Uri.EscapeDataString(measurementId)}",
+                    new {conforme=expected},"return=minimal");
+                updatedMeasurements.Add(new {id=measurementId,conforme=expected});
+            }
+        }
+        if(completed)
+        {
+            await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+                new {usuario_id=actingUser,entidade="inspecoes",entidade_id=id,
+                    acao="retificacao_criterio_dimensional",
+                    dados=new {processo_item_id=itemId,parametro_id=paramId,
+                        configuracao_anterior=hasPrevious?previous!.Value.GetRawText():null,
+                        configuracao_nova=found?row!.Value.GetRawText():null,
+                        medicoes_recalculadas=updatedMeasurements.Count}},"return=minimal");
+            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+                $"id=eq.{Uri.EscapeDataString(id)}",
+                new {documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
+        }
+        return Results.Ok(new {data=found?row:(object?)null,
+            medicoesAtualizadas=updatedMeasurements,error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao salvar configuração dimensional.",e.Message),statusCode:500);}

@@ -57,3 +57,22 @@ test('all subprocesses and mandatory inspection evidence must be ready before Wo
  assert.match(app,/disabled=\{wordDownloading\|\|!wordStatus\?\.ready\}/)
  assert.match(app,/disabled=\{sharepointBusy\|\|!wordStatus\?\.ready\}/)
 })
+
+test('Word readiness respects per-SKU NA, ten readings, and undefined tolerances',()=>{
+ assert.match(docs,/def dimensional_pendencies\(/)
+ assert.match(docs,/config\.get\("nao_aplicavel"\) is True/)
+ assert.match(docs,/len\(measurements\) < 10/)
+ assert.match(docs,/tolerância não informada/)
+ assert.match(docs,/conformidade não calculada/)
+ assert.match(docs,/pending\.extend\(dimensional_pendencies\(/)
+})
+
+test('retroactive tolerance recalculation preserves measurements and audit trail',()=>{
+ assert.match(api,/var currentMeasurements=await RestAsync/)
+ assert.match(api,/medicoesAtualizadas=updatedMeasurements/)
+ assert.match(api,/acao="retificacao_criterio_dimensional"/)
+ assert.match(api,/new \{conforme=expected\}/)
+ assert.match(app,/Sem tolerância/)
+ assert.match(app,/Retificar critérios/)
+ assert.match(app,/allowDimensionalRectification/)
+})
