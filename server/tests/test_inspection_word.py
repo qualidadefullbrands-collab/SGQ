@@ -95,6 +95,28 @@ class InspectionWordTests(unittest.TestCase):
         self.assertTrue(marked(boxes.cell(2,1)))
         self.assertFalse(marked(boxes.cell(3,0)))
 
+    def test_qa_level_table_marks_lot_and_only_selected_three_columns(self):
+        for level,highlighted in [("I",{0,1,2,3}),("II",{0,4,5,6})]:
+            with self.subTest(level=level):
+                doc=Document()
+                table=doc.add_table(rows=3,cols=7)
+                for index,header in enumerate([
+                    "Tamanho do lote","Código","Amostra","Ac / Re",
+                    "Código","Amostra","Ac / Re"
+                ]):
+                    table.cell(0,index).text=header
+                table.cell(1,0).text="281 – 500 unidades"
+                table.cell(2,0).text="501 – 1.200 unidades"
+                emphasize_sampling_tables(doc,{
+                    "tamanho_lote":400,"codigo_amostragem":"F" if level=="I" else "H",
+                    "nivel_inspecao":level
+                })
+                for row in range(1,3):
+                    for col in range(7):
+                        shaded=table.cell(row,col)._tc.get_or_add_tcPr().find(
+                            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}shd") is not None
+                        self.assertEqual(shaded,row==1 and col in highlighted,(level,row,col))
+
     def test_horizontal_box_sampling_marks_only_the_selected_column(self):
         doc=Document()
         boxes=doc.add_table(rows=2,cols=9)

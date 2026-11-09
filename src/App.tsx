@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Boxes, Camera, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Edit3, RefreshCw, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, BarChart3, CloudOff, CloudUpload, X } from 'lucide-react'
+import { Bell, Boxes, Camera, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Edit3, RefreshCw, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, BarChart3, CloudOff, CloudUpload, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/supabase'
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from './lib/offline'
@@ -142,6 +142,12 @@ const emptySku = () => ({
 // Canonical FST key: 26169-A and 26169-B are different Omie projects.
 type OmieOrderItem={sku:string;descricao:string;quantidade:number}
 type OmieOrder={codigoPedido:number;numeroPedido:string;quantidadeItens:number}
+type OmieInboxOrder={
+ id:string;omie_codigo_pedido:number;numero_pedido:string;cliente:string|null;
+ fst_referencia:string|null;status:'novo'|'alterado'|'cancelado'|'pendente_dados'|'erro';
+ itens:Array<{sku:string;descricao:string;quantidade:number}>;
+ numero_itens:number;recebido_em:string;atualizado_em:string;
+}
 type OmieSkuImport={codigo:string;numeroPedido:string;itens:OmieOrderItem[]}
 type OmieSkuReviewLine={sku:string;descricao:string;quantidadePedido:number;quantidadeInformada:string}
 type OmieSkuReview={codigo:string;numeroPedido:string;itens:OmieSkuReviewLine[]}
@@ -616,6 +622,108 @@ export default function App() {
   const [counts, setCounts] = useState({ processos: 0, inspecoes: 0, amostras: 0, laudos: 0 })
   const [processes, setProcesses] = useState<ProcessRow[]>([])
   const [inspections, setInspections] = useState<InspectionRow[]>([])
+  const [omieInbox,setOmieInbox]=useState<OmieInboxOrder[]>([])
+  const [omieInboxSeen,setOmieInboxSeen]=useState<Set<string>>(new Set())
+  const [omieInboxError,setOmieInboxError]=useState('')
+  const [omieInboxLoading,setOmieInboxLoading]=useState(false)
+  const levelOfferPrompted=useRef(new Set<string>())
+  const omieUnread=omieInbox.filter(order=>order.status!=='cancelado'&&!omieInboxSeen.has(order.id)).length
+
+  async function loadOmieInbox(){
+    if(!userId||!navigator.onLine)return
+    const [orders,seen]=await Promise.all([
+      authClient.from('sgq_omie_pedidos')
+        .select('id,omie_codigo_pedido,numero_pedido,cliente,fst_referencia,status,itens,numero_itens,recebido_em,atualizado_em')
+        .order('recebido_em',{ascending:false}).limit(40),
+      authClient.from('sgq_omie_pedidos_lidos')
+        .select('pedido_id').eq('usuario_id',userId).limit(200)
+    ])
+    if(orders.error){setOmieInboxError('Não foi possível carregar os PVs do Omie.');return}
+    setOmieInbox((orders.data||[]) as OmieInboxOrder[])
+    setOmieInboxSeen(new Set((seen.data||[]).map(x=>String(x.pedido_id))))
+    setOmieInboxError('')
+  }
+  useEffect(()=>{
+    if(!userId)return
+    void loadOmieInbox()
+    const interval=window.setInterval(()=>void loadOmieInbox(),60000)
+    return()=>window.clearInterval(interval)
+  },[userId])
+
+  async function reviewOmieInboxOrder(order:OmieInboxOrder){
+    if(!canWrite)return
+    if(order.status==='cancelado')return setPopupMessage('PV cancelado no Omie. Não é permitido iniciar inspeção a partir dele.')
+    if(!order.itens?.length)return setPopupMessage('Este PV ainda não possui itens disponíveis. Confira os dados no Omie.')
+    resetNewInspection()
+    const fst=order.fst_referencia||''
+    const process=processes.find(p=>fst&&parentFstCode(p.codigo)===parentFstCode(fst))
+    setInspection(current=>({...current,
+      codigo:fst?fstCode(fst):'',
+      processoId:process?.id||'',
+      subprocessoCodigo:fst.match(/-([A-Z])$/)?.[1]||(process?nextSubprocessFor(process):'A'),
+      cliente:order.cliente||process?.cliente||''
+    }))
+    setSkuRows(order.itens.map(item=>({
+      ...emptySku(),sku:item.sku,nome:item.descricao,
+      quantidadePv:String(item.quantidade),numeroPedidoPv:order.numero_pedido,
+      fstPv:fst,omieSourcePedido:order.numero_pedido,omieSourceFst:fst,
+      omieStatus:'found',omieMessage:'Referência importada do PV '+order.numero_pedido,
+      quantidade:'',caixasRecebidas:'',caixasInspecionadas:''
+    })))
+    setTab('nova')
+    setMessage('PV '+order.numero_pedido+' pré-preenchido. Confirme o FST, selecione a IT e registre o recebimento físico antes de salvar.')
+    if(userId){
+      const result=await authClient.from('sgq_omie_pedidos_lidos').upsert({
+        pedido_id:order.id,usuario_id:userId,lido_em:new Date().toISOString()
+      },{onConflict:'pedido_id,usuario_id'})
+      if(!result.error)setOmieInboxSeen(old=>new Set([...old,order.id]))
+    }
+  }
+
+  function maybeOfferLevelII(nc:number,re:number|null|undefined,level:string|undefined){
+    if(!selectedInspectionId||detail?.status!=='em_andamento'||level!=='I'||re==null||nc<re)return
+    const marker=selectedInspectionId+':I:'+re
+    if(levelOfferPrompted.current.has(marker))return
+    levelOfferPrompted.current.add(marker)
+    if(!window.confirm('Limite de rejeição atingido ('+nc+' NC; Re '+re+'). Deseja ampliar a inspeção para o Nível II? As NC registradas serão preservadas e o plano será recalculado.'))return
+    void (async()=>{
+      const result=await apiPost<any>('/api/inspecoes/'+selectedInspectionId+'/ampliar-nivel',{})
+      if(result.error)return setError(result.error.message)
+      const plan=result.data||{}
+      setDetail((d:any)=>d?{...d,...plan}:d)
+      setMessage('Amostragem ampliada para Nível II: '+plan.tamanho_amostra+' unidades ('+plan.amostras_adicionais+' adicionais). As NC foram preservadas.')
+      void refreshLists()
+    })()
+  }
+
+  function dimensionChecklistKey(name:string):string{
+    const normalized=String(name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+      .toLowerCase().replace(/extern[oa]|intern[oa]|dimens(ao|oes)/g,'').trim()
+    if(normalized.includes('altura'))return 'altura'
+    if(normalized.includes('largura'))return 'largura'
+    if(normalized.includes('diametro')||normalized.includes('circularidade'))return 'diametro'
+    if(normalized.includes('espessura'))return 'espessura'
+    if(normalized.includes('peso'))return 'peso'
+    return ''
+  }
+  function dimensionalNcForChecklist(item:any){
+    const key=dimensionChecklistKey(item?.requisito)
+    if(!key)return {count:0,skus:[] as string[]}
+    const dimensionIds=new Set((detail?.params||[])
+      .filter((p:any)=>dimensionChecklistKey(p.nome)===key).map((p:any)=>p.id))
+    const skuMap=new Map((detail?.items||[]).map((x:any)=>[
+      x.processo_itens?.id,x.processo_itens?.produtos?.sku||'SKU não informado'
+    ]))
+    const matching=new Map<string,any>()
+    for(const row of detail?.dimResults||[]){
+      if(row.conforme!==false||!dimensionIds.has(row.parametro_id))continue
+      const cfg=getDimConfig(row.processo_item_id,row.parametro_id)
+      if(cfg?.nao_aplicavel)continue
+      matching.set(row.processo_item_id+':'+row.sequencia_amostra,row)
+    }
+    const skus=[...new Set([...matching.values()].map(x=>String(skuMap.get(x.processo_item_id)||'')))]
+    return {count:matching.size,skus}
+  }
   const [isOnline,setIsOnline]=useState(navigator.onLine)
   const [offlinePending,setOfflinePending]=useState(0)
   const [offlineConflicts,setOfflineConflicts]=useState(0)
@@ -1912,6 +2020,9 @@ export default function App() {
     const quantityError=operationalQuantityError(editingInspectionData.itens??[])
     if(quantityError){setError(quantityError);return}
     const id=selectedInspectionId
+    if(editingInspectionData.chegadaCd && editingInspectionData.dataInspecao &&
+       editingInspectionData.dataInspecao<editingInspectionData.chegadaCd)
+      return setError('A data da inspeção não pode ser anterior à chegada ao CD.')
     setEditSaving(true);setError('')
     try{
       const itens=(editingInspectionData.itens??[]).map((row:any)=>({
@@ -2227,6 +2338,10 @@ export default function App() {
       })
     }
 
+    if(inspection.chegadaCd && inspection.dataInspecao && inspection.dataInspecao<inspection.chegadaCd){
+      setInspectionBusy(false)
+      return setError('A data da inspeção não pode ser anterior à chegada ao CD.')
+    }
     const created=await apiPost<any>('/api/inspecoes/criar',{
       codigo:parentFstCode(inspection.codigo),
       processoId:inspection.processoId||null,
@@ -2429,6 +2544,8 @@ export default function App() {
     if(saved.data?.reconciliacao_nc_necessaria) {
       setMessage('Há NC em mais de uma verificação. Confirme abaixo a quantidade de unidades NC únicas usada no Ac/Re para evitar dupla contagem.')
     }
+    if(saved.data?.re_atingido)maybeOfferLevelII(Number(saved.data.total_nao_conforme||0),
+      Number(saved.data.limite_rejeicao),String(saved.data.nivel_inspecao||'I'))
     reflectCompletedEdit()
   }
 
@@ -2448,6 +2565,7 @@ export default function App() {
     }:d)
     setSampleNcDraft(String(saved.data?.total_nao_conforme ?? qty))
     reflectCompletedEdit()
+    maybeOfferLevelII(Number(saved.data?.total_nao_conforme??qty),Number(detail.limite_rejeicao??0),String(detail.nivel_inspecao||'I'))
     setMessage('Quantidade de unidades NC únicas atualizada para o cálculo Ac/Re.')
   }
 
@@ -3155,6 +3273,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </div>
         <div className="userbox">
           <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
+          {omieUnread>0 && <button type="button" className="secondary small"
+            onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}} title="Pedidos de venda novos do Omie">
+            <Bell size={15}/> {omieUnread} novo(s) PV
+          </button>}
           <button type="button" className="sgq-offline-indicator" data-pending={offlinePending>0||offlineConflicts>0} title={offlineError||'Sincronização do dispositivo'}
             onClick={()=>{if(isOnline&&userId)void syncOfflineNow(userId);else setPopupMessage(offlineConflicts?'Existem registros com conflito. Seus dados permanecem salvos neste dispositivo.':'Os registros pendentes estão salvos neste dispositivo.')}}>
             {isOnline?<CloudUpload size={15}/>:<CloudOff size={15}/>}
@@ -3252,7 +3374,40 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </section>
       )}
 
-      {tab==='inspecoes' && <InspectionsKanban
+      {tab==='inspecoes' && <>
+        <section className="workspace" aria-label="Pedidos de venda recebidos do Omie">
+          <div className="panel section-card" style={{marginBottom:16}}>
+            <div className="section-title">
+              <div><h2>Pedidos de venda · Omie</h2>
+                <span className="section-note">Pré-cadastros recebidos automaticamente. Confirme chegada e quantidades físicas antes de iniciar.</span>
+              </div>
+              <div className="row-actions">
+                {omieUnread>0 && <span className="pill">{omieUnread} novo(s)</span>}
+                <button type="button" className="secondary small" disabled={omieInboxLoading}
+                  onClick={()=>{setOmieInboxLoading(true);void loadOmieInbox().finally(()=>setOmieInboxLoading(false))}}>
+                  <RefreshCw size={15}/>{omieInboxLoading?'Consultando…':'Atualizar PVs'}
+                </button>
+              </div>
+            </div>
+            {omieInboxError && <p className="field-status bad">{omieInboxError}</p>}
+            {!omieInbox.length && <p className="section-note">Nenhum pedido importado ainda. A recepção começa quando os webhooks são ativados no Omie.</p>}
+            {omieInbox.length>0 && <div className="checklist compact-checklist">
+              {omieInbox.slice(0,20).map(order=><div className="check-row" key={order.id}>
+                <div className="check-copy">
+                  <b>PV {order.numero_pedido} · {order.cliente||'Cliente aguardando consulta'}</b>
+                  <span>{order.fst_referencia||'FST não identificado — vinculação necessária'} · {order.numero_itens} SKU(s)</span>
+                  <small>{order.status==='cancelado'?'Cancelado no Omie':order.status==='alterado'?'Pedido atualizado':'Pedido recebido'} · {new Date(order.recebido_em).toLocaleString('pt-BR')}</small>
+                </div>
+                <div className="row-actions">
+                  {!omieInboxSeen.has(order.id) && <span className="pill">Novo</span>}
+                  <button type="button" className="secondary small" disabled={!canWrite || order.status==='cancelado'}
+                    onClick={()=>void reviewOmieInboxOrder(order)}>Revisar e preparar</button>
+                </div>
+              </div>)}
+            </div>}
+          </div>
+        </section>
+        <InspectionsKanban
         focusProcessId={focusedProcessId}
         inspections={inspections}
         processes={processes}
@@ -3268,7 +3423,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         onEditProcess={id=>{const process=processes.find(p=>p.id===id);if(process)editProcessFull(process)}}
         onDeleteProcess={id=>{const process=processes.find(p=>p.id===id);if(process)void deleteProcess(process)}}
         onDeleteInspection={id=>{const item=inspections.find(i=>i.id===id);if(item)void deleteInspection(item)}}
-      />}
+      /> </>}
 
       {tab==='nova' && (
         <section className="workspace">
@@ -3351,7 +3506,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <label className="check-option"><input type="checkbox" checked={inspection.transporte.includes('Aéreo')} onChange={()=>setInspection({...inspection,transporte:toggleTransport(inspection.transporte,'Aéreo')})}/><span>Aéreo</span></label>
                   <label className="check-option"><input type="checkbox" checked={inspection.transporte.includes('Marítimo')} onChange={()=>setInspection({...inspection,transporte:toggleTransport(inspection.transporte,'Marítimo')})}/><span>Marítimo</span></label>
                 </div></div>
-                <label>Data da inspeção<input type="date" value={inspection.dataInspecao} onChange={(e)=>setInspection({...inspection,dataInspecao:e.target.value})}/></label>
+                <label>Data da inspeção<input type="date" min={inspection.chegadaCd||undefined} value={inspection.dataInspecao} onChange={(e)=>setInspection({...inspection,dataInspecao:e.target.value})}/></label>
 
                 <label>Nível de inspeção
                   <select value={inspection.inspectionLevel} onChange={(e)=>setInspection({...inspection,inspectionLevel:e.target.value})}>
@@ -3613,7 +3768,12 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <div><small>Caixas recebidas</small><strong>{inspectionBoxTotal(detail,'received')?.toLocaleString('pt-BR') ?? '—'}</strong></div>
               <div><small>Caixas a avaliar</small><strong>{inspectionBoxTotal(detail,'evaluate')?.toLocaleString('pt-BR') ?? '—'}</strong></div>
             </div>
-            {!!detail.limite_rejeicao && detail.total_nao_conforme>=detail.limite_rejeicao && <div className="alert error">Limite de rejeição atingido. Você pode encerrar ou continuar a inspeção; a decisão ficará registrada.</div>}
+            {!!detail.limite_rejeicao && detail.total_nao_conforme>=detail.limite_rejeicao && <div className="alert error">
+              Limite de rejeição atingido.
+              {detail.nivel_inspecao==='I' && detail.status==='em_andamento' && <button type="button" className="secondary small"
+                onClick={()=>{levelOfferPrompted.current.delete(selectedInspectionId+':I:'+detail.limite_rejeicao);
+                  maybeOfferLevelII(Number(detail.total_nao_conforme),Number(detail.limite_rejeicao),'I')}}>Ampliar para Nível II</button>}
+            </div>}
           </section>
 
           <section id="sec-verificacoes" className={'panel section-card inspection-stage'+(activeStage==='verificacoes' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
@@ -3624,18 +3784,24 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 const automatic=item.classificacao_sugerida
                 const dimensionalScope=isDedicatedDimensionalCheck(item)
                 const scopeQty=dimensionalScope?10:Number(detail.tamanho_amostra ?? 0)
+                const linkedDimensionalNc=dimensionalNcForChecklist(item)
+                const hasDimensionalNc=linkedDimensionalNc.count>0
                 return (
                   <div className="check-row" key={item.id}>
                     <div className="check-copy">
                       <b>{item.ordem}. {item.requisito}</b>
                       <span>{item.instrucao}</span>
                       {automatic && <small>NC: {automatic==='critico'?'Crítico':automatic==='grave'?'Grave':'Tolerável'} · definido pela IT</small>}
+                      {hasDimensionalNc && <small className="field-status bad" role="status">
+                        NC dimensional: {linkedDimensionalNc.count} medição(ões) fora da tolerância · {linkedDimensionalNc.skus.join(', ')}.
+                        Confirme as NC únicas na amostragem para não duplicar unidades.
+                      </small>}
                     </div>
                     <div className="check-actions-stack">
                       <div className="tri-buttons quick">
-                        <button type="button" className={r?.resultado==='conforme'?'selected ok':''} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)} onClick={()=>saveChecklist(item.id,'conforme')}>C</button>
-                        <button type="button" className={r?.resultado==='nao_conforme'?'selected bad':''} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)} onClick={()=>saveChecklist(item.id,'nao_conforme',Number(r?.quantidade_nc ?? 1))}>NC</button>
-                        <button type="button" className={r?.resultado==='nao_aplicavel'?'selected':''} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)} onClick={()=>saveChecklist(item.id,'nao_aplicavel')}>NA</button>
+                        <button type="button" className={r?.resultado==='conforme'&&!hasDimensionalNc?'selected ok':''} disabled={!canWrite || hasDimensionalNc || (detail.status==='concluida' && !allowDimensionalRectification)} onClick={()=>saveChecklist(item.id,'conforme')}>C</button>
+                        <button type="button" className={r?.resultado==='nao_conforme'||hasDimensionalNc?'selected bad':''} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)} onClick={()=>saveChecklist(item.id,'nao_conforme',Math.max(Number(r?.quantidade_nc ?? 0),linkedDimensionalNc.count,1))}>NC</button>
+                        <button type="button" className={r?.resultado==='nao_aplicavel'&&!hasDimensionalNc?'selected':''} disabled={!canWrite || hasDimensionalNc || (detail.status==='concluida' && !allowDimensionalRectification)} onClick={()=>saveChecklist(item.id,'nao_aplicavel')}>NA</button>
                       </div>
                       {r?.resultado==='nao_conforme' && (
                         <label className="nc-quantity">
