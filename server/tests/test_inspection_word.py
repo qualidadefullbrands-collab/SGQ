@@ -258,6 +258,12 @@ class InspectionWordTests(unittest.TestCase):
         doc=Document(io.BytesIO(generate_inspection(template,payload)))
         dimension_tables=[table for table in doc.tables if any(
             "Componente / SKU" in cell.text for row in table.rows for cell in row.cells)]
+        if len(dimension_tables)!=2:
+            print("DIMDBG",[(idx,len(t.rows),len(t.columns),
+                [str(c.text)[:45] for row in t.rows[:3] for c in row.cells[:3]])
+                for idx,t in enumerate(doc.tables) if any(
+                    "dimens" in str(c.text).lower() or "componente" in str(c.text).lower()
+                    for row in t.rows[:3] for c in row.cells)])
         self.assertEqual(len(dimension_tables),2)
         first=" ".join(cell.text for row in dimension_tables[0].rows for cell in row.cells)
         second=" ".join(cell.text for row in dimension_tables[1].rows for cell in row.cells)
@@ -322,6 +328,11 @@ class InspectionWordTests(unittest.TestCase):
         photo_headers=[cell.text for table in doc.tables
                        for row in table.rows for cell in row.cells
                        if "FOTOS DA INSPEÇÃO" in cell.text.upper()]
+        if photo_headers:
+            print("PHOTODBG",[(idx,len(t.rows),len(t.columns),
+                [str(c.text)[:50] for row in t.rows[:3] for c in row.cells[:3]])
+                for idx,t in enumerate(doc.tables) if any(
+                    "foto" in str(c.text).lower() for row in t.rows for c in row.cells)])
         self.assertEqual(photo_headers,[])
 
 if __name__=="__main__": unittest.main()
