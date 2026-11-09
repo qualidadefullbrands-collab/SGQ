@@ -838,10 +838,20 @@ def update_consolidated_page_totals(doc)->None:
                     set_font(p.add_run("Página "),8,bold=True)
                     field=OxmlElement("w:fldSimple")
                     field.set(qn("w:instr"),"PAGE")
+                    page_run=OxmlElement("w:r")
+                    page_text=OxmlElement("w:t")
+                    page_text.text="1"
+                    page_run.append(page_text)
+                    field.append(page_run)
                     p._p.append(field)
                     set_font(p.add_run(" de "),8,bold=True)
                     total=OxmlElement("w:fldSimple")
                     total.set(qn("w:instr"),"NUMPAGES")
+                    total_run=OxmlElement("w:r")
+                    total_text=OxmlElement("w:t")
+                    total_text.text="1"
+                    total_run.append(total_text)
+                    total.append(total_run)
                     p._p.append(total)
     settings=doc.settings._element
     if settings.find(qn("w:updateFields")) is None:
