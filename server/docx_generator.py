@@ -1,7 +1,9 @@
 from __future__ import annotations
 from io import BytesIO
+from copy import deepcopy
 from typing import Any
 from docx import Document
+from docx.table import Table
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
@@ -270,6 +272,15 @@ def fst_code(value):
     raw=re.sub(r"\s+","",raw)
     return raw if raw.startswith("FST") else "FST"+raw
 
+def subprocess_fst_code(process:dict,group:dict)->str:
+    """Identificação operacional sempre vinculada ao subprocesso, nunca ao FST pai isolado."""
+    parent=fst_code((process or {}).get("codigo"))
+    suffix=str((group or {}).get("subprocesso_codigo") or "").strip().lstrip("-")
+    if not suffix or parent==EMPTY:return parent
+    if parent.upper().endswith("-"+suffix.upper()):return parent
+    return parent.rsplit("-",1)[0]+"-"+suffix if "-" in parent else parent+"-"+suffix
+
+
 def inspection_cell(cell,value,size=8,center=False,whole=False):
     """Rendered inspection data is navy and bold; template labels keep their own style."""
     text=whole_number(value) if whole else filled(value)
@@ -448,31 +459,160 @@ def dimensional_evaluations(items:list[dict], params:list[dict], configurations:
     return results
 
 
-def add_dimensional_mean_summary(doc, items:list[dict], params:list[dict],
-                                 configs:list[dict], readings:list[dict]) -> None:
-    evaluations=dimensional_evaluations(items,params,configs,readings)
-    if not evaluations:
-        return
-    doc.add_paragraph("RESUMO DIMENSIONAL — CRITÉRIOS E MÉDIAS")
-    table=doc.add_table(rows=1,cols=5)
-    for cell,val in zip(table.rows[0].cells,["SKU","Parâmetro","Medições","Média","Avaliação"]):
-        set_cell(cell,val,7,bold=True)
-    labels={
-        "aprovado_media":"APROVADO PELA MÉDIA (sem tolerância aprovada)",
-        "aprovado":"APROVADO (dentro dos limites)",
-        "reprovado":"REPROVADO (fora dos limites)",
-        "nao_aplicavel":"NÃO APLICÁVEL",
-        "pendente":"PENDENTE (medições insuficientes)",
-    }
-    for row in evaluations:
-        average=format_dimensional_mean(row["media"])
-        unit=row["unidade"]
-        add_row(table,[
-            row["sku"],row["parametro"],
-            "NA" if row["status"]=="nao_aplicavel" else f'{row["quantidade"]}/10',
-            "—" if row["status"]=="nao_aplicavel" else f"{average} {unit}".strip(),
-            labels[row["status"]],
-        ],7)
+def canonical_dimension_label(value:Any)->str:
+    normalized=unicodedata.normalize("NFKD",str(value or ""))
+    return re.sub(r"[^a-z0-9]+","",normalized.encode("ascii","ignore").decode().lower())
+
+
+def fill_dimensional_table_for_item(table, item:dict, params:list[dict],
+                                    configs:list[dict], readings:list[dict])->int:
+    """Usa o quadro oficial da IT para um único SKU; remove somente parâmetros sem análise."""
+    item_id=str(item.get("id") or "")
+    product=item.get("produto") or {}
+    sku=str(product.get("sku") or item.get("codigo_cliente") or item_id)
+    description=str(product.get("nome") or "").strip()
+    param_by_name={canonical_dimension_label(p.get("nome")):p for p in params}
+    config_by_id={str(c.get("parametro_id")):c for c in configs
+                  if str(c.get("processo_item_id"))==item_id}
+    measures={}
+    for reading in readings:
+        if str(reading.get("processo_item_id"))!=item_id:continue
+        measures.setdefault(str(reading.get("parametro_id")),[]).append(reading)
+    for values in measures.values():
+        values.sort(key=lambda row:int(row.get("sequencia_amostra") or 0))
+    kept=0
+    index=0
+    while index<len(table.rows):
+        row=table.rows[index]
+        label=canonical_dimension_label(row.cells[0].text) if row.cells else ""
+        if label=="componentesku":
+            if len(row.cells)>=2:
+                inspection_cell(row.cells[1],sku+(" — "+description if description else ""),8)
+            index+=1
+            continue
+        param=param_by_name.get(label)
+        # Parâmetros da ficha usam um cabeçalho e duas linhas com as dez amostras.
+        is_measurement_heading=(len(row.cells)>=4 and any(
+            "equipamento" in canonical_dimension_label(cell.text)
+            for cell in row.cells[1:]))
+        if not param and not is_measurement_heading:
+            index+=1
+            continue
+        param_id=str(param.get("id")) if param else ""
+        cfg=config_by_id.get(param_id,{})
+        values=measures.get(param_id,[])
+        active=(param is not None and cfg.get("nao_aplicavel") is not True
+                and any(v.get("valor") is not None for v in values))
+        if not active:
+            # Remover cabeçalho + amostras (não apenas limpar o valor):
+            # sem esse corte, a folha fica com dezenas de linhas vazias.
+            for original in list(table.rows[index:min(index+3,len(table.rows))]):
+                original._tr.getparent().remove(original._tr)
+            continue
+        if len(row.cells)>1:
+            label_text=row.cells[1].text.split(":")[0].strip()
+            labeled_cell(row.cells[1],label_text,cfg.get("equipamento"),7.5)
+        if len(row.cells)>2:
+            label_text=row.cells[2].text.split(":")[0].strip()
+            labeled_cell(row.cells[2],label_text,cfg.get("codigo_equipamento"),7.5)
+        if len(row.cells)>3:
+            label_text=row.cells[3].text.split(":")[0].strip()
+            labeled_cell(row.cells[3],label_text,cfg.get("especificacao_desvio") or "",7.5)
+        for sample_row in table.rows[index+1:min(index+3,len(table.rows))]:
+            for cell in sample_row.cells:
+                found=re.match(r"\s*(\d+)\.",cell.text)
+                if not found:continue
+                seq=int(found.group(1))
+                matched=next((v for v in values
+                              if int(v.get("sequencia_amostra") or 0)==seq),None)
+                if matched is None:continue
+                unit=matched.get("unidade") or cfg.get("unidade") or param.get("unidade") or ""
+                labeled_cell(cell,str(seq),f'{filled(matched.get("valor"))} {unit}'.strip(),7.5)
+        kept+=1
+        index+=3
+    return kept
+
+
+def apply_dimensional_result(table,item:dict,params:list[dict],
+                             configs:list[dict],readings:list[dict])->None:
+    evaluation=dimensional_evaluations([item],params,configs,readings)
+    included=[row for row in evaluation
+              if row["status"]!="nao_aplicavel" and row["quantidade"]>0]
+    if not included:decision=""
+    elif any(row["status"]=="reprovado" for row in included):decision="REPROVADO"
+    elif all(row["status"] in ("aprovado","aprovado_media") for row in included):
+        decision="APROVADO"
+    else:decision=""
+    for row in table.rows:
+        if row.cells and canonical_dimension_label(row.cells[0].text)=="resultadodimensional":
+            for cell in row.cells[1:]:
+                choice_cell(cell,decision,8)
+
+
+def render_dimension_tables_by_sku(doc,items:list[dict],params:list[dict],
+                                   configs:list[dict],readings:list[dict])->None:
+    """Repete os blocos oficiais da IT para cada SKU medido, sem linhas/tabelas NA.
+    No IT001, cabeçalho, componente, parâmetros e resultado são tabelas separadas.
+    """
+    body=doc._element.body
+    nodes=list(body)
+    def node_text(element):
+        return canonical_dimension_label(" ".join(t.text or "" for t in element.iter(qn("w:t"))))
+    start=next((i for i,node in enumerate(nodes)
+                if "analisesdimensionais" in node_text(node)),None)
+    if start is None:return
+    end=next((i for i in range(start,len(nodes))
+              if "resultadodimensional" in node_text(nodes[i])),None)
+    if end is None:return
+    source_nodes=nodes[start:end+1]
+    original_first=source_nodes[0]
+    for item in items:
+        item_id=str(item.get("id") or "")
+        if not item_id:continue
+        valid_params={str(p.get("id")) for p in params}
+        active_readings=[r for r in readings if str(r.get("processo_item_id"))==item_id
+                         and str(r.get("parametro_id")) in valid_params
+                         and r.get("valor") is not None
+                         and not any(str(c.get("processo_item_id"))==item_id
+                                     and str(c.get("parametro_id"))==str(r.get("parametro_id"))
+                                     and c.get("nao_aplicavel") is True for c in configs)]
+        if not active_readings:continue
+        sku=str((item.get("produto") or {}).get("sku") or item.get("codigo_cliente") or item_id)
+        description=str((item.get("produto") or {}).get("nome") or "").strip()
+        clones=[deepcopy(node) for node in source_nodes]
+        for cloned in clones:
+            if cloned.tag!=qn("w:tbl"):continue
+            table=Table(cloned,doc._body)
+            if not table.rows:continue
+            first_label=canonical_dimension_label(table.rows[0].cells[0].text)
+            if first_label=="componentesku":
+                if len(table.rows[0].cells)>=2:
+                    inspection_cell(table.rows[0].cells[1],
+                                    sku+(" — "+description if description else ""),8)
+            elif first_label=="resultadodimensional":
+                apply_dimensional_result(table,item,params,configs,readings)
+            elif "analisesdimensionais" in node_text(cloned):
+                # Preserve o cabeçalho da ficha para cada componente.
+                pass
+            else:
+                is_parameter=any(
+                    canonical_dimension_label(row.cells[0].text) in
+                    {canonical_dimension_label(p.get("nome")) for p in params}
+                    or (len(row.cells)>=4 and any(
+                        "equipamento" in canonical_dimension_label(c.text)
+                        for c in row.cells[1:]))
+                    for row in table.rows)
+                if is_parameter:
+                    # O parâmetro pode ocupar um quadro completo de três linhas.
+                    # Se não houver medições, retirar o quadro inteiro.
+                    if fill_dimensional_table_for_item(table,item,params,configs,readings)==0:
+                        cloned.getparent().remove(cloned) if cloned.getparent() is not None else None
+                        clones[clones.index(cloned)]=None
+        for cloned in clones:
+            if cloned is not None:original_first.addprevious(cloned)
+    for original in source_nodes:
+        if original.getparent() is not None:
+            original.getparent().remove(original)
 
 
 def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
@@ -528,7 +668,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
         # In SGQ the customer's product code is the registered SKU.
         "código do cliente": "\n".join(all_skus),
         "cliente": process.get("cliente") or "",
-        "processo fst": fst_code(process.get("codigo")),
+        "processo fst": subprocess_fst_code(process,group),
         "nota fiscal": group.get("nota_fiscal") or process.get("nota_fiscal") or "",
         "lote": first_item.get("lote") or "",
         "material": first_item.get("material") or "",
@@ -593,58 +733,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                         if result==selected: inspection_cell(row.cells[column],"X",9,center=True)
                         else: set_cell(row.cells[column],"",9,center=True)
 
-    config_key={(str(x.get("processo_item_id")),str(x.get("parametro_id"))):x for x in dim_configs}
-    result_key={}
-    for x in dim_results:
-        result_key.setdefault((str(x.get("processo_item_id")),str(x.get("parametro_id"))),[]).append(x)
-    for vals in result_key.values():
-        vals.sort(key=lambda x:int(x.get("sequencia_amostra") or 0))
-
-    first_item_id=str(first_item.get("id") or "")
-    params_by_name={_norm(x.get("nome")):x for x in dim_params}
-    for table in doc.tables:
-        for ridx,row in enumerate(table.rows):
-            if len(row.cells)<4: continue
-            pname=_norm(row.cells[0].text)
-            param=params_by_name.get(pname)
-            if not param: continue
-            pid=str(param.get("id"))
-            cfg=config_key.get((first_item_id,pid),{})
-            vals=result_key.get((first_item_id,pid),[])
-            if len(row.cells)>1:
-                base=row.cells[1].text.split(":")[0].strip()
-                labeled_cell(row.cells[1],base,cfg.get("equipamento"),7.5)
-            if len(row.cells)>2:
-                base=row.cells[2].text.split(":")[0].strip()
-                labeled_cell(row.cells[2],base,cfg.get("codigo_equipamento"),7.5)
-            if len(row.cells)>3:
-                base=row.cells[3].text.split(":")[0].strip()
-                spec=cfg.get("especificacao_desvio") or ""
-                labeled_cell(row.cells[3],base,spec,7.5)
-            for rr in table.rows[ridx+1:min(ridx+3,len(table.rows))]:
-                for cell in rr.cells:
-                    m=re.match(r"\s*(\d+)\.",cell.text)
-                    if not m: continue
-                    seq=int(m.group(1))
-                    hit=next((x for x in vals if int(x.get("sequencia_amostra") or 0)==seq),None)
-                    if hit:
-                        value=hit.get("valor")
-                        unit=hit.get("unidade") or cfg.get("unidade") or param.get("unidade") or ""
-                        labeled_cell(cell,str(seq),f"{filled(value)} {unit}".strip(),7.5)
-
-    dimensional_summary=dimensional_evaluations(items,dim_params,dim_configs,dim_results)
-    dim_choice=""
-    if dimensional_summary:
-        evaluated=[r for r in dimensional_summary if r["status"]!="nao_aplicavel"]
-        if any(r["status"]=="reprovado" for r in evaluated):
-            dim_choice="REPROVADO"
-        elif all(r["status"] in ("aprovado","aprovado_media") for r in evaluated):
-            dim_choice="APROVADO"
-    for table in doc.tables:
-        for row in table.rows:
-            if row.cells and _norm(row.cells[0].text)=="resultado dimensional":
-                for cell in row.cells[1:]:
-                    choice_cell(cell,dim_choice,8)
+    render_dimension_tables_by_sku(doc,items,dim_params,dim_configs,dim_results)
 
     final_result=str(inspection.get("resultado") or "").lower()
     final_choice="APROVADO" if final_result=="aprovado" else "REPROVADO" if final_result=="reprovado" else ""
@@ -666,34 +755,153 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
     emphasize_sampling_tables(doc,inspection)
 
     photo_table=None
-    for table in doc.tables:
-        if any("FOTO" in (c.text or "").upper() for row in table.rows for c in row.cells):
-            if len(table.rows)>=2 and len(table.columns)>=2: photo_table=table
+    photo_title=None
+    tables=list(doc.tables)
+    for index,table in enumerate(tables):
+        if any("FOTOS" in (cell.text or "").upper()
+               for row in table.rows for cell in row.cells):
+            photo_title=table
+            if len(table.columns)>=2:
+                photo_table=table
+            else:
+                # Modelo oficial: cabeçalho 1x1 seguido da grade de fotos 3 colunas.
+                photo_table=next((candidate for candidate in tables[index+1:]
+                    if len(candidate.columns)==3 and any(
+                        re.match(r"^Foto\s*\d+",(cell.text or "").strip(),re.I)
+                        for row in candidate.rows for cell in row.cells)),None)
+            break
+    if not photos:
+        removed=set()
+        for table in (photo_table,photo_title):
+            if table is None or id(table._tbl) in removed:continue
+            removed.add(id(table._tbl))
+            node=table._tbl
+            previous=node.getprevious()
+            node.getparent().remove(node)
+            if (previous is not None and previous.tag==qn("w:p")
+                and not "".join(t.text or "" for t in previous.iter(qn("w:t"))).strip()
+                and any(el.get(qn("w:type"))=="page" for el in previous.iter(qn("w:br")))):
+                previous.getparent().remove(previous)
     if photos:
         if photo_table is None:
-            doc.add_paragraph("REGISTRO FOTOGRÁFICO")
+            doc.add_paragraph("FOTOS DA INSPEÇÃO")
             photo_table=doc.add_table(rows=0,cols=3)
+            first_photo_row=0
         elif len(photo_table.columns)!=3:
-            # Do not squeeze a third photograph into an official two-column cell.
+            # A tabela original de duas colunas não pode manter espaços vazios adicionais.
+            original=photo_table._tbl
             three=doc.add_table(rows=0,cols=3)
-            photo_table._tbl.addnext(three._tbl)
+            original.addnext(three._tbl)
+            original.getparent().remove(original)
             photo_table=three
-        needed=(len(photos)+2)//3
-        while len(photo_table.rows)<needed: photo_table.add_row()
+            first_photo_row=0
+        else:
+            header=" ".join(c.text for c in photo_table.rows[0].cells).upper()
+            first_photo_row=1 if "FOTOS" in header else 0
+        needed=first_photo_row+(len(photos)+2)//3
+        while len(photo_table.rows)<needed:photo_table.add_row()
+        # Remover as linhas de fotografias do formulário que não foram utilizadas.
+        while len(photo_table.rows)>needed:
+            extra=photo_table.rows[-1]._tr
+            extra.getparent().remove(extra)
         for idx,item in enumerate(photos):
             data=photo_bytes(item.get("bytes"))
-            if not data: raise ValueError(f"Foto {idx+1} não disponível para compor o laudo.")
-            cell=photo_table.cell(idx//3,idx%3)
+            if not data:raise ValueError(f"Foto {idx+1} não disponível para compor o laudo.")
+            cell=photo_table.cell(first_photo_row+idx//3,idx%3)
             add_photo(cell,data,item.get("caption") or f"Foto {idx+1}",
                       width=2.17,max_height=2.5)
-        for idx in range(len(photos),len(photo_table.rows)*3):
-            set_cell(photo_table.cell(idx//3,idx%3),"")
-        for row in photo_table.rows:
+        for idx in range(len(photos),(needed-first_photo_row)*3):
+            set_cell(photo_table.cell(first_photo_row+idx//3,idx%3),"")
+        for row in photo_table.rows[first_photo_row:]:
             trPr=row._tr.get_or_add_trPr()
-            if trPr.find(qn("w:cantSplit")) is None: trPr.append(OxmlElement("w:cantSplit"))
+            if trPr.find(qn("w:cantSplit")) is None:
+                trPr.append(OxmlElement("w:cantSplit"))
 
-    add_dimensional_mean_summary(doc,items,dim_params,dim_configs,dim_results)
     out=BytesIO(); doc.save(out); return out.getvalue()
+
+def update_consolidated_page_totals(doc)->None:
+    """Substitui 'Página N de 9' do modelo por PAGE/NUMPAGES no laudo combinado."""
+    for section in doc.sections:
+        footer=section.footer
+        handled=set()
+        for table in footer.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    identifier=id(cell._tc)
+                    if identifier in handled:continue
+                    handled.add(identifier)
+                    content=str(cell.text or "")
+                    if not re.search(r"página",content,re.I) or not re.search(r"de\s+\d+\b",content,re.I):
+                        continue
+                    p=cell.paragraphs[0]
+                    clear_paragraph(p)
+                    set_font(p.add_run("Página "),8,bold=True)
+                    field=OxmlElement("w:fldSimple")
+                    field.set(qn("w:instr"),"PAGE")
+                    page_run=OxmlElement("w:r")
+                    page_text=OxmlElement("w:t")
+                    page_text.text="1"
+                    page_run.append(page_text)
+                    field.append(page_run)
+                    p._p.append(field)
+                    set_font(p.add_run(" de "),8,bold=True)
+                    total=OxmlElement("w:fldSimple")
+                    total.set(qn("w:instr"),"NUMPAGES")
+                    total_run=OxmlElement("w:r")
+                    total_text=OxmlElement("w:t")
+                    total_text.text="1"
+                    total_run.append(total_text)
+                    total.append(total_run)
+                    p._p.append(total)
+    settings=doc.settings._element
+    if settings.find(qn("w:updateFields")) is None:
+        update=OxmlElement("w:updateFields")
+        update.set(qn("w:val"),"true")
+        settings.append(update)
+
+
+def append_filled_inspection_form(doc,filled_docx:bytes)->None:
+    """Adiciona o registro oficial preenchido (sem repetir as páginas da instrução).
+    Preserva tabelas, conteúdo e imagens do próprio subprocesso.
+    """
+    child=Document(BytesIO(filled_docx))
+    elements=list(child._element.body)
+    start=None
+    for index,element in enumerate(elements):
+        if element.tag!=qn("w:p"):continue
+        line=" ".join((t.text or "") for t in element.iter(qn("w:t"))).strip().upper()
+        if line=="REGISTRO DE INSPEÇÃO" or line.startswith("REGISTRO DE INSPEÇÃO "):
+            start=index
+            break
+    if start is None:
+        raise ValueError("O modelo da IT não contém o marco REGISTRO DE INSPEÇÃO; "
+                         "não é seguro substituí-lo por tabelas genéricas.")
+    # Evita páginas vazias criadas por parágrafos ou quebras pendentes antes da nova ficha.
+    body=doc._element.body
+    while len(body)>1:
+        node=body[-2]  # sectPr é o último elemento.
+        if node.tag!=qn("w:p"):break
+        if any((t.text or "").strip() for t in node.iter(qn("w:t"))):break
+        if any(True for _ in node.iter(qn("w:drawing"))):break
+        body.remove(node)
+    doc.add_page_break()
+    image_id=max((int(x.get("id") or 0) for x in body.iter(qn("wp:docPr"))),default=0)
+    for original in elements[start:]:
+        if original.tag==qn("w:sectPr"):continue
+        cloned=deepcopy(original)
+        # Ids de imagens precisam ser exclusivos em todo o documento consolidado.
+        for property_node in cloned.iter(qn("wp:docPr")):
+            image_id+=1
+            property_node.set("id",str(image_id))
+        for blip in cloned.iter(qn("a:blip")):
+            image_rel=blip.get(qn("r:embed"))
+            if not image_rel:continue
+            image_part=child.part.related_parts.get(image_rel)
+            if image_part is None:raise ValueError("Imagem sem vínculo no formulário preenchido.")
+            new_rel,_=doc.part.get_or_add_image(BytesIO(image_part.blob))
+            blip.set(qn("r:embed"),new_rel)
+        body.insert(len(body)-1,cloned)
+
 
 def append_subprocess_appendix(doc, payload:dict) -> None:
     """Anexo individual; não replica o modelo da IT do FST principal."""
@@ -751,7 +959,6 @@ def append_subprocess_appendix(doc, payload:dict) -> None:
                 item_names.get(str(row.get("processo_item_id"))) or "",
                 row.get("sequencia_amostra") or "",row.get("valor") or "",
                 "C" if row.get("conforme") is True else "NC" if row.get("conforme") is False else "—"],7)
-    add_dimensional_mean_summary(doc,items,params,configs,dimensionals)
     if tests:
         doc.add_paragraph("Testes especiais")
         by_id={str(r.get("teste_id")):r for r in test_results}
