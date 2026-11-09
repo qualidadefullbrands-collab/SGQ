@@ -3169,7 +3169,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         aria-modal="true" aria-label="Gerando Word" aria-live="polite">
         <div className="sgq-dialog sgq-word-loading-content">
           <div className="sgq-word-spinner" aria-hidden="true"/>
-          <h2>Gerando Word…</h2>
+          <h2>Gerando laudo…</h2>
           <p>Preparando arquivo para download</p>
         </div>
       </div>}
@@ -3516,14 +3516,14 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 if(window.confirm('Editar inspeção concluída? Será possível corrigir medições, critérios, testes, verificações e resultado, com registro no histórico.'))setAllowDimensionalRectification(true)
               }}><Edit3 size={16}/>{allowDimensionalRectification?'Encerrar edição':'Editar inspeção concluída'}</button>}
 
-              {detail.status==='concluida' && <button className="secondary" type="button" disabled={wordDownloading} title={wordStatus?.ready?'Baixar o laudo Word do FST':'Ver o motivo pelo qual o Word ainda não está disponível'} onClick={()=>void downloadInspectionWord()}><FileDown size={16}/>{wordDownloading?'Gerando Word…':'Word do FST'}</button>}
+              {detail.status==='concluida' && <button className="secondary" type="button" disabled={wordDownloading} title={wordStatus?.ready?'Baixar o laudo Word do FST':'Ver o motivo pelo qual o Word ainda não está disponível'} onClick={()=>void downloadInspectionWord()}><FileDown size={16}/>{wordDownloading?'Gerando laudo…':'Gerar Laudo'}</button>}
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
           </div>
 
           {detail.status==='concluida' && !wordStatus?.ready && <div id="sgq-word-pendencias" className="alert" role="status">
             <strong>{wordStatus?.error?'Falha ao consultar o laudo':wordStatus
-              ?'O Word do FST ainda possui '+wordStatus.pending.length+' pendência(s)':'Verificando a disponibilidade do Word…'}</strong>
+              ?'O laudo ainda possui '+wordStatus.pending.length+' pendência(s)':'Verificando a disponibilidade do Word…'}</strong>
             {wordStatus?.error && <p>{wordStatus.error} A validação falhou; isso não significa que os dados da inspeção estejam incompletos.</p>}
             {!!wordStatus?.pending.length && <ul>
               {wordStatus.pending.map((reason,index)=><li key={index}>{reason}</li>)}
@@ -3975,7 +3975,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <div className="actions">
                 <button className={Object.values(retentionRows).some(x=>x.retain)?'primary':'secondary'} type="button" onClick={saveRetention}><Warehouse size={16}/>{Object.values(retentionRows).some(x=>x.retain)?'Enviar amostras ao estoque':'Registrar sem retenção (opcional)'}</button>
                 <button className="secondary" type="button" onClick={()=>setTab('inspecoes')}>Pular retenção e voltar aos processos</button>
-                <button className="secondary" type="button" disabled={wordDownloading} onClick={()=>void downloadInspectionWord()}><FileDown size={16}/> Gerar Word do FST</button>
+                <button className="secondary" type="button" disabled={wordDownloading} onClick={()=>void downloadInspectionWord()}><FileDown size={16}/> Gerar Laudo</button>
               </div>
             </section>
           )}
