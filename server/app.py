@@ -8,7 +8,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from .docx_generator import generate, file_name, generate_inspection, inspection_file_name, append_subprocess_appendix, dimensional_evaluations
+from .docx_generator import generate, file_name, generate_inspection, inspection_file_name, append_filled_inspection_form, dimensional_evaluations
 
 SUPABASE_URL=os.environ.get("SUPABASE_URL","").rstrip("/")
 SUPABASE_KEY=os.environ.get("SUPABASE_PUBLISHABLE_KEY","")
@@ -667,50 +667,15 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
         if not isinstance(primary,Response) or not getattr(primary,"body",None):
             raise HTTPException(status_code=502,detail="Falha ao montar o documento principal.")
         doc=Document(BytesIO(primary.body))
-        # Etiqueta de identificação antes do formulário preenchido do primeiro subprocesso.
-        label=doc.add_paragraph()
-        label.add_run(f"FST {str(parent.get('codigo') or '').removeprefix('FST')} — LAUDO CONSOLIDADO").bold=True
-        label.add_run(f" | Subprocesso {groups[0].get('subprocesso_codigo') or groups[0].get('codigo')}")
-        doc._element.body.remove(label._p)
-        doc._element.body.insert(0,label._p)
-
+        # Cada subprocesso usa a própria cópia preenchida do REGISTRO DE INSPEÇÃO
+        # existente na IT oficial. A introdução normativa aparece apenas uma vez.
         for group in groups[1:]:
-            row=by_group[group["id"]]
-            gid=group["id"]
-            links,checks,check_results,params,configs,dimensionals,tests,test_results,photo_rows=await __import__("asyncio").gather(
-                table_rows(client,token,"grupo_inspecao_itens",{"grupo_inspecao_id":f"eq.{gid}","select":"processo_itens(*,produtos(*))"}),
-                table_rows(client,token,"it_checklist",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
-                table_rows(client,token,"inspecao_checklist_resultados",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
-                table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
-                table_rows(client,token,"inspecao_dimensional_configuracoes",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
-                table_rows(client,token,"inspecao_dimensionais",{"inspecao_id":f"eq.{row['id']}","select":"*","order":"sequencia_amostra.asc"}),
-                table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{row['it_versao_id']}","ativo":"eq.true","select":"*","order":"ordem.asc"}),
-                table_rows(client,token,"inspecao_testes_resultados",{"inspecao_id":f"eq.{row['id']}","select":"*"}),
-                table_rows(client,token,"inspecao_fotos",{"inspecao_id":f"eq.{row['id']}","select":"*","excluido_em":"is.null","order":"criado_em.asc"}),
-            )
-            items=[]
-            for link in links:
-                item=dict(link.get("processo_itens") or {})
-                if item:
-                    item["produto"]=item.pop("produtos",{}) or {}
-                    items.append(item)
-            photos=[]
-            seen=set()
-            for photo in photo_rows:
-                path=photo.get("storage_path")
-                if not path or path in seen:continue
-                seen.add(path)
-                try:
-                    binary=await storage_download(client,token,"inspecao-fotos",path)
-                except HTTPException as exc:
-                    raise HTTPException(status_code=503,detail=f"Foto indisponível no subprocesso {group.get('subprocesso_codigo') or group.get('codigo')}.") from exc
-                photos.append({"bytes":binary,"caption":photo.get("legenda") or ""})
-            append_subprocess_appendix(doc,{
-                "inspection":row,"group":group,"items":items,
-                "checklist":checks,"check_results":check_results,
-                "dim_params":params,"dim_configs":configs,"dim_results":dimensionals,
-                "tests":tests,"test_results":test_results,"photos":photos,
-            })
+            child=by_group[group["id"]]
+            filled=await generate_inspection_document(child["id"],authorization=authorization)
+            if not isinstance(filled,Response) or not getattr(filled,"body",None):
+                raise HTTPException(status_code=502,detail=
+                    f"Não foi possível preencher a ficha oficial do subprocesso {group.get('subprocesso_codigo') or group.get('codigo')}.")
+            append_filled_inspection_form(doc,filled.body)
         out=BytesIO()
         doc.save(out)
         filename=f"FST{str(parent.get('codigo') or '').removeprefix('FST')} - Laudo consolidado.docx"
