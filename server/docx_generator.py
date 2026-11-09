@@ -551,34 +551,68 @@ def apply_dimensional_result(table,item:dict,params:list[dict],
 
 def render_dimension_tables_by_sku(doc,items:list[dict],params:list[dict],
                                    configs:list[dict],readings:list[dict])->None:
-    """Repete a tabela dimensional oficial para cada SKU efetivamente medido."""
-    candidates=[t for t in doc.tables if any(
-        "analisesdimensionais" in canonical_dimension_label(c.text)
-        for row in t.rows[:2] for c in row.cells)]
-    if not candidates:return
-    template=candidates[0]
-    result_table=next((t for t in doc.tables if any(
-        row.cells and canonical_dimension_label(row.cells[0].text)=="resultadodimensional"
-        for row in t.rows)),None)
-    inserted=0
+    """Repete os blocos oficiais da IT para cada SKU medido, sem linhas/tabelas NA.
+    No IT001, cabeçalho, componente, parâmetros e resultado são tabelas separadas.
+    """
+    body=doc._element.body
+    nodes=list(body)
+    def node_text(element):
+        return canonical_dimension_label(" ".join(t.text or "" for t in element.iter(qn("w:t"))))
+    start=next((i for i,node in enumerate(nodes)
+                if "analisesdimensionais" in node_text(node)),None)
+    if start is None:return
+    end=next((i for i in range(start,len(nodes))
+              if "resultadodimensional" in node_text(nodes[i])),None)
+    if end is None:return
+    source_nodes=nodes[start:end+1]
+    original_first=source_nodes[0]
     for item in items:
-        if not item.get("id"):continue
-        new_xml=deepcopy(template._tbl)
-        template._tbl.addprevious(new_xml)
-        new_table=Table(new_xml,template._parent)
-        count=fill_dimensional_table_for_item(new_table,item,params,configs,readings)
-        if count==0:
-            new_xml.getparent().remove(new_xml)
-            continue
-        inserted+=1
-        if result_table is not None:
-            result_xml=deepcopy(result_table._tbl)
-            template._tbl.addprevious(result_xml)
-            apply_dimensional_result(Table(result_xml,result_table._parent),
-                                     item,params,configs,readings)
-    template._tbl.getparent().remove(template._tbl)
-    if result_table is not None:
-        result_table._tbl.getparent().remove(result_table._tbl)
+        item_id=str(item.get("id") or "")
+        if not item_id:continue
+        valid_params={str(p.get("id")) for p in params}
+        active_readings=[r for r in readings if str(r.get("processo_item_id"))==item_id
+                         and str(r.get("parametro_id")) in valid_params
+                         and r.get("valor") is not None
+                         and not any(str(c.get("processo_item_id"))==item_id
+                                     and str(c.get("parametro_id"))==str(r.get("parametro_id"))
+                                     and c.get("nao_aplicavel") is True for c in configs)]
+        if not active_readings:continue
+        sku=str((item.get("produto") or {}).get("sku") or item.get("codigo_cliente") or item_id)
+        description=str((item.get("produto") or {}).get("nome") or "").strip()
+        clones=[deepcopy(node) for node in source_nodes]
+        for cloned in clones:
+            if cloned.tag!=qn("w:tbl"):continue
+            table=Table(cloned,doc._body)
+            if not table.rows:continue
+            first_label=canonical_dimension_label(table.rows[0].cells[0].text)
+            if first_label=="componentesku":
+                if len(table.rows[0].cells)>=2:
+                    inspection_cell(table.rows[0].cells[1],
+                                    sku+(" — "+description if description else ""),8)
+            elif first_label=="resultadodimensional":
+                apply_dimensional_result(table,item,params,configs,readings)
+            elif "analisesdimensionais" in node_text(cloned):
+                # Preserve o cabeçalho da ficha para cada componente.
+                pass
+            else:
+                is_parameter=any(
+                    canonical_dimension_label(row.cells[0].text) in
+                    {canonical_dimension_label(p.get("nome")) for p in params}
+                    or (len(row.cells)>=4 and any(
+                        "equipamento" in canonical_dimension_label(c.text)
+                        for c in row.cells[1:]))
+                    for row in table.rows)
+                if is_parameter:
+                    # O parâmetro pode ocupar um quadro completo de três linhas.
+                    # Se não houver medições, retirar o quadro inteiro.
+                    if fill_dimensional_table_for_item(table,item,params,configs,readings)==0:
+                        cloned.getparent().remove(cloned) if cloned.getparent() is not None else None
+                        clones[clones.index(cloned)]=None
+        for cloned in clones:
+            if cloned is not None:original_first.addprevious(cloned)
+    for original in source_nodes:
+        if original.getparent() is not None:
+            original.getparent().remove(original)
 
 
 def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
