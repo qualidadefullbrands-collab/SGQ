@@ -819,6 +819,37 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
 
     out=BytesIO(); doc.save(out); return out.getvalue()
 
+def update_consolidated_page_totals(doc)->None:
+    """Substitui 'Página N de 9' do modelo por PAGE/NUMPAGES no laudo combinado."""
+    for section in doc.sections:
+        footer=section.footer
+        handled=set()
+        for table in footer.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    identifier=id(cell._tc)
+                    if identifier in handled:continue
+                    handled.add(identifier)
+                    content=str(cell.text or "")
+                    if not re.search(r"página",content,re.I) or not re.search(r"de\s+\d+\b",content,re.I):
+                        continue
+                    p=cell.paragraphs[0]
+                    clear_paragraph(p)
+                    set_font(p.add_run("Página "),8,bold=True)
+                    field=OxmlElement("w:fldSimple")
+                    field.set(qn("w:instr"),"PAGE")
+                    p._p.append(field)
+                    set_font(p.add_run(" de "),8,bold=True)
+                    total=OxmlElement("w:fldSimple")
+                    total.set(qn("w:instr"),"NUMPAGES")
+                    p._p.append(total)
+    settings=doc.settings._element
+    if settings.find(qn("w:updateFields")) is None:
+        update=OxmlElement("w:updateFields")
+        update.set(qn("w:val"),"true")
+        settings.append(update)
+
+
 def append_filled_inspection_form(doc,filled_docx:bytes)->None:
     """Adiciona o registro oficial preenchido (sem repetir as páginas da instrução).
     Preserva tabelas, conteúdo e imagens do próprio subprocesso.
