@@ -758,7 +758,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
     photo_title=None
     tables=list(doc.tables)
     for index,table in enumerate(tables):
-        if any("FOTOS DA INSPEÇÃO" in (cell.text or "").upper()
+        if any("FOTOS" in (cell.text or "").upper()
                for row in table.rows for cell in row.cells):
             photo_title=table
             if len(table.columns)>=2:
