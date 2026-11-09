@@ -168,3 +168,15 @@ test('dimensional rows are omitted for unmeasured or NA parameters and repeated 
  assert.match(generator,/table\.rows\[index:min\(index\+3,len\(table\.rows\)\)\]/)
  assert.doesNotMatch(generator,/RESUMO DIMENSIONAL/)
 })
+
+test('laudo title and file follow user standard ITXXX- FSTXXXXX - DD-MM-AAAA',()=>{
+ const generator=source('server/docx_generator.py')
+ assert.match(app,/Gerar Laudo/)
+ assert.doesNotMatch(app,/>Word do FST</)
+ assert.doesNotMatch(app,/>Gerar Word do FST</)
+ assert.match(generator,/def consolidated_report_filename\(/)
+ assert.match(generator,/issued_on\.strftime\('%d-%m-%Y'\)/)
+ assert.match(docs,/consolidated_report_filename\(/)
+ assert.match(docs,/instrucoes_trabalho\(codigo\)/)
+ assert.match(docs,/ZoneInfo\("America\/Sao_Paulo"\)/)
+})

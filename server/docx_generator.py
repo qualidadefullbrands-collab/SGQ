@@ -272,6 +272,17 @@ def fst_code(value):
     raw=re.sub(r"\s+","",raw)
     return raw if raw.startswith("FST") else "FST"+raw
 
+def consolidated_report_filename(it_code:str,process_code:str,issued_on)->str:
+    """Padrão SGQ: IT001- FST26125 - 09-11-2026.docx (data de emissão local)."""
+    it=re.sub(r"[^A-Za-z0-9]","",str(it_code or "")).upper()
+    if not it.startswith("IT") or not re.fullmatch(r"IT[0-9]+[A-Z]?",it):
+        raise ValueError("Código da IT ausente ou inválido para nomear o laudo.")
+    fst=fst_code(process_code)
+    if fst=="–" or not re.fullmatch(r"FST[0-9]+(?:-[A-Z])?",fst):
+        raise ValueError("Código FST ausente ou inválido para nomear o laudo.")
+    return f"{it}- {fst} - {issued_on.strftime('%d-%m-%Y')}.docx"
+
+
 def subprocess_fst_code(process:dict,group:dict)->str:
     """Identificação operacional sempre vinculada ao subprocesso, nunca ao FST pai isolado."""
     parent=fst_code((process or {}).get("codigo"))
@@ -549,6 +560,49 @@ def apply_dimensional_result(table,item:dict,params:list[dict],
                 choice_cell(cell,decision,8)
 
 
+def _keep_dimensional_result_with_measurements(clones, doc) -> None:
+    """Vincula a última tabela medida ao resultado de seu SKU (sem ligar ao SKU seguinte)."""
+    result_index=next((idx for idx,node in enumerate(clones)
+        if node is not None and node.tag==qn("w:tbl")
+        and "resultadodimensional" in canonical_dimension_label(
+            " ".join(t.text or "" for t in node.iter(qn("w:t"))))),None)
+    if result_index is None:return
+    result_table=Table(clones[result_index],doc._body)
+    for row in result_table.rows:
+        trPr=row._tr.get_or_add_trPr()
+        if trPr.find(qn("w:cantSplit")) is None:
+            trPr.append(OxmlElement("w:cantSplit"))
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                paragraph.paragraph_format.page_break_before=False
+                paragraph.paragraph_format.keep_together=True
+                paragraph.paragraph_format.keep_with_next=False
+    # A IT usa tabelas separadas para as amostras e a linha de resultado.
+    # keepNext nas últimas medições impede o Word de deixar só o resultado na página seguinte.
+    last_measurement=next((node for node in reversed(clones[:result_index])
+        if node is not None and node.tag==qn("w:tbl")
+        and any(re.search(r"(?<!\d)10\.",(t.text or ""))
+                for t in node.iter(qn("w:t")))),None)
+    if last_measurement is not None:
+        table=Table(last_measurement,doc._body)
+        for row in table.rows:
+            trPr=row._tr.get_or_add_trPr()
+            if trPr.find(qn("w:cantSplit")) is None:
+                trPr.append(OxmlElement("w:cantSplit"))
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    paragraph.paragraph_format.keep_with_next=True
+
+
+def _dimension_group_separator(doc, before) -> None:
+    """Espaço claro entre SKUs, sem manter o resultado vinculado ao próximo componente."""
+    spacer=doc.add_paragraph()
+    spacer.paragraph_format.space_after=Pt(8)
+    spacer.paragraph_format.keep_with_next=False
+    spacer.paragraph_format.page_break_before=False
+    before.addprevious(spacer._p)
+
+
 def render_dimension_tables_by_sku(doc,items:list[dict],params:list[dict],
                                    configs:list[dict],readings:list[dict])->None:
     """Repete os blocos oficiais da IT para cada SKU medido, sem linhas/tabelas NA.
@@ -608,11 +662,56 @@ def render_dimension_tables_by_sku(doc,items:list[dict],params:list[dict],
                     if fill_dimensional_table_for_item(table,item,params,configs,readings)==0:
                         cloned.getparent().remove(cloned) if cloned.getparent() is not None else None
                         clones[clones.index(cloned)]=None
+        # Elimina os parágrafos vazios que separavam o resultado das últimas medições.
+        clones=[None if node is not None and node.tag==qn("w:p")
+                and not "".join(t.text or "" for t in node.iter(qn("w:t"))).strip()
+                and not any(True for _ in node.iter(qn("w:drawing")))
+                else node for node in clones]
+        _keep_dimensional_result_with_measurements(clones,doc)
         for cloned in clones:
             if cloned is not None:original_first.addprevious(cloned)
+        _dimension_group_separator(doc,original_first)
     for original in source_nodes:
         if original.getparent() is not None:
             original.getparent().remove(original)
+
+
+
+def _photo_heading_and_breaks(doc, title_table) -> None:
+    """Troca quebras manuais que antecedem FOTOS por uma única quebra antes do título.
+    Word pode produzir uma página totalmente vazia se uma tabela já encerrou a página.
+    """
+    if title_table is None:return
+    title_node=title_table._tbl
+    previous=title_node.getprevious()
+    while previous is not None and previous.tag==qn("w:p"):
+        text="".join(node.text or "" for node in previous.iter(qn("w:t"))).strip()
+        if text or any(True for _ in previous.iter(qn("w:drawing"))):
+            break
+        if any(True for _ in previous.iter(qn("w:sectPr"))):
+            break
+        before=previous.getprevious()
+        previous.getparent().remove(previous)
+        previous=before
+    for row in title_table.rows[:1]:
+        for cell in row.cells:
+            for paragraph in cell.paragraphs[:1]:
+                paragraph.paragraph_format.page_break_before=True
+                paragraph.paragraph_format.keep_with_next=True
+
+
+def _configure_photo_grid(table) -> None:
+    """Grade e imagens uniformes em todos os subprocessos, sem fragmentar uma foto."""
+    table.autofit=False
+    for column in table.columns:
+        column.width=Inches(2.17)
+    for row in table.rows:
+        for cell in row.cells:
+            cell.width=Inches(2.17)
+            cell.vertical_alignment=WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        trPr=row._tr.get_or_add_trPr()
+        if trPr.find(qn("w:cantSplit")) is None:
+            trPr.append(OxmlElement("w:cantSplit"))
 
 
 def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
@@ -770,6 +869,8 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                         re.match(r"^Foto\s*\d+",(cell.text or "").strip(),re.I)
                         for row in candidate.rows for cell in row.cells)),None)
             break
+    if photos:
+        _photo_heading_and_breaks(doc,photo_title or photo_table)
     if not photos:
         removed=set()
         for table in (photo_table,photo_title):
@@ -800,6 +901,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             first_photo_row=1 if "FOTOS" in header else 0
         needed=first_photo_row+(len(photos)+2)//3
         while len(photo_table.rows)<needed:photo_table.add_row()
+        _configure_photo_grid(photo_table)
         # Remover as linhas de fotografias do formulário que não foram utilizadas.
         while len(photo_table.rows)>needed:
             extra=photo_table.rows[-1]._tr
@@ -809,18 +911,37 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             if not data:raise ValueError(f"Foto {idx+1} não disponível para compor o laudo.")
             cell=photo_table.cell(first_photo_row+idx//3,idx%3)
             add_photo(cell,data,item.get("caption") or f"Foto {idx+1}",
-                      width=2.17,max_height=2.5)
+                      width=2.17,fixed_frame=True)
         for idx in range(len(photos),(needed-first_photo_row)*3):
             set_cell(photo_table.cell(first_photo_row+idx//3,idx%3),"")
-        for row in photo_table.rows[first_photo_row:]:
-            trPr=row._tr.get_or_add_trPr()
-            if trPr.find(qn("w:cantSplit")) is None:
-                trPr.append(OxmlElement("w:cantSplit"))
+        _configure_photo_grid(photo_table)
 
     out=BytesIO(); doc.save(out); return out.getvalue()
 
 def update_consolidated_page_totals(doc)->None:
-    """Substitui 'Página N de 9' do modelo por PAGE/NUMPAGES no laudo combinado."""
+    """Calibra texto e resultados PAGE/NUMPAGES em Calibri 8pt, inclusive após atualizar."""
+    def field(label):
+        field_xml=OxmlElement("w:fldSimple")
+        field_xml.set(qn("w:instr"),label+" \\* MERGEFORMAT")
+        result_run=OxmlElement("w:r")
+        run_pr=OxmlElement("w:rPr")
+        fonts=OxmlElement("w:rFonts")
+        for attr in ("ascii","hAnsi","eastAsia","cs"):
+            fonts.set(qn("w:"+attr),"Calibri")
+        run_pr.append(fonts)
+        font_size=OxmlElement("w:sz")
+        font_size.set(qn("w:val"),"16")
+        run_pr.append(font_size)
+        font_size_cs=OxmlElement("w:szCs")
+        font_size_cs.set(qn("w:val"),"16")
+        run_pr.append(font_size_cs)
+        result_run.append(run_pr)
+        cached=OxmlElement("w:t")
+        cached.text="1"
+        result_run.append(cached)
+        field_xml.append(result_run)
+        return field_xml
+
     for section in doc.sections:
         footer=section.footer
         handled=set()
@@ -830,29 +951,17 @@ def update_consolidated_page_totals(doc)->None:
                     identifier=id(cell._tc)
                     if identifier in handled:continue
                     handled.add(identifier)
-                    content=str(cell.text or "")
-                    if not re.search(r"página",content,re.I) or not re.search(r"de\s+\d+\b",content,re.I):
+                    original=str(cell.text or "")
+                    if not re.search(r"página",original,re.I) or not re.search(r"de\s+\d+\b",original,re.I):
                         continue
                     p=cell.paragraphs[0]
                     clear_paragraph(p)
                     set_font(p.add_run("Página "),8,bold=True)
-                    field=OxmlElement("w:fldSimple")
-                    field.set(qn("w:instr"),"PAGE")
-                    page_run=OxmlElement("w:r")
-                    page_text=OxmlElement("w:t")
-                    page_text.text="1"
-                    page_run.append(page_text)
-                    field.append(page_run)
-                    p._p.append(field)
+                    p._p.append(field("PAGE"))
                     set_font(p.add_run(" de "),8,bold=True)
-                    total=OxmlElement("w:fldSimple")
-                    total.set(qn("w:instr"),"NUMPAGES")
-                    total_run=OxmlElement("w:r")
-                    total_text=OxmlElement("w:t")
-                    total_text.text="1"
-                    total_run.append(total_text)
-                    total.append(total_run)
-                    p._p.append(total)
+                    p._p.append(field("NUMPAGES"))
+                    for extra in list(cell.paragraphs[1:]):
+                        extra._element.getparent().remove(extra._element)
     settings=doc.settings._element
     if settings.find(qn("w:updateFields")) is None:
         update=OxmlElement("w:updateFields")
@@ -884,11 +993,25 @@ def append_filled_inspection_form(doc,filled_docx:bytes)->None:
         if any((t.text or "").strip() for t in node.iter(qn("w:t"))):break
         if any(True for _ in node.iter(qn("w:drawing"))):break
         body.remove(node)
-    doc.add_page_break()
+    # A própria primeira linha da ficha B inicia a página. Uma segunda quebra
+    # explícita aqui criava páginas vazias quando a ficha A terminava em foto.
     image_id=max((int(x.get("id") or 0) for x in body.iter(qn("wp:docPr"))),default=0)
-    for original in elements[start:]:
+    for index,original in enumerate(elements[start:]):
         if original.tag==qn("w:sectPr"):continue
         cloned=deepcopy(original)
+        if index==0 and cloned.tag==qn("w:p"):
+            pPr=cloned.find(qn("w:pPr"))
+            if pPr is None:
+                pPr=OxmlElement("w:pPr")
+                cloned.insert(0,pPr)
+            page_break=pPr.find(qn("w:pageBreakBefore"))
+            if page_break is None:
+                page_break=OxmlElement("w:pageBreakBefore")
+                pPr.append(page_break)
+            page_break.set(qn("w:val"),"true")
+            for br in list(cloned.iter(qn("w:br"))):
+                if br.get(qn("w:type"))=="page":
+                    br.getparent().remove(br)
         # Ids de imagens precisam ser exclusivos em todo o documento consolidado.
         for property_node in cloned.iter(qn("wp:docPr")):
             image_id+=1
