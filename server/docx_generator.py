@@ -615,6 +615,44 @@ def render_dimension_tables_by_sku(doc,items:list[dict],params:list[dict],
             original.getparent().remove(original)
 
 
+
+def _photo_heading_and_breaks(doc, title_table) -> None:
+    """Troca quebras manuais que antecedem FOTOS por uma única quebra antes do título.
+    Word pode produzir uma página totalmente vazia se uma tabela já encerrou a página.
+    """
+    if title_table is None:return
+    title_node=title_table._tbl
+    previous=title_node.getprevious()
+    while previous is not None and previous.tag==qn("w:p"):
+        text="".join(node.text or "" for node in previous.iter(qn("w:t"))).strip()
+        if text or any(True for _ in previous.iter(qn("w:drawing"))):
+            break
+        if any(True for _ in previous.iter(qn("w:sectPr"))):
+            break
+        before=previous.getprevious()
+        previous.getparent().remove(previous)
+        previous=before
+    for row in title_table.rows[:1]:
+        for cell in row.cells:
+            for paragraph in cell.paragraphs[:1]:
+                paragraph.paragraph_format.page_break_before=True
+                paragraph.paragraph_format.keep_with_next=True
+
+
+def _configure_photo_grid(table) -> None:
+    """Grade e imagens uniformes em todos os subprocessos, sem fragmentar uma foto."""
+    table.autofit=False
+    for column in table.columns:
+        column.width=Inches(2.17)
+    for row in table.rows:
+        for cell in row.cells:
+            cell.width=Inches(2.17)
+            cell.vertical_alignment=WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        trPr=row._tr.get_or_add_trPr()
+        if trPr.find(qn("w:cantSplit")) is None:
+            trPr.append(OxmlElement("w:cantSplit"))
+
+
 def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
     doc=Document(BytesIO(template_bytes))
     inspection=payload.get("inspection") or {}
@@ -770,6 +808,8 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                         re.match(r"^Foto\s*\d+",(cell.text or "").strip(),re.I)
                         for row in candidate.rows for cell in row.cells)),None)
             break
+    if photos:
+        _photo_heading_and_breaks(doc,photo_title or photo_table)
     if not photos:
         removed=set()
         for table in (photo_table,photo_title):
@@ -800,6 +840,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             first_photo_row=1 if "FOTOS" in header else 0
         needed=first_photo_row+(len(photos)+2)//3
         while len(photo_table.rows)<needed:photo_table.add_row()
+        _configure_photo_grid(photo_table)
         # Remover as linhas de fotografias do formulário que não foram utilizadas.
         while len(photo_table.rows)>needed:
             extra=photo_table.rows[-1]._tr
@@ -809,13 +850,10 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             if not data:raise ValueError(f"Foto {idx+1} não disponível para compor o laudo.")
             cell=photo_table.cell(first_photo_row+idx//3,idx%3)
             add_photo(cell,data,item.get("caption") or f"Foto {idx+1}",
-                      width=2.17,max_height=2.5)
+                      width=2.17,fixed_frame=True)
         for idx in range(len(photos),(needed-first_photo_row)*3):
             set_cell(photo_table.cell(first_photo_row+idx//3,idx%3),"")
-        for row in photo_table.rows[first_photo_row:]:
-            trPr=row._tr.get_or_add_trPr()
-            if trPr.find(qn("w:cantSplit")) is None:
-                trPr.append(OxmlElement("w:cantSplit"))
+        _configure_photo_grid(photo_table)
 
     out=BytesIO(); doc.save(out); return out.getvalue()
 
