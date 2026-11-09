@@ -767,7 +767,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                 # Modelo oficial: cabeçalho 1x1 seguido da grade de fotos 3 colunas.
                 photo_table=next((candidate for candidate in tables[index+1:]
                     if len(candidate.columns)==3 and any(
-                        re.match(r"^Foto\\s*\\d+",(cell.text or "").strip(),re.I)
+                        re.match(r"^Foto\s*\d+",(cell.text or "").strip(),re.I)
                         for row in candidate.rows for cell in row.cells)),None)
             break
     if not photos:
