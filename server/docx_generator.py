@@ -1,7 +1,9 @@
 from __future__ import annotations
 from io import BytesIO
+from copy import deepcopy
 from typing import Any
 from docx import Document
+from docx.table import Table
 from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
@@ -270,6 +272,15 @@ def fst_code(value):
     raw=re.sub(r"\s+","",raw)
     return raw if raw.startswith("FST") else "FST"+raw
 
+def subprocess_fst_code(process:dict,group:dict)->str:
+    """Identificação operacional sempre vinculada ao subprocesso, nunca ao FST pai isolado."""
+    parent=fst_code((process or {}).get("codigo"))
+    suffix=str((group or {}).get("subprocesso_codigo") or "").strip().lstrip("-")
+    if not suffix or parent==EMPTY:return parent
+    if parent.upper().endswith("-"+suffix.upper()):return parent
+    return parent.rsplit("-",1)[0]+"-"+suffix if "-" in parent else parent+"-"+suffix
+
+
 def inspection_cell(cell,value,size=8,center=False,whole=False):
     """Rendered inspection data is navy and bold; template labels keep their own style."""
     text=whole_number(value) if whole else filled(value)
@@ -448,31 +459,126 @@ def dimensional_evaluations(items:list[dict], params:list[dict], configurations:
     return results
 
 
-def add_dimensional_mean_summary(doc, items:list[dict], params:list[dict],
-                                 configs:list[dict], readings:list[dict]) -> None:
-    evaluations=dimensional_evaluations(items,params,configs,readings)
-    if not evaluations:
-        return
-    doc.add_paragraph("RESUMO DIMENSIONAL — CRITÉRIOS E MÉDIAS")
-    table=doc.add_table(rows=1,cols=5)
-    for cell,val in zip(table.rows[0].cells,["SKU","Parâmetro","Medições","Média","Avaliação"]):
-        set_cell(cell,val,7,bold=True)
-    labels={
-        "aprovado_media":"APROVADO PELA MÉDIA (sem tolerância aprovada)",
-        "aprovado":"APROVADO (dentro dos limites)",
-        "reprovado":"REPROVADO (fora dos limites)",
-        "nao_aplicavel":"NÃO APLICÁVEL",
-        "pendente":"PENDENTE (medições insuficientes)",
-    }
-    for row in evaluations:
-        average=format_dimensional_mean(row["media"])
-        unit=row["unidade"]
-        add_row(table,[
-            row["sku"],row["parametro"],
-            "NA" if row["status"]=="nao_aplicavel" else f'{row["quantidade"]}/10',
-            "—" if row["status"]=="nao_aplicavel" else f"{average} {unit}".strip(),
-            labels[row["status"]],
-        ],7)
+def canonical_dimension_label(value:Any)->str:
+    normalized=unicodedata.normalize("NFKD",str(value or ""))
+    return re.sub(r"[^a-z0-9]+","",normalized.encode("ascii","ignore").decode().lower())
+
+
+def fill_dimensional_table_for_item(table, item:dict, params:list[dict],
+                                    configs:list[dict], readings:list[dict])->int:
+    """Usa o quadro oficial da IT para um único SKU; remove somente parâmetros sem análise."""
+    item_id=str(item.get("id") or "")
+    product=item.get("produto") or {}
+    sku=str(product.get("sku") or item.get("codigo_cliente") or item_id)
+    description=str(product.get("nome") or "").strip()
+    param_by_name={canonical_dimension_label(p.get("nome")):p for p in params}
+    config_by_id={str(c.get("parametro_id")):c for c in configs
+                  if str(c.get("processo_item_id"))==item_id}
+    measures={}
+    for reading in readings:
+        if str(reading.get("processo_item_id"))!=item_id:continue
+        measures.setdefault(str(reading.get("parametro_id")),[]).append(reading)
+    for values in measures.values():
+        values.sort(key=lambda row:int(row.get("sequencia_amostra") or 0))
+    kept=0
+    index=0
+    while index<len(table.rows):
+        row=table.rows[index]
+        label=canonical_dimension_label(row.cells[0].text) if row.cells else ""
+        if label=="componentesku":
+            if len(row.cells)>=2:
+                inspection_cell(row.cells[1],sku+(" — "+description if description else ""),8)
+            index+=1
+            continue
+        param=param_by_name.get(label)
+        # Parâmetros da ficha usam um cabeçalho e duas linhas com as dez amostras.
+        is_measurement_heading=(len(row.cells)>=4 and any(
+            "equipamento" in canonical_dimension_label(cell.text)
+            for cell in row.cells[1:]))
+        if not param and not is_measurement_heading:
+            index+=1
+            continue
+        param_id=str(param.get("id")) if param else ""
+        cfg=config_by_id.get(param_id,{})
+        values=measures.get(param_id,[])
+        active=(param is not None and cfg.get("nao_aplicavel") is not True
+                and any(v.get("valor") is not None for v in values))
+        if not active:
+            # Remover cabeçalho + amostras (não apenas limpar o valor):
+            # sem esse corte, a folha fica com dezenas de linhas vazias.
+            for original in list(table.rows[index:min(index+3,len(table.rows))]):
+                original._tr.getparent().remove(original._tr)
+            continue
+        if len(row.cells)>1:
+            label_text=row.cells[1].text.split(":")[0].strip()
+            labeled_cell(row.cells[1],label_text,cfg.get("equipamento"),7.5)
+        if len(row.cells)>2:
+            label_text=row.cells[2].text.split(":")[0].strip()
+            labeled_cell(row.cells[2],label_text,cfg.get("codigo_equipamento"),7.5)
+        if len(row.cells)>3:
+            label_text=row.cells[3].text.split(":")[0].strip()
+            labeled_cell(row.cells[3],label_text,cfg.get("especificacao_desvio") or "",7.5)
+        for sample_row in table.rows[index+1:min(index+3,len(table.rows))]:
+            for cell in sample_row.cells:
+                found=re.match(r"\s*(\d+)\.",cell.text)
+                if not found:continue
+                seq=int(found.group(1))
+                matched=next((v for v in values
+                              if int(v.get("sequencia_amostra") or 0)==seq),None)
+                if matched is None:continue
+                unit=matched.get("unidade") or cfg.get("unidade") or param.get("unidade") or ""
+                labeled_cell(cell,str(seq),f'{filled(matched.get("valor"))} {unit}'.strip(),7.5)
+        kept+=1
+        index+=3
+    return kept
+
+
+def apply_dimensional_result(table,item:dict,params:list[dict],
+                             configs:list[dict],readings:list[dict])->None:
+    evaluation=dimensional_evaluations([item],params,configs,readings)
+    included=[row for row in evaluation
+              if row["status"]!="nao_aplicavel" and row["quantidade"]>0]
+    if not included:decision=""
+    elif any(row["status"]=="reprovado" for row in included):decision="REPROVADO"
+    elif all(row["status"] in ("aprovado","aprovado_media") for row in included):
+        decision="APROVADO"
+    else:decision=""
+    for row in table.rows:
+        if row.cells and canonical_dimension_label(row.cells[0].text)=="resultadodimensional":
+            for cell in row.cells[1:]:
+                choice_cell(cell,decision,8)
+
+
+def render_dimension_tables_by_sku(doc,items:list[dict],params:list[dict],
+                                   configs:list[dict],readings:list[dict])->None:
+    """Repete a tabela dimensional oficial para cada SKU efetivamente medido."""
+    candidates=[t for t in doc.tables if any(
+        "analisesdimensionais" in canonical_dimension_label(c.text)
+        for row in t.rows[:2] for c in row.cells)]
+    if not candidates:return
+    template=candidates[0]
+    result_table=next((t for t in doc.tables if any(
+        row.cells and canonical_dimension_label(row.cells[0].text)=="resultadodimensional"
+        for row in t.rows)),None)
+    inserted=0
+    for item in items:
+        if not item.get("id"):continue
+        new_xml=deepcopy(template._tbl)
+        template._tbl.addprevious(new_xml)
+        new_table=Table(new_xml,template._parent)
+        count=fill_dimensional_table_for_item(new_table,item,params,configs,readings)
+        if count==0:
+            new_xml.getparent().remove(new_xml)
+            continue
+        inserted+=1
+        if result_table is not None:
+            result_xml=deepcopy(result_table._tbl)
+            template._tbl.addprevious(result_xml)
+            apply_dimensional_result(Table(result_xml,result_table._parent),
+                                     item,params,configs,readings)
+    template._tbl.getparent().remove(template._tbl)
+    if result_table is not None:
+        result_table._tbl.getparent().remove(result_table._tbl)
 
 
 def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
@@ -528,7 +634,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
         # In SGQ the customer's product code is the registered SKU.
         "código do cliente": "\n".join(all_skus),
         "cliente": process.get("cliente") or "",
-        "processo fst": fst_code(process.get("codigo")),
+        "processo fst": subprocess_fst_code(process,group),
         "nota fiscal": group.get("nota_fiscal") or process.get("nota_fiscal") or "",
         "lote": first_item.get("lote") or "",
         "material": first_item.get("material") or "",
@@ -593,58 +699,7 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
                         if result==selected: inspection_cell(row.cells[column],"X",9,center=True)
                         else: set_cell(row.cells[column],"",9,center=True)
 
-    config_key={(str(x.get("processo_item_id")),str(x.get("parametro_id"))):x for x in dim_configs}
-    result_key={}
-    for x in dim_results:
-        result_key.setdefault((str(x.get("processo_item_id")),str(x.get("parametro_id"))),[]).append(x)
-    for vals in result_key.values():
-        vals.sort(key=lambda x:int(x.get("sequencia_amostra") or 0))
-
-    first_item_id=str(first_item.get("id") or "")
-    params_by_name={_norm(x.get("nome")):x for x in dim_params}
-    for table in doc.tables:
-        for ridx,row in enumerate(table.rows):
-            if len(row.cells)<4: continue
-            pname=_norm(row.cells[0].text)
-            param=params_by_name.get(pname)
-            if not param: continue
-            pid=str(param.get("id"))
-            cfg=config_key.get((first_item_id,pid),{})
-            vals=result_key.get((first_item_id,pid),[])
-            if len(row.cells)>1:
-                base=row.cells[1].text.split(":")[0].strip()
-                labeled_cell(row.cells[1],base,cfg.get("equipamento"),7.5)
-            if len(row.cells)>2:
-                base=row.cells[2].text.split(":")[0].strip()
-                labeled_cell(row.cells[2],base,cfg.get("codigo_equipamento"),7.5)
-            if len(row.cells)>3:
-                base=row.cells[3].text.split(":")[0].strip()
-                spec=cfg.get("especificacao_desvio") or ""
-                labeled_cell(row.cells[3],base,spec,7.5)
-            for rr in table.rows[ridx+1:min(ridx+3,len(table.rows))]:
-                for cell in rr.cells:
-                    m=re.match(r"\s*(\d+)\.",cell.text)
-                    if not m: continue
-                    seq=int(m.group(1))
-                    hit=next((x for x in vals if int(x.get("sequencia_amostra") or 0)==seq),None)
-                    if hit:
-                        value=hit.get("valor")
-                        unit=hit.get("unidade") or cfg.get("unidade") or param.get("unidade") or ""
-                        labeled_cell(cell,str(seq),f"{filled(value)} {unit}".strip(),7.5)
-
-    dimensional_summary=dimensional_evaluations(items,dim_params,dim_configs,dim_results)
-    dim_choice=""
-    if dimensional_summary:
-        evaluated=[r for r in dimensional_summary if r["status"]!="nao_aplicavel"]
-        if any(r["status"]=="reprovado" for r in evaluated):
-            dim_choice="REPROVADO"
-        elif all(r["status"] in ("aprovado","aprovado_media") for r in evaluated):
-            dim_choice="APROVADO"
-    for table in doc.tables:
-        for row in table.rows:
-            if row.cells and _norm(row.cells[0].text)=="resultado dimensional":
-                for cell in row.cells[1:]:
-                    choice_cell(cell,dim_choice,8)
+    render_dimension_tables_by_sku(doc,items,dim_params,dim_configs,dim_results)
 
     final_result=str(inspection.get("resultado") or "").lower()
     final_choice="APROVADO" if final_result=="aprovado" else "REPROVADO" if final_result=="reprovado" else ""
@@ -692,7 +747,6 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
             trPr=row._tr.get_or_add_trPr()
             if trPr.find(qn("w:cantSplit")) is None: trPr.append(OxmlElement("w:cantSplit"))
 
-    add_dimensional_mean_summary(doc,items,dim_params,dim_configs,dim_results)
     out=BytesIO(); doc.save(out); return out.getvalue()
 
 def append_subprocess_appendix(doc, payload:dict) -> None:
@@ -751,7 +805,6 @@ def append_subprocess_appendix(doc, payload:dict) -> None:
                 item_names.get(str(row.get("processo_item_id"))) or "",
                 row.get("sequencia_amostra") or "",row.get("valor") or "",
                 "C" if row.get("conforme") is True else "NC" if row.get("conforme") is False else "—"],7)
-    add_dimensional_mean_summary(doc,items,params,configs,dimensionals)
     if tests:
         doc.add_paragraph("Testes especiais")
         by_id={str(r.get("teste_id")):r for r in test_results}
