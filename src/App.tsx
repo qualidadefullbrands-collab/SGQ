@@ -631,6 +631,7 @@ export default function App() {
   const [activeStage, setActiveStage] = useState<'dados'|'amostragem'|'verificacoes'|'dimensionais'|'testes'|'fotos'|'resultado'|'retencao'>('dados')
   const [detail, setDetail] = useState<any>(null)
   const [wordStatus,setWordStatus]=useState<{ready:boolean;pending:string[]}|null>(null)
+  const [allowDimensionalRectification,setAllowDimensionalRectification]=useState(false)
   useEffect(()=>{
     const processId=detail?.grupos_inspecao?.processo_id as string|undefined
     if(!processId){setWordStatus(null);return}
@@ -1795,7 +1796,7 @@ export default function App() {
 
   async function openInspection(id: string) {
     setError('')
-    if(selectedInspectionId!==id) setActiveStage('dados')
+    if(selectedInspectionId!==id){setActiveStage('dados');setAllowDimensionalRectification(false)}
     setSelectedInspectionId(id)
     const loaded=await apiGet<any>('/api/inspecoes/'+id+'/detalhe')
     let data=loaded.data
@@ -2449,7 +2450,8 @@ export default function App() {
 
 
   async function saveDimConfig(itemId:string, param:any, patch:any) {
-    if (!selectedInspectionId) return
+    if (!selectedInspectionId || !canWrite) return
+    if (detail?.status==='concluida' && (!canManageIts || !allowDimensionalRectification)) return
     const current = getDimConfig(itemId,param.id) ?? {}
     const next:any = { ...current, ...patch }
     const nominal = next.valor_nominal === '' || next.valor_nominal == null ? null : Number(next.valor_nominal)
@@ -2472,8 +2474,21 @@ export default function App() {
     if (saved.error || !saved.data) return setError(saved.error?.message ?? 'Falha ao salvar configuração dimensional.')
     setDetail((d:any)=>{
       const others=(d.dimConfigs ?? []).filter((x:any)=>!(x.processo_item_id===itemId && x.parametro_id===param.id))
-      return { ...d, dimConfigs:[...others,saved.data] }
+      const updates=(saved as any).medicoesAtualizadas ?? []
+      return { ...d, dimConfigs:[...others,saved.data],
+        dimResults:(d.dimResults??[]).map((measurement:any)=>{
+          const updated=updates.find((x:any)=>x.id===measurement.id)
+          return updated ? {...measurement,conforme:updated.conforme} : measurement
+        }) }
     })
+    const processId=detail?.grupos_inspecao?.processo_id
+    if(processId){
+      const status=await apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status')
+      setWordStatus(status.error?
+        {ready:false,pending:[status.error.message||'Falha ao validar laudo.']}:
+        {ready:status.data?.ready===true,pending:status.data?.pending??[]})
+    }
+    if(detail?.status==='concluida')setMessage('Critério retificado e medições reavaliadas. Confira a conformidade antes de emitir o laudo.')
   }
 
   async function saveDimension(itemId: string, param: any, seq: number, value: string) {
@@ -2500,7 +2515,7 @@ export default function App() {
     const c=rows.filter((x:any)=>x.conforme===true).length
     let decision='Pendente'
     if (rows.length===10) {
-      decision=nc>0?'Reprovado':'Aprovado'
+      decision=rows.some((x:any)=>x.conforme==null)?'Sem tolerância':nc>0?'Reprovado':'Aprovado'
     }
     return { total:rows.length, nc, c, decision }
   }
@@ -3586,7 +3601,13 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <div className="section-title">
               <div><h2>Análises dimensionais</h2><span className="section-note">Especificação, instrumento, desvio aceitável e 10 medições por parâmetro.</span></div>
               {detail.dimensionais_finalizados && <span className="pill">Concluído</span>}
+              {detail.status==='concluida' && canManageIts && !allowDimensionalRectification &&
+                <button className="secondary small" type="button" onClick={()=>{
+                  if(window.confirm('Retificar critérios dimensionais de uma inspeção concluída? A alteração será auditada e as medições preservadas.'))setAllowDimensionalRectification(true)
+                }}>Retificar critérios</button>}
             </div>
+            {detail.status==='concluida' && allowDimensionalRectification &&
+              <p className="section-note">Preencha o desvio aceitável conforme a IT ou a especificação técnica aprovada. Não altere os valores medidos. As conformidades serão recalculadas e a retificação auditada.</p>}
             {(detail.items ?? []).length>1 && <div className="dimension-set-navigation">
               <div className="dimension-set-caption"><strong>Produtos do conjunto</strong><span>{detail.items.length} SKUs · uma única inspeção</span></div>
               <div className="dimension-set-tabs">
@@ -3622,7 +3643,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                         <div className="param-title">
                           <div><strong>{p.nome}</strong>{cfg.nao_aplicavel && <span className="pill">NA</span>}</div>
                           <label className="check-option compact">
-                            <input type="checkbox" checked={!!cfg.nao_aplicavel} disabled={detail.status==='concluida'} onChange={(e)=>saveDimConfig(item.id,p,{nao_aplicavel:e.target.checked})}/>
+                            <input type="checkbox" checked={!!cfg.nao_aplicavel} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)} onChange={(e)=>saveDimConfig(item.id,p,{nao_aplicavel:e.target.checked})}/>
                             <span>Não aplicável</span>
                           </label>
                         </div>
@@ -3630,7 +3651,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                         {!cfg.nao_aplicavel && <>
                           <div className="dim-config-grid">
                             {usesMeasureReference(p) && <label>Referência da medida
-                              <select value={cfg.tipo_referencia ?? p.tipo_referencia ?? ''} onChange={(e)=>saveDimConfig(item.id,p,{tipo_referencia:e.target.value})} disabled={detail.status==='concluida'}>
+                              <select value={cfg.tipo_referencia ?? p.tipo_referencia ?? ''} onChange={(e)=>saveDimConfig(item.id,p,{tipo_referencia:e.target.value})} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)}>
                                 <option value="">Selecionar</option>
                                 {/(intern|interior)/i.test(p.nome||'') && <option value="interno">Face / dimensão interna</option>}
                                 {/(extern|exterior)/i.test(p.nome||'') && <option value="externo">Face / dimensão externa</option>}
@@ -3643,14 +3664,14 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                             </label>}
                             {usesMeasureReference(p) && (cfg.tipo_referencia ?? p.tipo_referencia)==='outro' && (
                               <label className="span-2">Especifique a referência da medida
-                                <input defaultValue={cfg.referencia_outro ?? ''} placeholder="Ex.: gabarito, norma ou instrumento de referência" onBlur={(e)=>saveDimConfig(item.id,p,{referencia_outro:e.target.value})} disabled={detail.status==='concluida'}/>
+                                <input defaultValue={cfg.referencia_outro ?? ''} placeholder="Ex.: gabarito, norma ou instrumento de referência" onBlur={(e)=>saveDimConfig(item.id,p,{referencia_outro:e.target.value})} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)}/>
                               </label>
                             )}
                             <label>Valor especificado
-                              <input type="number" step="any" defaultValue={cfg.valor_nominal ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{valor_nominal:e.target.value})} disabled={detail.status==='concluida'}/>
+                              <input type="number" step="any" defaultValue={cfg.valor_nominal ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{valor_nominal:e.target.value})} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)}/>
                             </label>
                             <label>Unidade
-                              <select value={cfg.unidade ?? p.unidade ?? ''} onChange={(e)=>saveDimConfig(item.id,p,{unidade:e.target.value})} disabled={detail.status==='concluida'}>
+                              <select value={cfg.unidade ?? p.unidade ?? ''} onChange={(e)=>saveDimConfig(item.id,p,{unidade:e.target.value})} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)}>
                                 <option value="">Selecionar</option>
                                 <option value="mg">mg</option><option value="g">g</option><option value="kg">kg</option>
                                 <option value="mL">mL</option><option value="L">L</option>
@@ -3663,7 +3684,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                               <select value={cfg.codigo_equipamento ?? ''} onChange={e=>{
                                 const selected=equipments.find(x=>x.codigo===e.target.value)
                                 void saveDimConfig(item.id,p,{equipamento:selected?.nome??null,codigo_equipamento:selected?.codigo??null})
-                              }} disabled={detail.status==='concluida'}>
+                              }} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)}>
                                 <option value="">Selecionar equipamento disponível</option>
                                 {cfg.codigo_equipamento && !equipments.some(x=>x.codigo===cfg.codigo_equipamento) && <option value={cfg.codigo_equipamento}>{cfg.equipamento || cfg.codigo_equipamento} (cadastro anterior)</option>}
                                 {equipments.filter(e=>equipmentFit(e,p.nome,cfg.unidade||p.unidade)).map(e=><option value={e.codigo} key={e.id}>{e.codigo} · {e.nome}</option>)}
@@ -3672,7 +3693,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                             </label>
                             <label>Código do equipamento<input value={cfg.codigo_equipamento??''} readOnly placeholder="Preenchido ao selecionar"/></label>
                             <label>Desvio ±
-                              <input type="number" min="0" step="any" defaultValue={cfg.desvio_mais ?? cfg.desvio_menos ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{desvio:e.target.value,desvio_menos:e.target.value,desvio_mais:e.target.value})} disabled={detail.status==='concluida'}/>
+                              <input type="number" min="0" step="any" defaultValue={cfg.desvio_mais ?? cfg.desvio_menos ?? ''} onBlur={(e)=>saveDimConfig(item.id,p,{desvio:e.target.value,desvio_menos:e.target.value,desvio_mais:e.target.value})} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)}/>
                             </label>
                             <label className="span-2">Especificação / desvio
                               <input value={cfg.especificacao_desvio ?? ((cfg.valor_nominal!=null && (cfg.desvio_mais!=null || cfg.desvio_menos!=null)) ? (String(cfg.valor_nominal)+' '+String(cfg.unidade ?? p.unidade ?? '')+' ± '+String(cfg.desvio_mais ?? cfg.desvio_menos)+' '+String(cfg.unidade ?? p.unidade ?? '')).trim() : '')} readOnly placeholder="Preenchido automaticamente"/>
@@ -3694,7 +3715,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                               return (
                                 <label className={existing?.conforme===true?'measure-ok':existing?.conforme===false?'measure-bad':''} key={seq}>
                                   <span>{seq}</span>
-                                  <input type="number" step="any" defaultValue={existing?.valor ?? ''} onBlur={(e)=>saveDimension(item.id,p,seq,e.target.value)} disabled={detail.status==='concluida'}/>
+                                  <input type="number" step="any" defaultValue={existing?.valor ?? ''} onBlur={(e)=>saveDimension(item.id,p,seq,e.target.value)} disabled={!canWrite || detail.status==='concluida'}/>
                                   {existing?.conforme===true && <small>C</small>}
                                   {existing?.conforme===false && <small>NC</small>}
                                 </label>
