@@ -1274,6 +1274,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             ? $"TMP-{Guid.NewGuid().ToString("N")[..10].ToUpperInvariant()}"
             : processCodeRaw;
         var inspectionDate = input.DataInspecao ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        if(input.ChegadaCd.HasValue && inspectionDate<input.ChegadaCd.Value)
+            return Results.Json(Error("A data da inspeção não pode ser anterior à chegada ao CD."),statusCode:400);
         var items = (input.Itens ?? [])
             .Where(x =>
                 !string.IsNullOrWhiteSpace(x.Sku) ||
@@ -1664,6 +1666,8 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var groupId=ins!.Value.GetProperty("grupo_inspecao_id").GetString()!;
         var wasConcluded=ins.Value.GetProperty("status").GetString()=="concluida";
+        if(input.DataInspecao.HasValue && input.ChegadaCd.HasValue && input.DataInspecao.Value<input.ChegadaCd.Value)
+            return Results.Json(Error("A data da inspeção não pode ser anterior à chegada ao CD."),statusCode:400);
         if(ins.Value.GetProperty("status").GetString()=="cancelada")
             return Results.Json(Error("Esta inspeção está cancelada."),statusCode:409);
         // Validate before touching the parent FST or any saved item.
@@ -2086,11 +2090,14 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
         var dimensionalSummary=string.Equals(group.Trim(),"Dimensional",StringComparison.OrdinalIgnoreCase);
 
         var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=tamanho_amostra,total_nao_conforme&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+            $"select=tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,limite_rejeicao&id=eq.{Uri.EscapeDataString(id)}&limit=1");
         var (inspection,inspectionFound)=FirstRow(insRows);
         if(!inspectionFound) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var sample=inspection!.Value.TryGetProperty("tamanho_amostra",out var sm)&&sm.ValueKind==JsonValueKind.Number?sm.GetInt32():0;
         var currentUniqueNc=inspection.Value.TryGetProperty("total_nao_conforme",out var unc)&&unc.ValueKind==JsonValueKind.Number?unc.GetInt32():0;
+        var priorInspected=inspection.Value.TryGetProperty("total_inspecionado",out var insCount)&&insCount.ValueKind==JsonValueKind.Number?insCount.GetInt32():0;
+        var currentLevel=inspection.Value.TryGetProperty("nivel_inspecao",out var lvl)&&lvl.ValueKind==JsonValueKind.String?lvl.GetString():"I";
+        var rejectLimit=inspection.Value.TryGetProperty("limite_rejeicao",out var reject)&&reject.ValueKind==JsonValueKind.Number?reject.GetInt32():int.MaxValue;
 
         var result=(input.Resultado??"").Trim();
         if(result is not ("conforme" or "nao_conforme" or "nao_aplicavel"))
@@ -2171,7 +2178,7 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
             1 => ncRows[0],
             _ => Math.Max(currentUniqueNc,ncRows.Max())
         };
-        var inspected=complete?sample:0;
+        var inspected=complete?sample:Math.Min(Math.Max(priorInspected,0),sample);
         await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
             new {
                 total_inspecionado=inspected,
@@ -2189,11 +2196,58 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
             ok=true,resultado=result,severidade=automaticSeverity,
             quantidade_avaliada=evaluated,quantidade_nc=ncQty,
             amostra_completa=complete,total_inspecionado=inspected,total_nao_conforme=uniqueNc,
-            reconciliacao_nc_necessaria=reconciliation
+            reconciliacao_nc_necessaria=reconciliation,
+            re_atingido=uniqueNc>=rejectLimit,nivel_inspecao=currentLevel,limite_rejeicao=rejectLimit
         },error=(object?)null });
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao salvar checklist.",e.Message),statusCode:500);}
+});
+
+app.MapPost("/api/inspecoes/{id}/ampliar-nivel",async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var (completed,actingUser)=await InspectionEditContext(client,token,id);
+        if(completed)return Results.Json(Error("A ampliação só é permitida durante a inspeção em andamento."),statusCode:409);
+        var oldRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=status,nivel_inspecao,tamanho_lote,tamanho_amostra,codigo_amostragem,limite_aceitacao,limite_rejeicao,total_inspecionado,total_nao_conforme&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inspection,found)=FirstRow(oldRows);
+        if(!found)return Results.Json(Error("Inspeção não localizada."),statusCode:404);
+        var prior=inspection!.Value;
+        var status=prior.GetProperty("status").GetString();
+        var level=prior.GetProperty("nivel_inspecao").GetString();
+        if(status!="em_andamento"||level!="I")
+            return Results.Json(Error("A ampliação automática está disponível apenas para o nível I em andamento."),statusCode:409);
+        var nc=prior.GetProperty("total_nao_conforme").GetInt32();
+        var re=prior.GetProperty("limite_rejeicao").GetInt32();
+        if(nc<re)
+            return Results.Json(Error("A quantidade de NC ainda não atingiu o limite de rejeição do nível I."),statusCode:409);
+        var lot=prior.GetProperty("tamanho_lote").GetInt64();
+        var currentSample=prior.GetProperty("tamanho_amostra").GetInt32();
+        var plan=SamplingPlan(lot,"II");
+        if(plan.Sample<=currentSample)
+            return Results.Json(Error("O nível II não amplia a amostragem para este lote."),statusCode:409);
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+            $"id=eq.{Uri.EscapeDataString(id)}&nivel_inspecao=eq.I&status=eq.em_andamento",
+            new {nivel_inspecao="II",codigo_amostragem=plan.Code,tamanho_amostra=plan.Sample,
+                limite_aceitacao=plan.Ac,limite_rejeicao=plan.Re,
+                documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
+        await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+            new {usuario_id=actingUser,entidade="inspecoes",entidade_id=id,acao="ampliacao_amostragem_nivel_ii",
+                dados=new {antes=prior.GetRawText(),depois=new{
+                    nivel_inspecao="II",codigo_amostragem=plan.Code,tamanho_amostra=plan.Sample,
+                    limite_aceitacao=plan.Ac,limite_rejeicao=plan.Re,
+                    novas_amostras=Math.Max(plan.Sample-currentSample,0),nc_preservadas=nc
+                }}}, "return=minimal");
+        return Results.Ok(new{data=new{nivel_inspecao="II",codigo_amostragem=plan.Code,
+            tamanho_amostra=plan.Sample,limite_aceitacao=plan.Ac,limite_rejeicao=plan.Re,
+            amostras_adicionais=plan.Sample-currentSample,total_nao_conforme=nc},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:403);}
+    catch(Exception e){return Results.Json(Error("Falha ao ampliar amostragem.",e.Message),statusCode:500);}
 });
 
 app.MapPut("/api/inspecoes/{id}/amostragem/resumo", async (string id,SampleSummaryRequest input,HttpRequest request,IHttpClientFactory factory)=>
