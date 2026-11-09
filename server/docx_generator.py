@@ -755,19 +755,33 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
     emphasize_sampling_tables(doc,inspection)
 
     photo_table=None
-    for table in doc.tables:
-        if any("FOTOS" in (c.text or "").upper() for row in table.rows for c in row.cells):
-            if len(table.rows)>=1 and len(table.columns)>=2:
+    photo_title=None
+    tables=list(doc.tables)
+    for index,table in enumerate(tables):
+        if any("FOTOS DA INSPEÇÃO" in (cell.text or "").upper()
+               for row in table.rows for cell in row.cells):
+            photo_title=table
+            if len(table.columns)>=2:
                 photo_table=table
-    if photo_table is not None and not photos:
-        # Não imprimir a folha fotográfica do modelo quando não existem evidências.
-        node=photo_table._tbl
-        previous=node.getprevious()
-        node.getparent().remove(node)
-        if (previous is not None and previous.tag==qn("w:p")
-            and not "".join(t.text or "" for t in previous.iter(qn("w:t"))).strip()
-            and any(el.get(qn("w:type"))=="page" for el in previous.iter(qn("w:br")))):
-            previous.getparent().remove(previous)
+            else:
+                # Modelo oficial: cabeçalho 1x1 seguido da grade de fotos 3 colunas.
+                photo_table=next((candidate for candidate in tables[index+1:]
+                    if len(candidate.columns)==3 and any(
+                        re.match(r"^Foto\\s*\\d+",(cell.text or "").strip(),re.I)
+                        for row in candidate.rows for cell in row.cells)),None)
+            break
+    if not photos:
+        removed=set()
+        for table in (photo_table,photo_title):
+            if table is None or id(table._tbl) in removed:continue
+            removed.add(id(table._tbl))
+            node=table._tbl
+            previous=node.getprevious()
+            node.getparent().remove(node)
+            if (previous is not None and previous.tag==qn("w:p")
+                and not "".join(t.text or "" for t in previous.iter(qn("w:t"))).strip()
+                and any(el.get(qn("w:type"))=="page" for el in previous.iter(qn("w:br")))):
+                previous.getparent().remove(previous)
     if photos:
         if photo_table is None:
             doc.add_paragraph("FOTOS DA INSPEÇÃO")
