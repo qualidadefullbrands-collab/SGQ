@@ -631,6 +631,13 @@ export default function App() {
   const [activeStage, setActiveStage] = useState<'dados'|'amostragem'|'verificacoes'|'dimensionais'|'testes'|'fotos'|'resultado'|'retencao'>('dados')
   const [detail, setDetail] = useState<any>(null)
   const [wordStatus,setWordStatus]=useState<{ready:boolean;pending:string[]}|null>(null)
+  const [completedEditRevision,setCompletedEditRevision]=useState(0)
+  function reflectCompletedEdit(){
+    if(detail?.status!=='concluida')return
+    setDetail((current:any)=>current?{...current,revisao_obrigatoria:true,revisado_em:null,documento_gerado_em:null}:current)
+    setCompletedEditRevision(n=>n+1)
+    setMessage('Retificação auditada. Confirme o resultado atualizado para liberar novamente o laudo.')
+  }
   const [allowDimensionalRectification,setAllowDimensionalRectification]=useState(false)
   useEffect(()=>{
     const processId=detail?.grupos_inspecao?.processo_id as string|undefined
@@ -645,7 +652,7 @@ export default function App() {
       })
       .catch(()=>{if(active)setWordStatus({ready:false,pending:['Não foi possível validar o laudo.']})})
     return()=>{active=false}
-  },[detail?.grupos_inspecao?.processo_id,detail?.status,inspections])
+  },[detail?.grupos_inspecao?.processo_id,detail?.status,inspections,completedEditRevision])
   const [finalObservation, setFinalObservation] = useState('')
   const [internalObservation, setInternalObservation] = useState('')
   const [retentionRows, setRetentionRows] = useState<Record<string,{
@@ -2331,7 +2338,9 @@ export default function App() {
   }
 
   async function saveChecklist(checkId: string, result: string, quantityNc?:number) {
-    if (!selectedInspectionId || !detail) return
+    if (!selectedInspectionId || !detail || !canWrite)return
+    if(detail.status==='concluida' && !allowDimensionalRectification)return
+    if(detail.status==='concluida' && !navigator.onLine)return setError('Retificação após conclusão exige conexão.')
     const item=detail.checklist?.find((x:any)=>x.id===checkId)
     const previous=(detail.checklistResults ?? []).find((x:any)=>x.checklist_id===checkId)
     const automatic=item?.classificacao_sugerida ?? null
@@ -2393,10 +2402,13 @@ export default function App() {
     if(saved.data?.reconciliacao_nc_necessaria) {
       setMessage('Há NC em mais de uma verificação. Confirme abaixo a quantidade de unidades NC únicas usada no Ac/Re para evitar dupla contagem.')
     }
+    reflectCompletedEdit()
   }
 
   async function saveUniqueNcSummary() {
-    if(!selectedInspectionId || !detail) return
+    if(!selectedInspectionId || !detail || !canWrite)return
+    if(detail.status==='concluida' && !allowDimensionalRectification)return
+    if(detail.status==='concluida' && !navigator.onLine)return setError('Retificação após conclusão exige conexão.')
     const qty=Math.max(0,Math.floor(Number(sampleNcDraft)||0))
     const max=Number(detail.tamanho_amostra ?? 0)
     if(max>0 && qty>max) return setError(`NC únicas não pode ultrapassar a amostra de ${max} unidades.`)
@@ -2408,11 +2420,14 @@ export default function App() {
       total_conforme:saved.data?.total_conforme ?? Math.max(Number(d.total_inspecionado ?? 0)-qty,0),
     }:d)
     setSampleNcDraft(String(saved.data?.total_nao_conforme ?? qty))
+    reflectCompletedEdit()
     setMessage('Quantidade de unidades NC únicas atualizada para o cálculo Ac/Re.')
   }
 
   async function saveInternalObservation() {
     if (!selectedInspectionId || !canWrite) return
+    if(detail?.status==='concluida' && !allowDimensionalRectification)return
+    if(detail?.status==='concluida' && !navigator.onLine)return setError('Retificação após conclusão exige conexão.')
     const path='/api/inspecoes/'+selectedInspectionId+'/observacao-interna'
     const body={texto:internalObservation.trim()||null}
     const expected=JSON.stringify(String(detail?.observacao_interna||''))
@@ -2436,6 +2451,7 @@ export default function App() {
       return
     }
     setDetail((d:any)=>d?{...d,observacao_interna:body.texto}:d)
+    reflectCompletedEdit()
     setMessage('Observação salva.')
   }
 
@@ -2451,7 +2467,7 @@ export default function App() {
 
   async function saveDimConfig(itemId:string, param:any, patch:any) {
     if (!selectedInspectionId || !canWrite) return
-    if (detail?.status==='concluida' && (!canManageIts || !allowDimensionalRectification)) return
+    if (detail?.status==='concluida' && !allowDimensionalRectification) return
     const current = getDimConfig(itemId,param.id) ?? {}
     const next:any = { ...current, ...patch }
     const nominal = next.valor_nominal === '' || next.valor_nominal == null ? null : Number(next.valor_nominal)
@@ -2488,11 +2504,13 @@ export default function App() {
         {ready:false,pending:[status.error.message||'Falha ao validar laudo.']}:
         {ready:status.data?.ready===true,pending:status.data?.pending??[]})
     }
-    if(detail?.status==='concluida')setMessage('Critério retificado e medições reavaliadas. Confira a conformidade antes de emitir o laudo.')
+    reflectCompletedEdit()
   }
 
   async function saveDimension(itemId: string, param: any, seq: number, value: string) {
-    if (!selectedInspectionId || !value.trim()) return
+    if (!selectedInspectionId || !value.trim() || !canWrite) return
+    if(detail?.status==='concluida' && !allowDimensionalRectification)return
+    if(detail?.status==='concluida' && !navigator.onLine)return setError('Retificação após conclusão exige conexão para auditoria.')
     const cfg=getDimConfig(itemId,param.id)
     if (cfg?.nao_aplicavel) return
     const numeric=Number(value.replace(',','.'))
@@ -2507,6 +2525,7 @@ export default function App() {
       const others=(d.dimResults ?? []).filter((x:any)=>!(x.processo_item_id===itemId && x.parametro_id===param.id && x.sequencia_amostra===seq))
       return { ...d, dimResults:[...others,saved.data] }
     })
+    reflectCompletedEdit()
   }
 
   function dimensionSummary(itemId:string,paramId:string) {
@@ -2542,10 +2561,12 @@ export default function App() {
   }
 
   async function completeTests() {
-    if (!selectedInspectionId||!detail)return
+    if (!selectedInspectionId||!detail||!canWrite)return
+    if(detail.status==='concluida' && !allowDimensionalRectification)return
     const done=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/testes/finalizar`,{})
     if(done.error){setPopupMessage(done.error.message);return}
     setDetail((d:any)=>d?{...d,testes_finalizados:true}:d)
+    if(detail?.status==='concluida')setCompletedEditRevision(n=>n+1)
     setMessage('Testes concluídos.')
   }
 
@@ -2614,7 +2635,9 @@ export default function App() {
   }
 
   async function saveTest(testId: string, result: string) {
-    if (!selectedInspectionId || !detail) return
+    if (!selectedInspectionId || !detail || !canWrite)return
+    if(detail.status==='concluida' && !allowDimensionalRectification)return
+    if(detail.status==='concluida' && !navigator.onLine)return setError('Retificação após conclusão exige conexão.')
     const previous=(detail.testResults ?? []).find((x:any)=>x.teste_id===testId)
     const optimistic={...(previous ?? {}),teste_id:testId,inspecao_id:selectedInspectionId,resultado:result}
     setDetail((d:any)=>{
@@ -2630,6 +2653,7 @@ export default function App() {
       return setError(saved.error.message)
     }
     if (saved.data?.finalizados===false) setDetail((d:any)=>d?{...d,testes_finalizados:false}:d)
+    reflectCompletedEdit()
   }
 
 
@@ -2711,7 +2735,11 @@ export default function App() {
   }
 
   async function finishInspection(result: 'aprovado' | 'reprovado') {
-    if (!detail || !selectedInspectionId) return
+    if (!detail || !selectedInspectionId || !canWrite)return
+    const retifying=detail.status==='concluida'
+    if(retifying && !allowDimensionalRectification)return
+    if(retifying && !navigator.onLine)return setError('Retificações após conclusão exigem conexão.')
+    if(retifying && !window.confirm('Confirmar o resultado revisado? Esta ação ficará registrada na auditoria.'))return
     const finished=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/concluir`,{
       resultado:result,
       observacoes:finalObservation.trim() || null,
@@ -2720,8 +2748,10 @@ export default function App() {
 
     const pendencias:string[]=finished.data?.pendencias ?? []
     setMessage(pendencias.length
-      ? 'Inspeção finalizada com pendências registradas.'
-      : 'Inspeção finalizada. A retenção de amostras é opcional.')
+      ? 'Resultado revisado com pendências registradas.'
+      : retifying?'Resultado retificado e revalidado.':'Inspeção finalizada. A retenção de amostras é opcional.')
+    setAllowDimensionalRectification(false)
+    setCompletedEditRevision(n=>n+1)
     void refreshLists()
     await openInspection(selectedInspectionId)
   }
@@ -3459,6 +3489,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
               {canWrite && <button className="secondary" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados</button>}
+              {canWrite && detail.status==='concluida' && <button className={allowDimensionalRectification?'secondary':'primary'} type="button" onClick={()=>{
+                if(allowDimensionalRectification){setAllowDimensionalRectification(false);return}
+                if(!navigator.onLine){setError('Conecte-se para editar com auditoria.');return}
+                if(window.confirm('Editar inspeção concluída? Será possível corrigir medições, critérios, testes, verificações e resultado, com registro no histórico.'))setAllowDimensionalRectification(true)
+              }}><Edit3 size={16}/>{allowDimensionalRectification?'Encerrar edição':'Editar inspeção concluída'}</button>}
 
               {detail.status==='concluida' && <button className="secondary" disabled={wordDownloading||!wordStatus?.ready} title={wordStatus?.ready?'Gerar laudo único do FST':wordStatus?.pending?.[0]||'Validando subprocessos'} onClick={downloadInspectionWord}><FileDown size={16}/> Word do FST</button>}
               {detail.status==='concluida' && <button className="secondary" type="button" disabled={sharepointBusy||!wordStatus?.ready} onClick={()=>void sendWordToPowerAutomate()}><FileText size={16}/>{sharepointBusy?'Enviando…':'Enviar ao SharePoint'}</button>}
@@ -3469,6 +3504,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
+          {detail.status==='concluida' && allowDimensionalRectification && <div className="alert">Modo de retificação: alterações auditadas. Ao terminar, confirme o resultado atualizado para liberar o laudo.</div>}
           <nav id="inspection-stage-nav" className="inspection-stage-tabs" role="tablist" aria-label="Etapas da inspeção">
             {([
               ['dados','Dados',true],['amostragem','Amostragem',samplingDone],
@@ -3541,6 +3577,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   value={sampleNcDraft}
                   onChange={(e)=>setSampleNcDraft(e.target.value)}
                   onBlur={()=>void saveUniqueNcSummary()}
+                  disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)}
                 />
               </div>
               <div><small>Ac</small><strong>{detail.limite_aceitacao ?? '—'}</strong></div>
@@ -3568,9 +3605,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     </div>
                     <div className="check-actions-stack">
                       <div className="tri-buttons quick">
-                        <button type="button" className={r?.resultado==='conforme'?'selected ok':''} onClick={()=>saveChecklist(item.id,'conforme')}>C</button>
-                        <button type="button" className={r?.resultado==='nao_conforme'?'selected bad':''} onClick={()=>saveChecklist(item.id,'nao_conforme',Number(r?.quantidade_nc ?? 1))}>NC</button>
-                        <button type="button" className={r?.resultado==='nao_aplicavel'?'selected':''} onClick={()=>saveChecklist(item.id,'nao_aplicavel')}>NA</button>
+                        <button type="button" className={r?.resultado==='conforme'?'selected ok':''} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)} onClick={()=>saveChecklist(item.id,'conforme')}>C</button>
+                        <button type="button" className={r?.resultado==='nao_conforme'?'selected bad':''} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)} onClick={()=>saveChecklist(item.id,'nao_conforme',Number(r?.quantidade_nc ?? 1))}>NC</button>
+                        <button type="button" className={r?.resultado==='nao_aplicavel'?'selected':''} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)} onClick={()=>saveChecklist(item.id,'nao_aplicavel')}>NA</button>
                       </div>
                       {r?.resultado==='nao_conforme' && (
                         <label className="nc-quantity">
@@ -3581,7 +3618,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                             max={scopeQty || undefined}
                             value={r?.quantidade_nc ?? 1}
                             onChange={(e)=>setChecklistNcDraft(item.id,Math.max(1,Number(e.target.value)||1))}
-                            onBlur={(e)=>void saveChecklist(item.id,'nao_conforme',Number(e.target.value))}
+                            onBlur={(e)=>void saveChecklist(item.id,'nao_conforme',Number(e.target.value))} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)}
                           />
                           <em>/ {scopeQty || '—'}</em>
                         </label>
@@ -3613,13 +3650,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <div className="section-title">
               <div><h2>Análises dimensionais</h2><span className="section-note">10 medições por parâmetro. Sem desvio aprovado, o sistema calcula a média e aprova por critério interno.</span></div>
               {detail.dimensionais_finalizados && <span className="pill">Concluído</span>}
-              {detail.status==='concluida' && canManageIts && !allowDimensionalRectification &&
-                <button className="secondary small" type="button" onClick={()=>{
-                  if(window.confirm('Retificar critérios dimensionais de uma inspeção concluída? A alteração será auditada e as medições preservadas.'))setAllowDimensionalRectification(true)
-                }}>Retificar critérios</button>}
+              {detail.status==='concluida' && canWrite && !allowDimensionalRectification &&
+                <small className="section-note">Use “Editar inspeção concluída” para corrigir critérios e medições.</small>}
             </div>
             {detail.status==='concluida' && allowDimensionalRectification &&
-              <p className="section-note">Preencha o desvio aceitável conforme a IT ou a especificação técnica aprovada. Não altere os valores medidos. As conformidades serão recalculadas e a retificação auditada.</p>}
+              <p className="section-note">Critérios e valores medidos podem ser corrigidos com auditoria. Sem tolerância aprovada, a avaliação usa a média das 10 medições.</p>}
             {(detail.items ?? []).length>1 && <div className="dimension-set-navigation">
               <div className="dimension-set-caption"><strong>Produtos do conjunto</strong><span>{detail.items.length} SKUs · uma única inspeção</span></div>
               <div className="dimension-set-tabs">
@@ -3728,7 +3763,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                               return (
                                 <label className={existing?.conforme===true?'measure-ok':existing?.conforme===false?'measure-bad':''} key={seq}>
                                   <span>{seq}</span>
-                                  <input type="number" step="any" defaultValue={existing?.valor ?? ''} onBlur={(e)=>saveDimension(item.id,p,seq,e.target.value)} disabled={!canWrite || detail.status==='concluida'}/>
+                                  <input type="number" step="any" defaultValue={existing?.valor ?? ''} onBlur={(e)=>saveDimension(item.id,p,seq,e.target.value)} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)}/>
                                   {existing?.conforme===true && <small>C</small>}
                                   {existing?.conforme===false && <small>NC</small>}
                                 </label>
@@ -3755,9 +3790,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <div><strong>{test.nome}</strong><p>{test.procedimento}</p><small>Critério: {test.criterio_aprovacao}</small></div>
                   <div className="test-actions">
                     <div className="tri-buttons quick">
-                      <button type="button" className={r?.resultado==='conforme'?'selected ok':''} onClick={()=>saveTest(test.id,'conforme')}>C</button>
-                      <button type="button" className={r?.resultado==='nao_conforme'?'selected bad':''} onClick={()=>saveTest(test.id,'nao_conforme')}>NC</button>
-                      <button type="button" className={r?.resultado==='nao_aplicavel'?'selected':''} onClick={()=>saveTest(test.id,'nao_aplicavel')}>NA</button>
+                      <button type="button" className={r?.resultado==='conforme'?'selected ok':''} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)} onClick={()=>saveTest(test.id,'conforme')}>C</button>
+                      <button type="button" className={r?.resultado==='nao_conforme'?'selected bad':''} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)} onClick={()=>saveTest(test.id,'nao_conforme')}>NC</button>
+                      <button type="button" className={r?.resultado==='nao_aplicavel'?'selected':''} disabled={!canWrite || (detail.status==='concluida' && !allowDimensionalRectification)} onClick={()=>saveTest(test.id,'nao_aplicavel')}>NA</button>
                     </div>
                     {r?.resultado && <span className="pill">Salvo</span>}
                   </div>
@@ -3765,7 +3800,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               )
             })}
             {!detail.tests?.length && <div className="muted">Sem teste especial estruturado para esta IT.</div>}
-            {!!detail.tests?.length && !detail.testes_finalizados && detail.status!=='concluida' && <div className="actions"><button className="secondary" type="button" onClick={()=>void completeTests()}><CheckCircle2 size={16}/> Concluir testes</button></div>}
+            {!!detail.tests?.length && !detail.testes_finalizados && (detail.status!=='concluida'||allowDimensionalRectification) && <div className="actions"><button className="secondary" type="button" onClick={()=>void completeTests()}><CheckCircle2 size={16}/> Concluir testes</button></div>}
           </section>
 
           <section id="sec-fotos" className={'panel section-card inspection-stage'+(activeStage==='fotos'?'':' inspection-stage-hidden')}>
@@ -3844,7 +3879,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </section>
 
-          {detail.status!=='concluida' && detail.status!=='aberta' && (
+          {detail.status!=='aberta' && (detail.status!=='concluida'||allowDimensionalRectification) && (
             <section id="sec-resultado" className={'panel section-card result-panel inspection-stage'+(activeStage==='resultado' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
               <h2>Resultado final</h2>
               <div className="readiness">
@@ -3860,8 +3895,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {aiConclusionError&&<p className="sgq-ai-conclusion-error" role="alert">{aiConclusionError}</p>}
               <textarea value={finalObservation} onChange={(e)=>setFinalObservation(e.target.value)} rows={5} placeholder="Registre a conclusão da inspeção."/>
               <div className="result-actions">
-                <button className="success-button" onClick={()=>finishInspection('aprovado')}>Aprovar inspeção</button>
-                <button className="danger" onClick={()=>finishInspection('reprovado')}>Reprovar inspeção</button>
+                <button className="success-button" disabled={!canWrite} onClick={()=>finishInspection('aprovado')}>{detail.status==='concluida'?'Confirmar aprovação revisada':'Aprovar inspeção'}</button>
+                <button className="danger" disabled={!canWrite} onClick={()=>finishInspection('reprovado')}>{detail.status==='concluida'?'Confirmar reprovação revisada':'Reprovar inspeção'}</button>
               </div>
             </section>
           )}
@@ -3873,7 +3908,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <button className="secondary" type="button" onClick={()=>selectInspectionStage('resultado')}>Ir para resultado</button>
             </section>
           )}
-          {detail.status==='concluida' && activeStage==='resultado' && (
+          {detail.status==='concluida' && !allowDimensionalRectification && activeStage==='resultado' && (
             <section className="panel section-card inspection-stage">
               <div className="section-title"><h2>Resultado final</h2><span className={'result-badge '+detail.resultado}>{statusLabel(detail.resultado)}</span></div>
               <p>{detail.observacoes || 'Nenhuma observação final registrada.'}</p>

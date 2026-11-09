@@ -114,6 +114,40 @@ async Task<string> CurrentUserId(HttpClient client, string token)
     return userId;
 }
 
+async Task<(bool Completed,string UserId)> InspectionEditContext(HttpClient client,string token,string id)
+{
+    var userId=await CurrentUserId(client,token);
+    var inspectionRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+        $"select=status&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+    var (inspection,found)=FirstRow(inspectionRows);
+    if(!found)throw new InvalidOperationException("Inspeção não encontrada ou arquivada.");
+    var status=inspection!.Value.GetProperty("status").GetString();
+    if(status=="cancelada")throw new InvalidOperationException("Inspeções canceladas não podem ser editadas.");
+    var profileRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
+        $"select=perfil,ativo&id=eq.{Uri.EscapeDataString(userId)}&ativo=is.true&limit=1");
+    var (profile,authorized)=FirstRow(profileRows);
+    if(!authorized || profile!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor" or "inspetor"))
+        throw new UnauthorizedAccessException("Perfil sem permissão para alterar inspeções.");
+    return (status=="concluida",userId);
+}
+
+async Task AuditCompletedInspectionEdit(HttpClient client,string token,string id,string actor,
+    string action,object? before,object? after,bool needsReview=true)
+{
+    await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+        new {usuario_id=actor,entidade="inspecoes",entidade_id=id,acao=action,
+            dados=new {antes=before,depois=after,registrado_em=DateTimeOffset.UtcNow}},"return=minimal");
+    if(needsReview)
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+            $"id=eq.{Uri.EscapeDataString(id)}",
+            new {documento_gerado_em=(DateTimeOffset?)null,revisao_obrigatoria=true,
+                revisado_em=(DateTimeOffset?)null},"return=minimal");
+    else
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+            $"id=eq.{Uri.EscapeDataString(id)}",
+            new {documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
+}
+
 (JsonElement? row, bool found) FirstRow(JsonElement? element)
 {
     if (element is null || element.Value.ValueKind != JsonValueKind.Array || element.Value.GetArrayLength() == 0)
@@ -1603,6 +1637,11 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
                 app.Logger.LogWarning(logError,"Audit log failed after changing completed inspection {InspectionId}",id);
             }
         }
+        if(wasConcluded)
+            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+                $"id=eq.{Uri.EscapeDataString(id)}",
+                new {revisao_obrigatoria=true,revisado_em=(DateTimeOffset?)null,
+                    documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
         return Results.Ok(new {data=new {ok=true,plano=new {
             lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re,
             caixasRecebidas=totalBoxes,caixasAvaliar=totalInspect,
@@ -1859,6 +1898,11 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 app.Logger.LogWarning(logError,"Audit log failed after changing completed inspection {InspectionId}",id);
             }
         }
+        if(wasConcluded)
+            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+                $"id=eq.{Uri.EscapeDataString(id)}",
+                new {revisao_obrigatoria=true,revisado_em=(DateTimeOffset?)null,
+                    documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
         return Results.Ok(new {data=new {ok=true,plano=new {lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re,caixasRecebidas=totalBoxes,caixasAvaliar=totalInspect}},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -2026,7 +2070,10 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
     {
         var token=Token(request);
         var client=factory.CreateClient("supabase");
-        var userId=await CurrentUserId(client,token);
+        var (completed,actingUser)=await InspectionEditContext(client,token,id);
+        var previous=completed?await RestAsync(client,token,HttpMethod.Get,"inspecao_checklist_resultados",
+            $"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&checklist_id=eq.{Uri.EscapeDataString(checkId)}&limit=1"):null;
+        var userId=actingUser;
 
         var checkRows=await RestAsync(client,token,HttpMethod.Get,"it_checklist",
             $"select=classificacao_sugerida,grupo&id=eq.{Uri.EscapeDataString(checkId)}&limit=1");
@@ -2132,6 +2179,12 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
                 total_conforme=Math.Max(inspected-uniqueNc,0)
             },"return=minimal");
 
+        if(completed)
+            await AuditCompletedInspectionEdit(client,token,id,actingUser,
+                "retificacao_verificacao",
+                new {checklist_id=checkId,anterior=FirstRow(previous).row?.GetRawText()},
+                new {checklist_id=checkId,resultado=result,quantidade_nc=ncQty,
+                    amostra_coberta=inspected,nc_unicas=uniqueNc});
         return Results.Ok(new { data=new {
             ok=true,resultado=result,severidade=automaticSeverity,
             quantidade_avaliada=evaluated,quantidade_nc=ncQty,
@@ -2149,8 +2202,9 @@ app.MapPut("/api/inspecoes/{id}/amostragem/resumo", async (string id,SampleSumma
     {
         var token=Token(request);
         var client=factory.CreateClient("supabase");
+        var (completed,actor)=await InspectionEditContext(client,token,id);
         var rows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=tamanho_amostra,total_inspecionado&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+            $"select=tamanho_amostra,total_inspecionado,total_nao_conforme&id=eq.{Uri.EscapeDataString(id)}&limit=1");
         var (inspection,found)=FirstRow(rows);
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var sample=inspection!.Value.TryGetProperty("tamanho_amostra",out var sm)&&sm.ValueKind==JsonValueKind.Number?sm.GetInt32():0;
@@ -2163,6 +2217,11 @@ app.MapPut("/api/inspecoes/{id}/amostragem/resumo", async (string id,SampleSumma
                 total_nao_conforme=input.TotalNaoConforme,
                 total_conforme=Math.Max(inspected-input.TotalNaoConforme,0)
             },"return=minimal");
+        if(completed)
+            await AuditCompletedInspectionEdit(client,token,id,actor,
+                "retificacao_amostragem",
+                new {nc_anterior=inspection.Value.TryGetProperty("total_nao_conforme",out var prev)?prev.ToString():null},
+                new {nc_unicas=input.TotalNaoConforme,total_conforme=Math.Max(inspected-input.TotalNaoConforme,0)});
         return Results.Ok(new {data=new {total_nao_conforme=input.TotalNaoConforme,total_conforme=Math.Max(inspected-input.TotalNaoConforme,0)},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -2174,8 +2233,17 @@ app.MapPut("/api/inspecoes/{id}/observacao-interna", async (string id,InternalNo
     try
     {
         var token=Token(request);
-        await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"inspecoes",
+        var client=factory.CreateClient("supabase");
+        var (completed,actor)=await InspectionEditContext(client,token,id);
+        var previous=completed?await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=observacao_interna&id=eq.{Uri.EscapeDataString(id)}&limit=1"):null;
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
             $"id=eq.{Uri.EscapeDataString(id)}",new { observacao_interna=string.IsNullOrWhiteSpace(input.Texto)?null:input.Texto.Trim() },"return=minimal");
+        if(completed)
+            await AuditCompletedInspectionEdit(client,token,id,actor,
+                "retificacao_observacao_interna",
+                new {anterior=FirstRow(previous).row?.GetRawText()},
+                new {texto=input.Texto});
         return Results.Ok(new {data=new {ok=true},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -2188,22 +2256,7 @@ app.MapPut("/api/inspecoes/{id}/dimensionais/{itemId}/{paramId}/config", async (
     {
         var token=Token(request);
         var client=factory.CreateClient("supabase");
-        var inspectionRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=status&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
-        var (inspection,inspectionFound)=FirstRow(inspectionRows);
-        if(!inspectionFound)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
-        var completed=inspection!.Value.GetProperty("status").GetString()=="concluida";
-        string? actingUser=null;
-        if(completed)
-        {
-            actingUser=await CurrentUserId(client,token);
-            var roleRows=await RestAsync(client,token,HttpMethod.Get,"profiles",
-                $"select=perfil,ativo&id=eq.{Uri.EscapeDataString(actingUser)}&limit=1");
-            var (role,hasRole)=FirstRow(roleRows);
-            if(!hasRole || role!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor")
-                || (role.Value.TryGetProperty("ativo",out var active)&&active.ValueKind==JsonValueKind.False))
-                return Results.Json(Error("A retificação de dimensionais concluídos exige gestor ou administrador."),statusCode:403);
-        }
+        var (completed,actingUser)=await InspectionEditContext(client,token,id);
         var previousRows=await RestAsync(client,token,HttpMethod.Get,"inspecao_dimensional_configuracoes",
             $"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&processo_item_id=eq.{Uri.EscapeDataString(itemId)}&parametro_id=eq.{Uri.EscapeDataString(paramId)}&limit=1");
         var (previous,hasPrevious)=FirstRow(previousRows);
@@ -2265,18 +2318,10 @@ app.MapPut("/api/inspecoes/{id}/dimensionais/{itemId}/{paramId}/config", async (
             }
         }
         if(completed)
-        {
-            await RestAsync(client,token,HttpMethod.Post,"audit_log","",
-                new {usuario_id=actingUser,entidade="inspecoes",entidade_id=id,
-                    acao="retificacao_criterio_dimensional",
-                    dados=new {processo_item_id=itemId,parametro_id=paramId,
-                        configuracao_anterior=hasPrevious?previous!.Value.GetRawText():null,
-                        configuracao_nova=found?row!.Value.GetRawText():null,
-                        medicoes_recalculadas=updatedMeasurements.Count}},"return=minimal");
-            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
-                $"id=eq.{Uri.EscapeDataString(id)}",
-                new {documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
-        }
+            await AuditCompletedInspectionEdit(client,token,id,actingUser,
+                "retificacao_criterio_dimensional",
+                new {processo_item_id=itemId,parametro_id=paramId,configuracao_anterior=hasPrevious?previous!.Value.GetRawText():null},
+                new {processo_item_id=itemId,parametro_id=paramId,configuracao_nova=found?row!.Value.GetRawText():null,medicoes_recalculadas=updatedMeasurements.Count});
         return Results.Ok(new {data=found?row:(object?)null,
             medicoesAtualizadas=updatedMeasurements,error=(object?)null});
     }
@@ -2291,6 +2336,11 @@ app.MapPut("/api/inspecoes/{id}/dimensionais/{itemId}/{paramId}/{seq:int}", asyn
         if(seq<1 || seq>10) return Results.Json(Error("As análises dimensionais usam exatamente 10 medições por parâmetro."),statusCode:400);
         var token=Token(request);
         var client=factory.CreateClient("supabase");
+        var (completed,actingUser)=await InspectionEditContext(client,token,id);
+        var prior=completed
+            ? await RestAsync(client,token,HttpMethod.Get,"inspecao_dimensionais",
+                $"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&processo_item_id=eq.{Uri.EscapeDataString(itemId)}&parametro_id=eq.{Uri.EscapeDataString(paramId)}&sequencia_amostra=eq.{seq}&limit=1")
+            : null;
         var cfgRows=await RestAsync(client,token,HttpMethod.Get,"inspecao_dimensional_configuracoes",
             $"select=nao_aplicavel,unidade,minimo_aceitavel,maximo_aceitavel&inspecao_id=eq.{Uri.EscapeDataString(id)}&processo_item_id=eq.{Uri.EscapeDataString(itemId)}&parametro_id=eq.{Uri.EscapeDataString(paramId)}&limit=1");
         var (cfg,found)=FirstRow(cfgRows);
@@ -2319,6 +2369,11 @@ app.MapPut("/api/inspecoes/{id}/dimensionais/{itemId}/{paramId}/{seq:int}", asyn
                 conforme
             },"resolution=merge-duplicates,return=representation");
         var (row,ok)=FirstRow(saved);
+        if(completed && ok)
+            await AuditCompletedInspectionEdit(client,token,id,actingUser,
+                "retificacao_medicao_dimensional",
+                new {processo_item_id=itemId,parametro_id=paramId,sequencia=seq,anterior=FirstRow(prior).row?.GetRawText()},
+                new {processo_item_id=itemId,parametro_id=paramId,sequencia=seq,atual=row!.Value.GetRawText()});
         return Results.Ok(new {data=ok?row:(object?)null,error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -2330,8 +2385,13 @@ app.MapPost("/api/inspecoes/{id}/dimensionais/finalizar", async (string id,HttpR
     try
     {
         var token=Token(request);
-        await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+        var client=factory.CreateClient("supabase");
+        var (completed,actor)=await InspectionEditContext(client,token,id);
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
             new {dimensionais_finalizados=true},"return=minimal");
+        if(completed)
+            await AuditCompletedInspectionEdit(client,token,id,actor,
+                "revalidacao_dimensionais",null,new {dimensionais_finalizados=true},needsReview:false);
         return Results.Ok(new {data=new {ok=true},error=(object?)null});
     }
     catch(Exception e){return Results.Json(Error("Falha ao finalizar dimensionais.",e.Message),statusCode:500);}
@@ -2343,7 +2403,9 @@ app.MapPut("/api/inspecoes/{id}/testes/{testId}", async (string id,string testId
     {
         var token=Token(request);
         var client=factory.CreateClient("supabase");
-        var userId=await CurrentUserId(client,token);
+        var (completed,userId)=await InspectionEditContext(client,token,id);
+        var previous=completed?await RestAsync(client,token,HttpMethod.Get,"inspecao_testes_resultados",
+            $"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&teste_id=eq.{Uri.EscapeDataString(testId)}&limit=1"):null;
         await RestAsync(client,token,HttpMethod.Post,"inspecao_testes_resultados",
             "on_conflict=inspecao_id,teste_id",
             new {inspecao_id=id,teste_id=testId,resultado=input.Resultado,registrado_por=userId,registrado_em=DateTimeOffset.UtcNow},
@@ -2353,6 +2415,11 @@ app.MapPut("/api/inspecoes/{id}/testes/{testId}", async (string id,string testId
         // Se uma medição for alterada depois da conclusão, exige nova confirmação.
         await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
             new {testes_finalizados=false},"return=minimal");
+        if(completed)
+            await AuditCompletedInspectionEdit(client,token,id,userId,
+                "retificacao_teste_especial",
+                new {teste_id=testId,anterior=FirstRow(previous).row?.GetRawText()},
+                new {teste_id=testId,resultado=input.Resultado});
         return Results.Ok(new {data=new {ok=true,finalizados=false},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -2364,8 +2431,14 @@ app.MapPost("/api/inspecoes/{id}/testes/finalizar", async (string id,HttpRequest
     try
     {
         var token=Token(request);
-        await RestAsync(factory.CreateClient("supabase"),token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
+        var client=factory.CreateClient("supabase");
+        var (completed,actor)=await InspectionEditContext(client,token,id);
+        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
             new {testes_finalizados=true},"return=minimal");
+        if(completed)
+            await AuditCompletedInspectionEdit(client,token,id,actor,
+                "revalidacao_testes_especiais",new {testes_finalizados=false},
+                new {testes_finalizados=true},needsReview:false);
         return Results.Ok(new {data=new {ok=true},error=(object?)null});
     }
     catch(Exception e){return Results.Json(Error("Falha ao finalizar testes.",e.Message),statusCode:500);}
@@ -2378,12 +2451,23 @@ app.MapPost("/api/inspecoes/{id}/concluir", async (string id,FinishInspectionReq
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=status,grupo_inspecao_id,it_versao_id,tamanho_amostra,total_inspecionado,total_nao_conforme,limite_rejeicao,dimensionais_finalizados,testes_finalizados&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+            $"select=status,resultado,observacoes,concluida_em,grupo_inspecao_id,it_versao_id,tamanho_amostra,total_inspecionado,total_nao_conforme,limite_rejeicao,dimensionais_finalizados,testes_finalizados&id=eq.{Uri.EscapeDataString(id)}&limit=1");
         var (ins,found)=FirstRow(insRows);
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var i=ins!.Value;
-        if(!i.TryGetProperty("status",out var currentStatus)||currentStatus.GetString()!="em_andamento")
-            return Results.Json(Error("Inicie o produto antes de concluir. Produtos ainda não iniciados não podem ser finalizados."),statusCode:409);
+        var status=i.GetProperty("status").GetString();
+        if(status is not ("em_andamento" or "concluida"))
+            return Results.Json(Error("Inicie a inspeção antes de concluir."),statusCode:409);
+        var concluded=status=="concluida";
+        string? revisingUser=null;
+        if(concluded)
+        {
+            var edit=await InspectionEditContext(client,token,id);
+            revisingUser=edit.UserId;
+        }
+        var completedAt=concluded && i.TryGetProperty("concluida_em",out var previousDate)
+            && previousDate.ValueKind==JsonValueKind.String
+            ? previousDate.GetDateTimeOffset():DateTimeOffset.UtcNow;
 
         int sample=i.TryGetProperty("tamanho_amostra",out var sm)&&sm.ValueKind==JsonValueKind.Number?sm.GetInt32():0;
         int inspected=i.TryGetProperty("total_inspecionado",out var ti)&&ti.ValueKind==JsonValueKind.Number?ti.GetInt32():0;
@@ -2418,14 +2502,22 @@ app.MapPost("/api/inspecoes/{id}/concluir", async (string id,FinishInspectionReq
                 observacoes=string.IsNullOrWhiteSpace(input.Observacoes)?null:input.Observacoes.Trim(),
                 justificativa_decisao=reHit?(string.IsNullOrWhiteSpace(input.Observacoes)?null:input.Observacoes.Trim()):null,
                 revisao_obrigatoria=pending.Count>0||reHit,
-                concluida_em=DateTimeOffset.UtcNow
+                revisado_em=concluded && pending.Count==0 && !reHit ? (DateTimeOffset?)DateTimeOffset.UtcNow : null,
+                concluida_em=completedAt,
+                documento_gerado_em=(DateTimeOffset?)null
             },"return=minimal");
 
         var groupId=i.GetProperty("grupo_inspecao_id").GetString();
         if(!string.IsNullOrWhiteSpace(groupId))
             await RestAsync(client,token,HttpMethod.Patch,"grupos_inspecao",$"id=eq.{Uri.EscapeDataString(groupId)}",new {status="concluido"},"return=minimal");
 
-        return Results.Ok(new {data=new {pendencias=pending,re_atingido=reHit},error=(object?)null});
+        if(concluded)
+            await AuditCompletedInspectionEdit(client,token,id,revisingUser!,
+                "retificacao_resultado_final",
+                new {resultado_anterior=i.TryGetProperty("resultado",out var oldResult)?oldResult.ToString():null,
+                    observacoes_anteriores=i.TryGetProperty("observacoes",out var oldObs)?oldObs.ToString():null},
+                new {resultado=input.Resultado,observacoes=input.Observacoes,pendencias=pending},needsReview:false);
+        return Results.Ok(new {data=new {pendencias=pending,re_atingido=reHit,retificado=concluded},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao concluir inspeção.",e.Message),statusCode:500);}
