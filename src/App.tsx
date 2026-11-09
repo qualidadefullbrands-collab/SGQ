@@ -660,7 +660,7 @@ export default function App() {
     setInspection(current=>({...current,
       codigo:fst?fstCode(fst):'',
       processoId:process?.id||'',
-      subprocessoCodigo:process?nextSubprocessFor(process):'A',
+      subprocessoCodigo:fst.match(/-([A-Z])$/)?.[1]||(process?nextSubprocessFor(process):'A'),
       cliente:order.cliente||process?.cliente||''
     }))
     setSkuRows(order.itens.map(item=>({
