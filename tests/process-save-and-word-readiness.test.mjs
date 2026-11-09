@@ -44,7 +44,7 @@ test('backend persists independent NF and shared parent fields while verifying a
  assert.match(code,/FirstRow\(updatedParent\)\.found/)
 })
 
-test('all subprocesses and mandatory inspection evidence must be ready before Word or SharePoint',()=>{
+test('all subprocesses and mandatory inspection evidence must be checked before Word generation',()=>{
  assert.match(docs,/async def process_word_status\(/)
  assert.match(docs,/if not group_rows:/)
  assert.match(docs,/row\.get\("status"\)!="concluida"/)
@@ -54,8 +54,12 @@ test('all subprocesses and mandatory inspection evidence must be ready before Wo
  assert.match(docs,/if not status\["ready"\]:/)
  assert.match(api,/app\.MapGet\("\/api\/processos\/\{id\}\/laudo-status"/)
  assert.match(api,/generate-process\/\{Uri\.EscapeDataString\(parentId!\)\}/)
- assert.match(app,/disabled=\{wordDownloading\|\|!wordStatus\?\.ready\}/)
- assert.match(app,/disabled=\{sharepointBusy\|\|!wordStatus\?\.ready\}/)
+ assert.match(app,/id="sgq-word-pendencias"/)
+ assert.match(app,/wordStatus\.pending\.map\(/)
+ assert.match(app,/onClick=\{\(\)=>void refreshWordStatus\(\)\}/)
+ assert.match(app,/disabled=\{wordDownloading\}/)
+ assert.doesNotMatch(app,/Enviar ao SharePoint/)
+ assert.doesNotMatch(app,/disabled=\{wordDownloading\|\|!wordStatus\?\.ready\}/)
 })
 
 test('Word readiness respects per-SKU NA, ten readings, and undefined tolerances',()=>{
@@ -112,4 +116,29 @@ test('backend records before-after revisions and preserves the original completi
  assert.match(api,/concluida_em=completedAt/)
  assert.match(api,/revisao_obrigatoria=true/)
  assert.match(api,/revisado_em=\(DateTimeOffset\?\)null/)
+})
+
+test('Word readiness unpacks all six parallel query results, including dimensional configurations',()=>{
+ const readiness=docs.split('async def process_word_status(')[1]?.split('@app.get("/process-report-status/')[0]||''
+ assert.match(readiness,/links,photos,check_results,dim_results,test_results,dim_configs=await __import__\("asyncio"\)\.gather\(/)
+ assert.match(readiness,/table_rows\(client,token,"inspecao_dimensional_configuracoes"/)
+ assert.match(readiness,/pending\.extend\(dimensional_pendencies\(/)
+})
+
+test('Word errors and actual pending items are visible and retryable without bypassing validation',()=>{
+ assert.match(app,/function parseWordStatus\(/)
+ assert.match(app,/async function refreshWordStatus\(/)
+ assert.match(app,/wordStatus\?\.error\?'Falha ao consultar o laudo'/)
+ assert.match(app,/wordStatus\.pending\.map\(/)
+ assert.match(app,/A validação falhou/)
+ assert.match(app,/if\(!wordStatus\?\.ready\)/)
+ assert.match(app,/document\.getElementById\('sgq-word-pendencias'\)/)
+})
+
+test('Word retains photo evidence while allowing numbered captions when empty',()=>{
+ assert.match(docs,/if not photo_rows:/)
+ assert.match(docs,/fotografias sem arquivo\./)
+ assert.doesNotMatch(docs,/fotografias sem arquivo ou legenda/)
+ const generator=source('server/docx_generator.py')
+ assert.match(generator,/photo\.get\("caption"\) or f"Foto \{index\+1\}"/)
 })

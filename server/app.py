@@ -363,7 +363,7 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
             table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}))
     links,photos,check_results,dim_results,test_results,dim_configs=([],[],[],[],[],[])
     if ids:
-        links,photos,check_results,dim_results,test_results=await __import__("asyncio").gather(
+        links,photos,check_results,dim_results,test_results,dim_configs=await __import__("asyncio").gather(
             table_rows(client,token,"grupo_inspecao_itens",{
                 "grupo_inspecao_id":f"in.({group_ids})",
                 "select":"grupo_inspecao_id,processo_itens(id,quantidade,caixas_recebidas,"
@@ -447,9 +447,11 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
             photo_rows=[p for p in photos if p.get("inspecao_id")==ident]
             if not photo_rows:
                 pending.append(f"{label}: fotografias da inspeção não registradas.")
-            elif any(not required_text(p.get("storage_path")) or not required_text(p.get("legenda"))
+            elif any(not required_text(p.get("storage_path"))
                      for p in photo_rows):
-                pending.append(f"{label}: fotografias sem arquivo ou legenda.")
+                # Fotos sem legenda recebem identificação sequencial no Word (Foto 1, Foto 2...).
+                # Apenas arquivo ausente invalida a evidência.
+                pending.append(f"{label}: fotografias sem arquivo.")
     return {"ready":len(pending)==0,"pending":pending,
             "processCode":parent.get("codigo"),"subprocesses":len(groups),
             "completed":completed}

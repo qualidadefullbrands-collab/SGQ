@@ -38,6 +38,7 @@ test('Word readiness does not depend on voluntary sample-retention decision',()=
   assert.match(report,/async def process_word_status\(/)
   const block=report.split('async def process_word_status(')[1]?.split('@app.get("/process-report-status/')[0]||''
   assert.doesNotMatch(block,/retencao_decisao|retencao_motivo|retained/)
-  assert.match(app,/disabled=\{wordDownloading\|\|!wordStatus\?\.ready\}/)
+  assert.match(app,/disabled=\{wordDownloading\}/)
+  assert.match(app,/id="sgq-word-pendencias"/)
   assert.match(app,/Gerar Word do FST/)
 })
