@@ -796,9 +796,14 @@ def append_filled_inspection_form(doc,filled_docx:bytes)->None:
         if any(True for _ in node.iter(qn("w:drawing"))):break
         body.remove(node)
     doc.add_page_break()
+    image_id=max((int(x.get("id") or 0) for x in body.iter(qn("wp:docPr"))),default=0)
     for original in elements[start:]:
         if original.tag==qn("w:sectPr"):continue
         cloned=deepcopy(original)
+        # Ids de imagens precisam ser exclusivos em todo o documento consolidado.
+        for property_node in cloned.iter(qn("wp:docPr")):
+            image_id+=1
+            property_node.set("id",str(image_id))
         for blip in cloned.iter(qn("a:blip")):
             image_rel=blip.get(qn("r:embed"))
             if not image_rel:continue
