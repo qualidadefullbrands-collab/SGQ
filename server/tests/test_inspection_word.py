@@ -265,8 +265,21 @@ class InspectionWordTests(unittest.TestCase):
                     "dimens" in str(c.text).lower() or "componente" in str(c.text).lower()
                     for row in t.rows[:3] for c in row.cells)])
         self.assertEqual(len(dimension_tables),2)
-        first=" ".join(cell.text for row in dimension_tables[0].rows for cell in row.cells)
-        second=" ".join(cell.text for row in dimension_tables[1].rows for cell in row.cells)
+        # A IT real divide um mesmo quadro em tabelas: componente, parâmetro e resultado.
+        # Validar o bloco completo de cada SKU, não só a célula Componente / SKU.
+        sections=[]
+        current=None
+        for node in doc._element.body:
+            text=" ".join(t.text or "" for t in node.iter(qn("w:t")))
+            if "Componente / SKU" in text:
+                current=[text]
+                sections.append(current)
+            elif current is not None:
+                current.append(text)
+                if "Resultado dimensional" in text:current=None
+        self.assertEqual(len(sections),2)
+        first=" ".join(sections[0])
+        second=" ".join(sections[1])
         self.assertIn("SKU1234",first)
         self.assertIn("81 g",first)
         self.assertNotIn("SKU5678",first)
