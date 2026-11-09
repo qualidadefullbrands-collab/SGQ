@@ -858,7 +858,29 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
     out=BytesIO(); doc.save(out); return out.getvalue()
 
 def update_consolidated_page_totals(doc)->None:
-    """Substitui 'Página N de 9' do modelo por PAGE/NUMPAGES no laudo combinado."""
+    """Calibra texto e resultados PAGE/NUMPAGES em Calibri 8pt, inclusive após atualizar."""
+    def field(label):
+        field_xml=OxmlElement("w:fldSimple")
+        field_xml.set(qn("w:instr"),label+" \\* MERGEFORMAT")
+        result_run=OxmlElement("w:r")
+        run_pr=OxmlElement("w:rPr")
+        fonts=OxmlElement("w:rFonts")
+        for attr in ("ascii","hAnsi","eastAsia","cs"):
+            fonts.set(qn("w:"+attr),"Calibri")
+        run_pr.append(fonts)
+        font_size=OxmlElement("w:sz")
+        font_size.set(qn("w:val"),"16")
+        run_pr.append(font_size)
+        font_size_cs=OxmlElement("w:szCs")
+        font_size_cs.set(qn("w:val"),"16")
+        run_pr.append(font_size_cs)
+        result_run.append(run_pr)
+        cached=OxmlElement("w:t")
+        cached.text="1"
+        result_run.append(cached)
+        field_xml.append(result_run)
+        return field_xml
+
     for section in doc.sections:
         footer=section.footer
         handled=set()
@@ -868,29 +890,17 @@ def update_consolidated_page_totals(doc)->None:
                     identifier=id(cell._tc)
                     if identifier in handled:continue
                     handled.add(identifier)
-                    content=str(cell.text or "")
-                    if not re.search(r"página",content,re.I) or not re.search(r"de\s+\d+\b",content,re.I):
+                    original=str(cell.text or "")
+                    if not re.search(r"página",original,re.I) or not re.search(r"de\\s+\\d+\\b",original,re.I):
                         continue
                     p=cell.paragraphs[0]
                     clear_paragraph(p)
                     set_font(p.add_run("Página "),8,bold=True)
-                    field=OxmlElement("w:fldSimple")
-                    field.set(qn("w:instr"),"PAGE")
-                    page_run=OxmlElement("w:r")
-                    page_text=OxmlElement("w:t")
-                    page_text.text="1"
-                    page_run.append(page_text)
-                    field.append(page_run)
-                    p._p.append(field)
+                    p._p.append(field("PAGE"))
                     set_font(p.add_run(" de "),8,bold=True)
-                    total=OxmlElement("w:fldSimple")
-                    total.set(qn("w:instr"),"NUMPAGES")
-                    total_run=OxmlElement("w:r")
-                    total_text=OxmlElement("w:t")
-                    total_text.text="1"
-                    total_run.append(total_text)
-                    total.append(total_run)
-                    p._p.append(total)
+                    p._p.append(field("NUMPAGES"))
+                    for extra in list(cell.paragraphs[1:]):
+                        extra._element.getparent().remove(extra._element)
     settings=doc.settings._element
     if settings.find(qn("w:updateFields")) is None:
         update=OxmlElement("w:updateFields")
