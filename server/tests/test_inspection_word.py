@@ -6,11 +6,12 @@ from pathlib import Path
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches
+from docx.oxml.ns import qn
 from PIL import Image
 from server.docx_generator import (
     add_photo, emphasize_sampling_tables, fst_code, generate_inspection,
     inspection_file_name, whole_number, dimensional_evaluations,
-    format_dimensional_mean,
+    format_dimensional_mean, append_filled_inspection_form, update_consolidated_page_totals,
 )
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -227,17 +228,134 @@ class InspectionWordTests(unittest.TestCase):
         within=dimensional_evaluations(items,params,limited,[dict(r,valor=94) for r in readings])
         self.assertEqual(within[0]["status"],"aprovado")
 
-    def test_word_records_approval_by_mean(self):
+    def test_dimensionals_are_separate_for_each_measured_sku(self):
         payload=sample_payload()
-        payload["dim_params"]=[{"id":"peso","nome":"Peso","unidade":"g"}]
-        payload["dim_configs"]=[]
-        payload["dim_results"]=[{"processo_item_id":"item-1","parametro_id":"peso",
-                                "sequencia_amostra":i,"valor":81,"conforme":None}
-                                for i in range(1,11)]
+        payload["group"]={"subprocesso_codigo":"A"}
+        payload["process"]["codigo"]="26125"
+        payload["items"].append({
+            "id":"item-2","produto":{"sku":"SKU5678","nome":"COMPONENTE B"},
+            "quantidade":250,"quantidade_por_caixa":25,"caixas_recebidas":10
+        })
+        payload["dim_params"]=[
+            {"id":"peso","nome":"Peso","unidade":"g"},
+            {"id":"altura","nome":"Tamanho externo (altura)","unidade":"mm"},
+            {"id":"espessura","nome":"Espessura da parede","unidade":"mm"},
+        ]
+        payload["dim_configs"]=[
+            {"processo_item_id":"item-1","parametro_id":"espessura","nao_aplicavel":True},
+            {"processo_item_id":"item-2","parametro_id":"espessura","nao_aplicavel":True},
+        ]
+        payload["dim_results"]=[
+            {"processo_item_id":"item-1","parametro_id":"peso",
+             "sequencia_amostra":i,"valor":81,"unidade":"g","conforme":None}
+            for i in range(1,11)
+        ] + [
+            {"processo_item_id":"item-2","parametro_id":"altura",
+             "sequencia_amostra":i,"valor":70,"unidade":"mm","conforme":None}
+            for i in range(1,11)
+        ]
         template=(ROOT/"templates"/"IT001.docx").read_bytes()
         doc=Document(io.BytesIO(generate_inspection(template,payload)))
-        cells=[cell.text for table in doc.tables for row in table.rows for cell in row.cells]
-        self.assertIn("APROVADO PELA MÉDIA (sem tolerância aprovada)",cells)
-        self.assertIn("81 g",cells)
+        dimension_tables=[table for table in doc.tables if any(
+            "Componente / SKU" in cell.text for row in table.rows for cell in row.cells)]
+        if len(dimension_tables)!=2:
+            print("DIMDBG",[(idx,len(t.rows),len(t.columns),
+                [str(c.text)[:45] for row in t.rows[:3] for c in row.cells[:3]])
+                for idx,t in enumerate(doc.tables) if any(
+                    "dimens" in str(c.text).lower() or "componente" in str(c.text).lower()
+                    for row in t.rows[:3] for c in row.cells)])
+        self.assertEqual(len(dimension_tables),2)
+        # A IT real divide um mesmo quadro em tabelas: componente, parâmetro e resultado.
+        # Validar o bloco completo de cada SKU, não só a célula Componente / SKU.
+        sections=[]
+        current=None
+        for node in doc._element.body:
+            text=" ".join(t.text or "" for t in node.iter(qn("w:t")))
+            if "Componente / SKU" in text:
+                current=[text]
+                sections.append(current)
+            elif current is not None:
+                current.append(text)
+                if "Resultado dimensional" in text:current=None
+        self.assertEqual(len(sections),2)
+        first=" ".join(sections[0])
+        second=" ".join(sections[1])
+        self.assertIn("SKU1234",first)
+        self.assertIn("81 g",first)
+        self.assertNotIn("SKU5678",first)
+        self.assertNotIn("Tamanho externo (altura)",first)
+        self.assertIn("SKU5678",second)
+        self.assertIn("70 mm",second)
+        self.assertNotIn("SKU1234",second)
+        self.assertNotIn("Peso",second)
+        self.assertNotIn("Espessura da parede",first+second)
+        all_text=" ".join(cell.text for table in doc.tables for row in table.rows for cell in row.cells)
+        self.assertNotIn("RESUMO DIMENSIONAL",all_text)
+        self.assertIn("FST26125-A",all_text)
+
+    def test_completed_subprocess_uses_full_official_inspection_form(self):
+        template=(ROOT/"templates"/"IT001.docx").read_bytes()
+        a=sample_payload()
+        a["process"]["codigo"]="26125"
+        a["group"]={"subprocesso_codigo":"A"}
+        b=sample_payload()
+        b["process"]["codigo"]="26125"
+        b["group"]={"subprocesso_codigo":"B"}
+        b["inspection"]["numero"]="INS-26125-B"
+        b["items"][0]["produto"]["sku"]="SKU-B"
+        b["items"][0]["produto"]["nome"]="COMPONENTE B"
+        doc=Document(io.BytesIO(generate_inspection(template,a)))
+        append_filled_inspection_form(doc,generate_inspection(template,b))
+        values=" ".join(cell.text for table in doc.tables for row in table.rows for cell in row.cells)
+        self.assertIn("FST26125-A",values)
+        self.assertIn("FST26125-B",values)
+        self.assertEqual(sum(
+            p.text.strip().upper()=="REGISTRO DE INSPEÇÃO" for p in doc.paragraphs),2)
+        # O texto normativo da instrução permanece uma vez só.
+        norm_count=sum("1. OBJETIVO" in p.text.upper() for p in doc.paragraphs)
+        self.assertLessEqual(norm_count,1)
+
+    def test_subprocess_photo_images_preserved_and_unique(self):
+        template=(ROOT/"templates"/"IT001.docx").read_bytes()
+        photo=Image.new("RGB",(300,200),(60,120,140))
+        image=io.BytesIO();photo.save(image,format="PNG")
+        first=sample_payload()
+        first["photos"]=[{"bytes":image.getvalue(),"caption":"Evidência A"}]
+        first["process"]["codigo"]="26125"
+        first["group"]={"subprocesso_codigo":"A"}
+        second=sample_payload()
+        second["photos"]=[{"bytes":image.getvalue(),"caption":"Evidência B"}]
+        second["process"]["codigo"]="26125"
+        second["group"]={"subprocesso_codigo":"B"}
+        doc=Document(io.BytesIO(generate_inspection(template,first)))
+        append_filled_inspection_form(doc,generate_inspection(template,second))
+        buffer=io.BytesIO();doc.save(buffer)
+        reloaded=Document(io.BytesIO(buffer.getvalue()))
+        self.assertEqual(len(reloaded.inline_shapes),2)
+        identifiers=[node.get("id") for node in reloaded._element.body.iter(qn("wp:docPr"))]
+        self.assertEqual(len(identifiers),len(set(identifiers)))
+
+    def test_empty_photo_template_does_not_create_unused_section(self):
+        template=(ROOT/"templates"/"IT001.docx").read_bytes()
+        doc=Document(io.BytesIO(generate_inspection(template,sample_payload())))
+        photo_headers=[cell.text for table in doc.tables
+                       for row in table.rows for cell in row.cells
+                       if "FOTOS DA INSPEÇÃO" in cell.text.upper()]
+        if photo_headers:
+            print("PHOTODBG",[(idx,len(t.rows),len(t.columns),
+                [str(c.text)[:50] for row in t.rows[:3] for c in row.cells[:3]])
+                for idx,t in enumerate(doc.tables) if any(
+                    "foto" in str(c.text).lower() for row in t.rows for c in row.cells)])
+        self.assertEqual(photo_headers,[])
+
+    def test_consolidated_footer_uses_total_page_field(self):
+        doc=Document()
+        footer_table=doc.sections[0].footer.add_table(rows=1,cols=1,width=Inches(3))
+        footer_table.cell(0,0).text="Página 10 de 9"
+        update_consolidated_page_totals(doc)
+        xml=doc.sections[0].footer._element.xml
+        self.assertIn('w:instr="PAGE"',xml)
+        self.assertIn('w:instr="NUMPAGES"',xml)
+        self.assertNotIn("Página 10 de 9",xml)
 
 if __name__=="__main__": unittest.main()
