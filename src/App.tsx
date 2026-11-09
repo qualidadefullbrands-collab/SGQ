@@ -2474,7 +2474,7 @@ export default function App() {
     if (saved.error || !saved.data) return setError(saved.error?.message ?? 'Falha ao salvar configuração dimensional.')
     setDetail((d:any)=>{
       const others=(d.dimConfigs ?? []).filter((x:any)=>!(x.processo_item_id===itemId && x.parametro_id===param.id))
-      const updates=saved.medicoesAtualizadas ?? []
+      const updates=(saved as any).medicoesAtualizadas ?? []
       return { ...d, dimConfigs:[...others,saved.data],
         dimResults:(d.dimResults??[]).map((measurement:any)=>{
           const updated=updates.find((x:any)=>x.id===measurement.id)
