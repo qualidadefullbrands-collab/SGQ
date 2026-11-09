@@ -73,7 +73,7 @@ test('retroactive tolerance recalculation preserves measurements and audit trail
  assert.match(api,/"retificacao_criterio_dimensional"/)
  assert.match(api,/new \{conforme=expected\}/)
  assert.match(app,/Aprovado pela média/)
- assert.match(app,/Retificar critérios/)
+ assert.match(app,/Editar inspeção concluída/)
  assert.match(app,/allowDimensionalRectification/)
 })
 
