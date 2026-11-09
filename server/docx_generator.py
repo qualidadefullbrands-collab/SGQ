@@ -722,32 +722,92 @@ def generate_inspection(template_bytes:bytes,payload:dict)->bytes:
 
     photo_table=None
     for table in doc.tables:
-        if any("FOTO" in (c.text or "").upper() for row in table.rows for c in row.cells):
-            if len(table.rows)>=2 and len(table.columns)>=2: photo_table=table
+        if any("FOTOS" in (c.text or "").upper() for row in table.rows for c in row.cells):
+            if len(table.rows)>=1 and len(table.columns)>=2:
+                photo_table=table
+    if photo_table is not None and not photos:
+        # Não imprimir a folha fotográfica do modelo quando não existem evidências.
+        node=photo_table._tbl
+        previous=node.getprevious()
+        node.getparent().remove(node)
+        if (previous is not None and previous.tag==qn("w:p")
+            and not "".join(t.text or "" for t in previous.iter(qn("w:t"))).strip()
+            and any(el.get(qn("w:type"))=="page" for el in previous.iter(qn("w:br")))):
+            previous.getparent().remove(previous)
     if photos:
         if photo_table is None:
-            doc.add_paragraph("REGISTRO FOTOGRÁFICO")
+            doc.add_paragraph("FOTOS DA INSPEÇÃO")
             photo_table=doc.add_table(rows=0,cols=3)
+            first_photo_row=0
         elif len(photo_table.columns)!=3:
-            # Do not squeeze a third photograph into an official two-column cell.
+            # A tabela original de duas colunas não pode manter espaços vazios adicionais.
+            original=photo_table._tbl
             three=doc.add_table(rows=0,cols=3)
-            photo_table._tbl.addnext(three._tbl)
+            original.addnext(three._tbl)
+            original.getparent().remove(original)
             photo_table=three
-        needed=(len(photos)+2)//3
-        while len(photo_table.rows)<needed: photo_table.add_row()
+            first_photo_row=0
+        else:
+            header=" ".join(c.text for c in photo_table.rows[0].cells).upper()
+            first_photo_row=1 if "FOTOS" in header else 0
+        needed=first_photo_row+(len(photos)+2)//3
+        while len(photo_table.rows)<needed:photo_table.add_row()
+        # Remover as linhas de fotografias do formulário que não foram utilizadas.
+        while len(photo_table.rows)>needed:
+            extra=photo_table.rows[-1]._tr
+            extra.getparent().remove(extra)
         for idx,item in enumerate(photos):
             data=photo_bytes(item.get("bytes"))
-            if not data: raise ValueError(f"Foto {idx+1} não disponível para compor o laudo.")
-            cell=photo_table.cell(idx//3,idx%3)
+            if not data:raise ValueError(f"Foto {idx+1} não disponível para compor o laudo.")
+            cell=photo_table.cell(first_photo_row+idx//3,idx%3)
             add_photo(cell,data,item.get("caption") or f"Foto {idx+1}",
                       width=2.17,max_height=2.5)
-        for idx in range(len(photos),len(photo_table.rows)*3):
-            set_cell(photo_table.cell(idx//3,idx%3),"")
-        for row in photo_table.rows:
+        for idx in range(len(photos),(needed-first_photo_row)*3):
+            set_cell(photo_table.cell(first_photo_row+idx//3,idx%3),"")
+        for row in photo_table.rows[first_photo_row:]:
             trPr=row._tr.get_or_add_trPr()
-            if trPr.find(qn("w:cantSplit")) is None: trPr.append(OxmlElement("w:cantSplit"))
+            if trPr.find(qn("w:cantSplit")) is None:
+                trPr.append(OxmlElement("w:cantSplit"))
 
     out=BytesIO(); doc.save(out); return out.getvalue()
+
+def append_filled_inspection_form(doc,filled_docx:bytes)->None:
+    """Adiciona o registro oficial preenchido (sem repetir as páginas da instrução).
+    Preserva tabelas, conteúdo e imagens do próprio subprocesso.
+    """
+    child=Document(BytesIO(filled_docx))
+    elements=list(child._element.body)
+    start=None
+    for index,element in enumerate(elements):
+        if element.tag!=qn("w:p"):continue
+        line=" ".join((t.text or "") for t in element.iter(qn("w:t"))).strip().upper()
+        if line=="REGISTRO DE INSPEÇÃO" or line.startswith("REGISTRO DE INSPEÇÃO "):
+            start=index
+            break
+    if start is None:
+        raise ValueError("O modelo da IT não contém o marco REGISTRO DE INSPEÇÃO; "
+                         "não é seguro substituí-lo por tabelas genéricas.")
+    # Evita páginas vazias criadas por parágrafos ou quebras pendentes antes da nova ficha.
+    body=doc._element.body
+    while len(body)>1:
+        node=body[-2]  # sectPr é o último elemento.
+        if node.tag!=qn("w:p"):break
+        if any((t.text or "").strip() for t in node.iter(qn("w:t"))):break
+        if any(True for _ in node.iter(qn("w:drawing"))):break
+        body.remove(node)
+    doc.add_page_break()
+    for original in elements[start:]:
+        if original.tag==qn("w:sectPr"):continue
+        cloned=deepcopy(original)
+        for blip in cloned.iter(qn("a:blip")):
+            image_rel=blip.get(qn("r:embed"))
+            if not image_rel:continue
+            image_part=child.part.related_parts.get(image_rel)
+            if image_part is None:raise ValueError("Imagem sem vínculo no formulário preenchido.")
+            new_rel,_=doc.part.get_or_add_image(BytesIO(image_part.blob))
+            blip.set(qn("r:embed"),new_rel)
+        body.insert(len(body)-1,cloned)
+
 
 def append_subprocess_appendix(doc, payload:dict) -> None:
     """Anexo individual; não replica o modelo da IT do FST principal."""
