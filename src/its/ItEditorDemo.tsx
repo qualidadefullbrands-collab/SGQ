@@ -384,14 +384,18 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
       {showSpecs&&<section className="it-structure-section">
        <div className="it-structure-section-head"><h3>Análises dimensionais</h3><span>{dimensionalCriteria.length} parâmetros</span></div>
        <p className="it-structure-help">Os valores nominais e desvios somente aparecem quando cadastrados na IT. As medições reais permanecem vinculadas a Componente / SKU durante a inspeção.</p>
-       <div className="it-test-table-scroll"><table className="it-structure-table">
-        <thead><tr><th scope="col">Parâmetro</th><th scope="col">Especificação / desvio</th><th scope="col">Leitura de exemplo</th><th scope="col">Observação</th></tr></thead>
-        <tbody>{dimensionalCriteria.map(c=><tr key={c.id}>
-         <td><strong>{c.title||'—'}</strong></td><td>{specification(c)}</td>
-         <td>{c.measurement?c.measurement+' '+c.unit:'Sem medição simulada'}</td>
-         <td>{c.notes||'—'}</td>
-        </tr>)}</tbody>
-       </table></div>
+       {isIt001Reference&&<div className="it-structure-dim-sku">Componente / SKU <strong>A identificar durante a inspeção</strong></div>}
+       <div className="it-structure-dimension-list">
+        {dimensionalCriteria.map(c=><div className="it-structure-dimension-item" key={c.id}>
+         <div className="it-structure-dimension-title"><strong>{c.title}</strong><span>Equipamento / instrumento: —</span>
+          <span>Cód. equipamento: —</span><span>Especificação / desvio: {specification(c)}</span></div>
+         {isIt001Reference?<div className="it-structure-dimension-grid">
+          {[1,3,5,7,9,2,4,6,8,10].map(index=><div key={index}><small>{index}.</small>{c.measurement&&index===1?<span>{c.measurement} {c.unit}</span>:<span>—</span>}</div>)}
+         </div>:<div className="it-structure-dimension-note">Leitura de exemplo: {c.measurement?c.measurement+' '+c.unit:'Não informada'}</div>}
+         {c.notes&&<p className="it-structure-help">{c.notes}</p>}
+        </div>)}
+       </div>
+       {isIt001Reference&&<div className="it-structure-level-row"><strong>Resultado dimensional</strong><span>☐ Aprovado</span><span>☐ Reprovado</span></div>
       </section>}
       {!!specialCriteria.length&&<section className="it-structure-section">
        <div className="it-structure-section-head"><h3>Testes especiais</h3><span>{specialCriteria.length} teste(s)</span></div>
@@ -399,6 +403,16 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
         <strong>{c.title}</strong><p>{c.notes||'Procedimento não informado.'}</p>
         <small>Resultado de exemplo: {c.answer||'Não registrado'}</small>
        </div>)}
+      </section>}
+      {isIt001Reference&&<section className="it-structure-section">
+       <div className="it-structure-section-head"><h3>Resultado da inspeção · modelo</h3><span>Sem dados operacionais</span></div>
+       <div className="it-test-table-scroll"><table className="it-structure-table it-structure-result-table"><tbody>
+        <tr><th>Resultado final</th><td>☐ Aprovado&nbsp;&nbsp; ☐ Reprovado</td></tr>
+        <tr><th>Inspecionado por</th><td>—</td></tr>
+        <tr><th>Data</th><td>—</td></tr>
+        <tr><th>Responsável Técnico (nome/CRF)</th><td>—</td></tr>
+        <tr><th>Observação / conclusão</th><td>—</td></tr>
+       </tbody></table></div>
       </section>}
       <footer className="it-structure-footer">
        <span><strong>Elaboração:</strong> {footer.prepared||'Não estruturada no cadastro'}</span>
