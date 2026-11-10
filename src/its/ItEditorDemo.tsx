@@ -343,6 +343,31 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
        <div className="it-structure-body">{notebook||'Nenhum texto incluído nesta cópia.'}</div>
        {technicalImage&&<figure className="it-test-doc-figure"><img src={technicalImage} alt="Figura anexada à cópia"/><figcaption>{technicalName}</figcaption></figure>}
       </section>
+      {isIt001Reference&&<section className="it-structure-section">
+       <div className="it-structure-section-head"><h3>Identificação · modelo de registro</h3><span>IT 001 · Anexo</span></div>
+       <p className="it-structure-help">Campos presentes no formulário oficial, sem preenchimento operacional nesta demonstração.</p>
+       <div className="it-test-table-scroll"><table className="it-structure-table it-structure-identification">
+        <tbody>{it001IdentityRows.map((labels,i)=><tr key={i}>
+         <th scope="row">{labels[0]}</th><td> </td>
+         {labels[1]?<><th scope="row">{labels[1]}</th><td> </td></>:<td colSpan={2}> </td>}
+        </tr>)}</tbody>
+       </table></div>
+      </section>}
+      {isIt001Reference&&<section className="it-structure-section">
+       <div className="it-structure-section-head"><h3>Plano de amostragem · ABNT NBR 5426</h3><span>NQA 1,5%</span></div>
+       <div className="it-structure-level-row"><strong>Nível de inspeção</strong><span>☐ Nível I</span><span>☐ Nível II</span><span>☐ Especial S2</span></div>
+       <div className="it-structure-level-row"><strong>Quantidade amostrada</strong><span>—</span><strong>Caixas avaliadas</strong><span>—</span></div>
+       <div className="it-test-table-scroll"><table className="it-structure-table it-structure-sampling">
+        <thead><tr><th rowSpan={2}>Tamanho do lote</th><th colSpan={3}>Nível I · NQA 1,5%</th><th colSpan={3}>Nível II · NQA 1,5%</th></tr>
+        <tr><th>Código</th><th>Amostra</th><th>Ac / Re</th><th>Código</th><th>Amostra</th><th>Ac / Re</th></tr></thead>
+        <tbody>{it001SamplingRows.map(row=><tr key={row[0]}>{row.map((cell,i)=><td key={i}>{cell}</td>)}</tr>)}</tbody>
+       </table></div>
+       <div className="it-test-table-scroll"><table className="it-structure-table it-structure-boxes">
+        <tbody><tr><th>Caixas recebidas</th>{it001BoxRanges.map(v=><td key={v}>{v}</td>)}</tr>
+        <tr><th>Caixas a avaliar</th>{it001BoxRanges.map((v,i)=><td key={v}>{i+1}</td>)}</tr></tbody>
+       </table></div>
+       <p className="it-structure-help">A linha e o nível selecionados são destacados apenas na inspeção real, após calcular o tamanho do lote.</p>
+      </section>}
       <section className="it-structure-section">
        <div className="it-structure-section-head"><h3><ClipboardCheck size={18}/> Verificações</h3><span>{checklistCriteria.length} itens</span></div>
        <p className="it-structure-help">As categorias originais (Visual, Dimensional, Olfativo, Medição e Funcional) foram preservadas.</p>
