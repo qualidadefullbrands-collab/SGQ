@@ -62,7 +62,7 @@ function PaperHeader({header,logo}:{header:Header;logo:string|null}){
 function PaperFooter({footer,page}:{footer:Footer;page:number}){
  return <footer className="it-test-doc-footer">
   <div><span>Elaborado por: {footer.prepared||'—'}</span><span>Aprovado por: {footer.approved||'—'}</span></div>
-  <div><span>{footer.control||'SGQ'}</span><b>Página {page} de 2</b></div>
+  <div><span>{footer.control||'SGQ'}</span><b>Prévia {page}/2</b></div>
  </footer>
 }
 export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:OfficialOption[]}){
@@ -184,8 +184,36 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
  const count=(a:Answer)=>results.filter(x=>x===a).length
  return <section className="it-test" aria-label="Editor de IT experimental">
   <div className="it-test-banner">
-   <div className="it-test-banner-copy"><Settings2 size={21}/><div><strong>Editor de IT · Tela teste</strong><span>Exemplo preenchido para avaliação do layout. Não salva nem publica documentos reais.</span></div></div>
+   <div className="it-test-banner-copy"><Settings2 size={21}/><div><strong>Editor de IT · Demonstração com documento oficial</strong><span>{officialLoaded?'Cópia editável de '+officialLoaded.codigo+' · versão '+officialLoaded.versao:'Selecione uma IT publicada para reproduzir seus critérios no editor.'} Nenhum ajuste salva ou publica a IT original.</span></div></div>
    <button className="secondary" type="button" onClick={reset}><RotateCcw size={16}/> Restaurar exemplo</button>
+  </div>
+
+  <div className="it-test-official-source" aria-label="Importar IT oficial para demonstração">
+   <div className="it-test-source-head"><FileText size={22} aria-hidden="true"/>
+    <div><strong>Reproduzir uma IT oficial</strong><small>Importa somente os dados publicados do SGQ. É uma cópia local para testar o layout, não uma nova versão.</small></div>
+   </div>
+   <div className="it-test-source-controls">
+    <label>Documento de referência
+     <select value={sourceId} disabled={loadBusy} onChange={e=>setSourceId(e.target.value)} aria-label="Selecionar IT oficial">
+      <option value="">Selecionar IT publicada</option>
+      {officialVersions.map(v=><option key={v.id} value={v.id}>{v.codigo} · {v.titulo} · v{v.versao}</option>)}
+     </select>
+    </label>
+    <button type="button" className="primary" disabled={!sourceId||loadBusy} onClick={()=>void loadOfficial(sourceId)}>
+     <RefreshCw size={16} aria-hidden="true"/>{loadBusy?'Carregando documento…':'Carregar no editor'}
+    </button>
+    {officialLoaded&&originalPath&&<button type="button" className="secondary" disabled={downloadingOriginal} onClick={()=>void downloadOriginal()}>
+     <Download size={16} aria-hidden="true"/>{downloadingOriginal?'Baixando…':'Consultar Word oficial'}
+    </button>}
+   </div>
+   {loadError&&<p className="it-test-source-error" role="alert">{loadError}</p>}
+   {officialLoaded&&<div className="it-test-source-summary" role="status">
+     <span><strong>{officialLoaded.codigo}</strong> · v{officialLoaded.versao}</span>
+     <span>{officialCounts.checks} verificações</span><span>{officialCounts.dimensions} dimensionais</span>
+     <span>{officialCounts.special} teste(s) especial(is)</span>
+    </div>}
+   {officialLoaded&&<p className="it-test-source-nqa">{nqaSummary}</p>}
+   {sourceWarning&&<p className="it-test-source-warning" role="note">{sourceWarning}</p>}
   </div>
   <nav className="it-test-tabs" aria-label="Etapas do editor">
    {steps.map((x,i)=><button type="button" key={x.key} className={x.key===step?'selected':''} aria-current={x.key===step?'step':undefined} onClick={()=>setStep(x.key)}><span>{i+1}</span>{x.title}</button>)}
@@ -212,7 +240,8 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
    </>}
    {step==='caderno'&&<>
     <div className="section-title"><h2>Caderno de inspeção</h2></div>
-    <label className="it-test-caderno-label">Cole ou escreva o conteúdo
+    {officialLoaded&&<p className="it-test-hint">Conteúdo textual extraído do Word oficial. Figuras, tabelas e paginação devem ser conferidas no arquivo original.</p>}
+    <label className="it-test-caderno-label">{officialLoaded?'Texto do Word oficial (editável nesta demonstração)':'Cole ou escreva o conteúdo'}
      <textarea rows={14} value={notebook} onChange={e=>setNotebook(e.target.value)} placeholder="Cole o texto do caderno aqui"/>
     </label>
     <div className="it-test-toolbar">
@@ -221,13 +250,16 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
      <label className="it-test-checkbox"><input type="checkbox" checked={showSpecs} onChange={e=>setShowSpecs(e.target.checked)}/> Tabela de especificações</label>
     </div>
     {technicalImage&&<div className="it-test-image-preview"><img src={technicalImage} alt="Imagem técnica"/><span>{technicalName}</span></div>}
-    <p className="it-test-hint">Nesta tela experimental é possível colar texto e anexar uma imagem. A importação completa de arquivos Word/PDF com formatação será uma etapa posterior.</p>
+    <p className="it-test-hint">{officialLoaded?'A prévia representa os dados e o texto da IT publicada, mas não reproduz imagens, tabelas e a paginação exata do Word original. Nenhuma alteração será gravada.':'Nesta tela experimental é possível colar texto e anexar uma imagem. A importação completa de arquivos Word/PDF com formatação será uma etapa posterior.'}</p>
    </>}
    {step==='criterios'&&<>
-    <div className="section-title"><h2>Critérios da inspeção</h2><button type="button" className="secondary" onClick={add}><Plus size={16}/> Adicionar critério</button></div>
+    <div className="section-title"><h2>Critérios da inspeção{officialLoaded?' · '+criteria.length+' itens':''}</h2><button type="button" className="secondary" onClick={add}><Plus size={16}/> Adicionar critério</button></div>
     <div className="it-test-criteria">
      {criteria.map((c,i)=><article className="it-test-criterion" key={c.id}>
-      <div className="it-test-criterion-head"><strong>{i+1}. {c.title}</strong><div>
+      <div className="it-test-criterion-head"><div className="it-test-criterion-identification">
+       <small>{c.origin==='checklist'?'Verificação':c.origin==='dimensional'?'Dimensional':c.origin==='teste'?'Teste especial':'Critério'}{c.group?' · '+c.group:''}</small>
+       <strong>{i+1}. {c.title}</strong>
+      </div><div>
        <button className="secondary small" disabled={i===0} type="button" aria-label="Mover para cima" onClick={()=>move(i,-1)}><ArrowUp size={15}/></button>
        <button className="secondary small" disabled={i===criteria.length-1} type="button" aria-label="Mover para baixo" onClick={()=>move(i,1)}><ArrowDown size={15}/></button>
        <button className="secondary small" type="button" aria-label="Excluir critério" onClick={()=>setCriteria(old=>old.filter(x=>x.id!==c.id))}><Trash2 size={15}/></button>
@@ -241,6 +273,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
         <label>Tolerância ±<input inputMode="decimal" value={c.tolerance} onChange={e=>update(c.id,{tolerance:e.target.value})}/></label>
         <label>Unidade<input value={c.unit} onChange={e=>update(c.id,{unit:e.target.value})}/></label>
         <label>Leitura simulada<input inputMode="decimal" value={c.measurement} onChange={e=>update(c.id,{measurement:e.target.value})}/></label>
+        {officialLoaded&&!c.nominal&&!c.tolerance&&<small className="it-test-hint span-2">Sem tolerância aprovada no cadastro oficial. Não foi atribuído valor presumido.</small>}
        </>:<label>Resultado de exemplo<select value={c.answer} onChange={e=>update(c.id,{answer:e.target.value as Answer})}><option value="">Sem resposta</option><option value="C">Conforme</option><option value="NC">Não conforme</option><option value="NA">Não aplicável</option></select></label>}
       </div>
      </article>)}
@@ -259,7 +292,8 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
   </div>}
 
   {step==='previa'&&<div className="it-test-preview">
-   <div className="it-test-preview-title"><Eye size={20}/><div><h2>Prévia do documento</h2><p>O caderno aparece antes da própria inspeção, na sequência prevista.</p></div></div>
+   <div className="it-test-preview-title"><Eye size={20}/><div><h2>Prévia da estrutura da IT{officialLoaded?' · '+officialLoaded.codigo:''}</h2>
+    <p>{officialLoaded?'Reprodução editável a partir dos dados publicados; não é uma cópia da diagramação original do Word.':'O caderno aparece antes da própria inspeção, na sequência prevista.'}</p></div></div>
    <div className="it-test-paper-stack">
     <article className="it-test-paper" aria-label="Página 1 do exemplo">
      <PaperHeader header={header} logo={logo}/>
@@ -270,7 +304,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
       <div className="it-test-pasted-content">{notebook||'Nenhum conteúdo incluído.'}</div>
       {technicalImage&&<figure className="it-test-doc-figure"><img src={technicalImage} alt="Imagem técnica do caderno"/><figcaption>{technicalName}</figcaption></figure>}
       {showSpecs&&<><h4>Especificações de referência</h4><div className="it-test-table-scroll"><table><thead><tr><th>Parâmetro</th><th>Especificação</th><th>Unidade</th></tr></thead><tbody>
-       {criteria.filter(c=>c.kind==='dimensional').map(c=><tr key={c.id}><td>{c.title}</td><td>{c.nominal||'—'} ± {c.tolerance||'—'}</td><td>{c.unit||'—'}</td></tr>)}
+       {criteria.filter(c=>c.kind==='dimensional').map(c=><tr key={c.id}><td>{c.title}</td><td>{specification(c)}</td><td>{c.unit||'—'}</td></tr>)}
       </tbody></table></div></>}
      </div><PaperFooter footer={footer} page={1}/>
     </article>
@@ -283,7 +317,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
       <div className="it-test-summary"><span>Conformes <b>{count('C')}</b></span><span>Não conformes <b>{count('NC')}</b></span><span>Não aplicáveis <b>{count('NA')}</b></span></div>
       <div className="it-test-table-scroll"><table><thead><tr><th>#</th><th>Critério</th><th>Especificação</th><th>Leitura / resposta</th><th>Status</th></tr></thead><tbody>
        {criteria.map((c,i)=>{const r=resultFor(c);return <tr key={c.id}><td>{i+1}</td><td><b>{c.title||'—'}</b><small>{c.notes}</small></td>
-        <td>{c.kind==='dimensional'?(c.nominal||'—')+' ± '+(c.tolerance||'—')+' '+c.unit:c.kind==='funcional'?'Teste funcional':'Visual'}</td>
+        <td>{specification(c)}</td>
         <td>{c.kind==='dimensional'?(c.measurement?c.measurement+' '+c.unit:'Sem leitura'):r==='C'?'Conforme':r==='NC'?'Não conforme':r==='NA'?'Não aplicável':'Pendente'}</td>
         <td><span className={'it-test-result '+(r||'pending')}>{r||'—'}</span></td>
        </tr>})}
@@ -292,7 +326,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
      </div><PaperFooter footer={footer} page={2}/>
     </article>
    </div>
-   <p className="it-test-hint">Prévia ilustrativa em duas páginas. O editor definitivo precisará de paginação dinâmica e exportação Word/PDF.</p>
+   <p className="it-test-hint">Prévia em dois blocos para avaliação da organização visual. Não corresponde à paginação oficial nem gera nova versão da IT. Compare com o Word original.</p>
   </div>}
   <div className="it-test-actions">
    <button className="secondary" type="button" disabled={index===0} onClick={()=>setStep(steps[index-1].key)}><ChevronLeft size={16}/> Anterior</button>
