@@ -184,7 +184,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
       ? x.status==='concluida'||x.status==='erro_integracao'
       : x.status==='em_andamento'||x.status==='revisao')
     const term=historySearch.trim().toLocaleLowerCase('pt-BR')
-    return inGroup&&(!term||[x.titulo,x.rq_code,x.responsavel_nome].some(value=>String(value??'').toLocaleLowerCase('pt-BR').includes(term)))
+    return inGroup&&(!term||[x.titulo,x.rq_code,x.responsavel_nome,x.mes_referencia,formatDate(x.data_avaliacao)].some(value=>String(value??'').toLocaleLowerCase('pt-BR').includes(term)))
   }),[executions,historyFilter,historySearch])
 
   useEffect(()=>{ void loadAuditHome() },[])
@@ -317,7 +317,8 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
       setFindings((data.findings ?? []) as AuditFinding[])
       setObjects((data.objects ?? []) as AuditObject[])
       if(!preserveContext) {
-        setCurrentLocation('')
+        const savedLocations=[...new Set(((data.answers??[]) as AuditAnswer[]).map(row=>String(row.local_ref||'').trim()).filter(Boolean))]
+        setCurrentLocation(savedLocations[0]||'')
         setRq016bArea('Ruas')
         setNotes({})
         setDraft('')
