@@ -17,7 +17,7 @@ test('global SGQ style is loaded once and scoped to operational routes',()=>{
  assert.match(app,/<main className="app-shell sgq-operational-shell" data-sgq-screen=\{tab\}>/)
  assert.match(css,/\.sgq-operational-shell\[data-sgq-screen\]/)
  assert.match(css,/:not\(\[data-sgq-screen="painel"\]\)/)
- assert.doesNotMatch(css,/\bbody\s*\{\s*background:/)
+ assert.doesNotMatch(css,/^body\s*\{/m)
 })
 
 test('all SGQ application screens are themed without hiding workflows',()=>{
