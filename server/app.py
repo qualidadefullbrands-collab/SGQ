@@ -322,7 +322,7 @@ def dimensional_pendencies(label: str, inspection: dict, products: list[dict],
                 f'{missing} medições faltantes.')
     return pending
 
-async def process_word_status(client:httpx.AsyncClient, token:str, process_id:str)->dict:
+async def process_word_status(client:httpx.AsyncClient, token:str, process_id:str, group_id:str|None=None)->dict:
     """Valida integralidade no banco; status concluída isoladamente não libera Word."""
     parents=await table_rows(client,token,"processos",{
         "id":f"eq.{process_id}","select":"id,codigo,cliente,it_versao_id,excluido_em","limit":"1"})
@@ -333,6 +333,10 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
         "processo_id":f"eq.{process_id}",
         "select":"id,codigo,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,nome",
         "order":"subprocesso_codigo.asc,codigo.asc"})
+    if group_id:
+        groups=[group for group in groups if group["id"]==group_id]
+        if not groups:
+            raise HTTPException(status_code=404,detail="Entrada não pertence a este FST.")
     pending=[]
     if not required_text(parent.get("cliente")):
         pending.append("FST principal: cliente não preenchido.")
@@ -459,13 +463,13 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
 
 
 @app.get("/process-report-status/{process_id}")
-async def process_report_status(process_id:str,authorization:str|None=Header(default=None)):
+async def process_report_status(process_id:str,entrada:str|None=None,authorization:str|None=Header(default=None)):
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401,detail="Authorization Bearer obrigatório.")
     token=authorization.split(" ",1)[1].strip()
     async with httpx.AsyncClient(timeout=45.0) as client:
         await verify_user(client,token)
-        return await process_word_status(client,token,process_id)
+        return await process_word_status(client,token,process_id,entrada)
 
 
 @app.get("/generate-inspection/{inspection_id}")
@@ -497,10 +501,10 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
             raise HTTPException(status_code=409,detail="Grupo da inspeção não encontrado.")
         process=group.get("processos") or {}
         if process.get("id") and not inspection.get("excluido_em"):
-            status=await process_word_status(client,token,process["id"])
+            status=await process_word_status(client,token,process["id"],group_id)
             if not status["ready"]:
                 raise HTTPException(status_code=409,detail=
-                    "Laudo bloqueado: conclua e preencha todos os subprocessos. "+
+                    "Laudo da entrada bloqueado: conclua e preencha esta inspeção. "+
                     " | ".join(status["pending"][:12]))
 
         version=inspection.get("it_versoes") or {}
@@ -601,7 +605,7 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
         collection_name=(nome_conjunto or "").strip() if len(distinct_skus)>1 else None
         if collection_name and len(collection_name)>100:
             raise HTTPException(status_code=422,detail="O nome do conjunto deve ter até 100 caracteres.")
-        filename=inspection_file_name(process.get("codigo"),first_product.get("sku"),
+        filename=inspection_file_name(str(process.get("codigo") or "")+("-"+str(group.get("subprocesso_codigo")) if group.get("subprocesso_codigo") else ""),first_product.get("sku"),
                                       first_product.get("nome"),collection_name=collection_name or (
                                           "Componentes" if len(distinct_skus)>1 else None))
         # Download only: document is assembled from the official IT and returned
