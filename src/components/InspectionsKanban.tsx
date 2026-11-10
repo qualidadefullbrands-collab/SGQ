@@ -188,7 +188,7 @@ export default function InspectionsKanban({
           <input type="search" value={query} onChange={e=>{setQuery(e.target.value);setShownByLane({})}}
             placeholder="Buscar FST, letra, NF ou cliente" aria-label="Buscar processos"/>
         </label>
-        <button type="button" className="primary sgq-kanban-new" onClick={onCreate}><Plus size={17}/> Novo FST</button>
+        <button type="button" className="primary sgq-kanban-new" onClick={onCreate}><Plus size={17}/> Novo Processo</button>
       </div>}
     </header>
 
@@ -211,12 +211,12 @@ export default function InspectionsKanban({
               </span>
             </button>
             <div className="sgq-process-node-summary">
-              <span>{entry.subprocesses.length} subprocesso(s)</span>
+              <span>{entry.subprocesses.length} entrada(s)</span>
               <span className={'sgq-process-status '+(entry.allCompleted?'is-complete':'')}>{progressLabel}</span>
             </div>
             <div className="sgq-process-node-actions">
-              <button type="button" onClick={()=>onReuseProcess(process.id)} title={'Adicionar subprocesso a '+processLabel}>
-                <Plus size={15}/> Subprocesso
+              <button type="button" onClick={()=>onReuseProcess(process.id)} title={'Adicionar nova entrada a '+processLabel}>
+                <Plus size={15}/> Nova Entrada
               </button>
               <button type="button" onClick={()=>onEditProcess(process.id)} title={'Editar dados do FST '+processLabel}>
                 <Edit3 size={15}/> Editar FST
@@ -234,7 +234,7 @@ export default function InspectionsKanban({
                 <div className="sgq-subprocess-node-heading">
                   <span className="sgq-subprocess-letter">{sub.letter||'—'}</span>
                   <div className="sgq-subprocess-node-name">
-                    <strong>{sub.letter?'Subprocesso '+sub.letter:'Inspeção vinculada'}</strong>
+                    <strong>{sub.letter?'Entrada '+sub.letter:'Inspeção vinculada'}</strong>
                     <span>{sub.name}</span>
                   </div>
                   <span className="sgq-subprocess-invoice">{sub.invoice?'NF '+sub.invoice:'NF não informada'}</span>
