@@ -1,0 +1,563 @@
+/* SGQ unified application design system
+   Scope: every operational route (Dashboard keeps its dedicated layout).
+   Design reference: navy navigation, ice-blue canvas, white functional surfaces. */
+.sgq-operational-shell{
+  --sgq-ui-ink:#112d50;
+  --sgq-ui-subtle:#526d8f;
+  --sgq-ui-border:#dbe5f1;
+  --sgq-ui-line:#e7edf5;
+  --sgq-ui-white:#fff;
+  --sgq-ui-blue:#0875bd;
+  --sgq-ui-blue-dark:#055287;
+  --sgq-ui-blue-soft:#edf6fd;
+  --sgq-ui-green:#078e71;
+  --sgq-ui-shadow:0 3px 16px rgba(20,60,111,.055);
+  --sgq-ui-shadow-hover:0 9px 24px rgba(20,60,111,.10);
+}
+
+/* All routes share the same content rhythm; no changes to data or handlers. */
+.sgq-operational-shell[data-sgq-screen]:not([data-sgq-screen="painel"]){
+  color:var(--sgq-ui-ink);
+  background:transparent;
+}
+.sgq-operational-shell[data-sgq-screen]:not([data-sgq-screen="painel"]) > .workspace,
+.sgq-operational-shell[data-sgq-screen]:not([data-sgq-screen="painel"]) > .sgq-kanban-page,
+.sgq-operational-shell[data-sgq-screen]:not([data-sgq-screen="painel"]) > .audit-workspace,
+.sgq-operational-shell[data-sgq-screen]:not([data-sgq-screen="painel"]) > .equipment-page,
+.sgq-operational-shell[data-sgq-screen]:not([data-sgq-screen="painel"]) > .sgq-insights{
+  width:100%;
+  max-width:1640px;
+  padding:28px 26px 48px;
+  margin:0 auto;
+  min-width:0;
+  box-sizing:border-box;
+}
+.sgq-operational-shell .page-title,
+.sgq-operational-shell .audit-page-title,
+.sgq-operational-shell .insights-heading,
+.sgq-operational-shell .sgq-kanban-toolbar{
+  display:flex;
+  flex-wrap:wrap;
+  gap:14px 20px;
+  align-items:center;
+  justify-content:space-between;
+  margin:0 0 23px;
+}
+.sgq-operational-shell .page-title>div:first-child,
+.sgq-operational-shell .audit-page-title>div:first-child,
+.sgq-operational-shell .insights-heading>div:first-child{min-width:0}
+.sgq-operational-shell .page-title h1,
+.sgq-operational-shell .sgq-kanban-title h1,
+.sgq-operational-shell .insights-heading h1,
+.sgq-operational-shell .audit-page-title h1{
+  color:#0e2a50;
+  font-weight:850;
+  font-size:clamp(27px,2.35vw,35px);
+  letter-spacing:-.045em;
+  line-height:1.15;
+  margin:5px 0 0;
+  overflow-wrap:anywhere;
+}
+.sgq-operational-shell .page-title .eyebrow,
+.sgq-operational-shell .audit-page-title .eyebrow{
+  font-size:10px;
+  color:var(--sgq-ui-blue);
+  font-weight:850;
+  letter-spacing:.10em;
+}
+.sgq-operational-shell .page-title .page-subtitle,
+.sgq-operational-shell .page-title p,
+.sgq-operational-shell .insights-heading p{
+  color:var(--sgq-ui-subtle);
+  font-size:13px;
+  line-height:1.55;
+  margin:7px 0 0;
+  max-width:700px;
+}
+.sgq-operational-shell .page-title .row-actions,
+.sgq-operational-shell .audit-page-title .row-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:9px}
+
+/* Actions and controls have one shared treatment throughout the application. */
+.sgq-operational-shell .primary,
+.sgq-operational-shell .secondary,
+.sgq-operational-shell .success-button,
+.sgq-operational-shell .danger{
+  border-radius:10px;
+  display:inline-flex;
+  justify-content:center;
+  align-items:center;
+  gap:8px;
+  min-height:42px;
+  padding:10px 15px;
+  font-size:12px;
+  font-weight:760;
+  line-height:1.2;
+  transition:background .16s,border-color .16s,box-shadow .16s,transform .16s;
+  text-decoration:none;
+}
+.sgq-operational-shell .primary{
+  background:linear-gradient(135deg,#0874bd,#065083);
+  border:1px solid #0762a0;
+  color:#fff;
+  box-shadow:0 4px 12px rgba(8,91,152,.12);
+}
+.sgq-operational-shell .primary:hover:not(:disabled){background:#064c7e;border-color:#064c7e;box-shadow:0 6px 18px rgba(5,73,120,.18)}
+.sgq-operational-shell .secondary{
+  background:#fff;
+  border:1px solid #cbd9ea;
+  color:#254466;
+  box-shadow:0 1px 3px rgba(18,51,87,.025);
+}
+.sgq-operational-shell .secondary:hover:not(:disabled){
+  background:#f2f8ff;
+  border-color:#8dbde0;
+  color:#0b5c94;
+}
+.sgq-operational-shell :is(.primary,.secondary,.danger,.success-button):disabled{opacity:.56;box-shadow:none;cursor:not-allowed}
+.sgq-operational-shell :is(.primary,.secondary,.danger,.success-button,.sgq-kanban-open):focus-visible,
+.sgq-operational-shell input:focus-visible,
+.sgq-operational-shell select:focus-visible,
+.sgq-operational-shell textarea:focus-visible,
+.sgq-operational-shell summary:focus-visible{
+  outline:2px solid #178de0;
+  outline-offset:3px;
+}
+.sgq-operational-shell .primary.small,
+.sgq-operational-shell .secondary.small{min-height:34px;padding:7px 10px;font-size:11px;border-radius:8px}
+.sgq-operational-shell .actions,
+.sgq-operational-shell .row-actions{gap:10px;flex-wrap:wrap}
+.sgq-operational-shell :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea){
+  border-color:#cad9e9;
+  border-radius:10px;
+  background:#fff;
+  color:var(--sgq-ui-ink);
+  box-shadow:0 1px 2px rgba(20,60,100,.025);
+}
+.sgq-operational-shell :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea):focus{
+  border-color:#419ddd;
+  box-shadow:0 0 0 3px rgba(60,152,222,.12);
+}
+.sgq-operational-shell :is(input,textarea,select):disabled{background:#f4f7fb;color:#6e829c}
+.sgq-operational-shell label{color:#344f71;line-height:1.45;font-size:12px;font-weight:680}
+.sgq-operational-shell .field-hint,
+.sgq-operational-shell .section-note{color:#637e9b;line-height:1.55;font-size:11px}
+
+/* Card surfaces */
+.sgq-operational-shell .panel,
+.sgq-operational-shell .row-card,
+.sgq-operational-shell .sku-card,
+.sgq-operational-shell .process-card,
+.sgq-operational-shell .sample-card,
+.sgq-operational-shell .dimension-param,
+.sgq-operational-shell .test-card,
+.sgq-operational-shell .inspection-stage,
+.sgq-operational-shell .audit-card,
+.sgq-operational-shell .equipment-row,
+.sgq-operational-shell .sgq-inventory-session,
+.sgq-operational-shell .sgq-inventory-start,
+.sgq-operational-shell .it-test-criterion{
+  background:var(--sgq-ui-white);
+  border:1px solid var(--sgq-ui-border);
+  border-radius:15px;
+  box-shadow:var(--sgq-ui-shadow);
+  color:var(--sgq-ui-ink);
+}
+.sgq-operational-shell .panel.section-card{
+  padding:22px 23px;
+  border-radius:16px;
+  box-shadow:var(--sgq-ui-shadow);
+}
+.sgq-operational-shell .panel.section-card+.panel.section-card{margin-top:16px}
+.sgq-operational-shell .section-title{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  padding-bottom:12px;
+  margin-bottom:17px;
+  border-bottom:1px solid var(--sgq-ui-line);
+}
+.sgq-operational-shell .section-title h2,
+.sgq-operational-shell .panel.section-card>h2{
+  margin:0;
+  font-size:17px;
+  line-height:1.35;
+  letter-spacing:-.02em;
+  font-weight:800;
+  color:#18385e;
+}
+.sgq-operational-shell .section-title h3{color:#25466b}
+.sgq-operational-shell .pill:not(.error){border-radius:99px;background:#edf5fc;border-color:#d3e5f4;color:#266a9c}
+.sgq-operational-shell .list{display:grid;gap:10px}
+.sgq-operational-shell .row-card{
+  padding:15px 17px;
+  transition:border-color .16s,box-shadow .16s;
+}
+.sgq-operational-shell .row-card:hover{border-color:#afcce3;box-shadow:var(--sgq-ui-shadow-hover)}
+.sgq-operational-shell .row-card strong{color:#173a62}
+.sgq-operational-shell .row-card span{color:#65819d}
+
+/* Process directory and inspection Kanban: lighter tools with clear grouping. */
+.sgq-operational-shell[data-sgq-screen="inspecoes"] .sgq-kanban-page,
+.sgq-operational-shell[data-sgq-screen="quadro"] .sgq-kanban-page{
+  background:transparent;
+  margin-top:0;
+}
+.sgq-operational-shell .sgq-screen-processos .panel{
+  border-radius:16px;
+  box-shadow:var(--sgq-ui-shadow);
+}
+.sgq-operational-shell .sgq-screen-processos .check-row{
+  border-color:var(--sgq-ui-line);
+  border-radius:11px;
+  padding:13px 14px;
+  background:#f9fbfe;
+}
+.sgq-operational-shell .sgq-kanban-title h1{color:#102f56;font-size:clamp(27px,2.4vw,35px)}
+.sgq-operational-shell .sgq-process-node{
+  background:#fff;
+  border:1px solid #dce6f1;
+  border-radius:14px;
+  box-shadow:var(--sgq-ui-shadow);
+}
+.sgq-operational-shell .sgq-process-node:hover,
+.sgq-operational-shell .sgq-kanban-card:hover{border-color:#a9d2ed}
+.sgq-operational-shell .sgq-process-children{background:#f8fbff}
+.sgq-operational-shell .sgq-kanban-lane{
+  border-color:#dce6f1;
+  box-shadow:0 3px 12px rgba(20,62,108,.035);
+}
+.sgq-operational-shell .sgq-kanban-lane.tone-queued{--lane:#5c7696;--lane-tint:#f5f7fb;--lane-border:#dfe6f0}
+.sgq-operational-shell .sgq-kanban-lane.tone-active{--lane:#0589d3;--lane-tint:#edf6ff;--lane-border:#d0e5f8}
+.sgq-operational-shell .sgq-kanban-lane.tone-done{--lane:#0da47e;--lane-tint:#f0fbf6;--lane-border:#cfece1}
+.sgq-operational-shell .sgq-kanban-card{border-radius:13px;box-shadow:0 4px 12px rgba(25,70,115,.06)}
+.sgq-operational-shell .sgq-kanban-toolbar{padding-bottom:0}
+.sgq-operational-shell .sgq-kanban-search{
+  border-radius:12px;
+  min-height:43px;
+  border-color:#ceddec;
+}
+.sgq-operational-shell .sgq-process-status{border-radius:99px}
+
+/* New inspection and edit forms; preserve field arrangement and validations. */
+.sgq-operational-shell .inspection-form{display:grid;gap:15px;min-width:0}
+.sgq-operational-shell .form-grid{gap:14px 17px}
+.sgq-operational-shell .inspection-form .section-title{margin-bottom:18px}
+.sgq-operational-shell .inspection-form .sgq-fst-field,
+.sgq-operational-shell .inspection-form .sgq-sku-collapsible{min-width:0}
+.sgq-operational-shell .sku-card{
+  padding:15px;
+  border-left:3px solid #8cbfdf;
+  transition:border-color .15s,box-shadow .15s;
+}
+.sgq-operational-shell .sku-card:hover{border-color:#8cbfdf;box-shadow:0 5px 18px rgba(21,88,133,.08)}
+.sgq-operational-shell .sgq-sku-toggle{color:#1a466c}
+.sgq-operational-shell .sgq-sku-summary strong{color:#12395f}
+.sgq-operational-shell .inspection-it-choice{border-left:3px solid #2d91d0}
+.sgq-operational-shell .sgq-subprocess-inheritance{border-radius:11px}
+.sgq-operational-shell .calc-strip{
+  border:1px solid #d7e4ee;
+  border-radius:14px;
+  background:#ecf5fd;
+  box-shadow:var(--sgq-ui-shadow);
+  color:#214e73;
+}
+.sgq-operational-shell .sgq-screen-nova .page-title .row-actions{max-width:650px}
+
+/* Execution: one clear workflow rail and consistent step cards. */
+.sgq-operational-shell .execution .page-title{
+  align-items:flex-start;
+  gap:16px;
+}
+.sgq-operational-shell .execution .page-title h1{font-size:clamp(24px,2.6vw,34px);max-width:850px}
+.sgq-operational-shell .execution .row-actions{
+  justify-content:flex-end;
+  max-width:850px;
+}
+.sgq-operational-shell .inspection-stage-tabs{
+  padding:8px;
+  border:1px solid #d6e3ef;
+  background:#fff;
+  border-radius:15px;
+  box-shadow:var(--sgq-ui-shadow);
+  gap:6px;
+  margin:15px 0 18px;
+}
+.sgq-operational-shell .inspection-stage-tab{
+  border-radius:10px;
+  color:#476585;
+  font-size:12px;
+  font-weight:700;
+  min-height:42px;
+}
+.sgq-operational-shell .inspection-stage-tab:hover{background:#edf5fc;color:#0d629b}
+.sgq-operational-shell .inspection-stage-tab.active,
+.sgq-operational-shell .inspection-stage-tab[aria-selected="true"]{
+  color:#0864a4;
+  border-color:#bcdcf5;
+  background:#eaf5fe;
+  box-shadow:inset 0 0 0 1px #b7d9f0;
+}
+.sgq-operational-shell .inspection-stage-dot{font-size:12px}
+.sgq-operational-shell .inspection-data-summary,
+.sgq-operational-shell .sgq-initial-data-grid{gap:10px}
+.sgq-operational-shell .inspection-data-summary>div{
+  border:1px solid #e0eaf4;
+  border-radius:10px;
+  padding:12px 13px;
+  background:#f9fbfe;
+}
+.sgq-operational-shell .inspection-data-summary small{font-size:10px;color:#6c8199}
+.sgq-operational-shell .inspection-data-summary strong{font-size:13px;color:#173657}
+.sgq-operational-shell .dimension-param{overflow:hidden}
+.sgq-operational-shell .photo-card{border-color:#dce7f1;box-shadow:var(--sgq-ui-shadow);border-radius:13px;overflow:hidden}
+.sgq-operational-shell .photo-gallery{gap:13px}
+.sgq-operational-shell .photo-gallery img{object-fit:cover}
+.sgq-operational-shell .result-panel{border-color:#cddfeb}
+.sgq-operational-shell .result-actions{display:flex;gap:10px;flex-wrap:wrap}
+.sgq-operational-shell .retention-panel{border-color:#e0e7ef}
+.sgq-operational-shell .inspection-stage-hidden{display:none!important}
+
+/* Stocks / inventory: four indicator cards and a calm data grid. */
+.sgq-operational-shell .sgq-stock-mode{
+  display:inline-flex;
+  padding:5px;
+  gap:4px;
+  border:1px solid #d5e2ef;
+  background:#eaf2fa;
+  border-radius:12px;
+  margin-bottom:17px;
+}
+.sgq-operational-shell .sgq-stock-mode>button{
+  min-height:36px;
+  border-radius:9px;
+  padding:8px 16px;
+  box-shadow:none;
+}
+.sgq-operational-shell .stock-summary{gap:13px;margin-bottom:16px}
+.sgq-operational-shell .stock-summary article,
+.sgq-operational-shell .sgq-inventory-kpis>div,
+.sgq-operational-shell .sgq-inventory-kpis>article{
+  background:#fff;
+  border:1px solid #dbe5f1;
+  border-radius:15px;
+  padding:17px 18px;
+  box-shadow:var(--sgq-ui-shadow);
+}
+.sgq-operational-shell .stock-summary article strong{font-size:28px;color:#11345d}
+.sgq-operational-shell .stock-summary article span{font-size:11px;color:#5e7897}
+.sgq-operational-shell .stock-controls{
+  border-color:#dce5ef;
+  border-radius:14px;
+  padding:13px;
+  box-shadow:var(--sgq-ui-shadow);
+  background:#fff;
+}
+.sgq-operational-shell .stock-table-shell,
+.sgq-operational-shell .sgq-inventory-table-scroll{
+  border:1px solid #dbe5f1;
+  border-radius:14px;
+  background:#fff;
+  box-shadow:var(--sgq-ui-shadow);
+}
+.sgq-operational-shell .stock-table-head,
+.sgq-operational-shell .sgq-inventory-table th{background:#f1f6fd;color:#4c698d}
+.sgq-operational-shell .stock-data-row:hover,
+.sgq-operational-shell .sgq-inventory-table tbody tr:hover{background:#f4f9ff}
+.sgq-operational-shell .stock-primary-info>div{background:#f7fbff;border-color:#e0e9f2}
+.sgq-operational-shell .stock-drawer,
+.sgq-operational-shell .sample-detail{background:#fff;border-color:#d7e5f2}
+.sgq-operational-shell .sgq-inventory-session{border-radius:13px}
+.sgq-operational-shell .sgq-inventory-head h2{color:#15375d}
+
+/* IT document library and test editor. */
+.sgq-operational-shell .sgq-screen-its .it-row{border-left:3px solid #a4cce8;min-height:72px}
+.sgq-operational-shell .sgq-screen-its .it-row strong{font-size:13px;color:#154771}
+.sgq-operational-shell .sgq-screen-its .it-row span{color:#6b849e}
+.sgq-operational-shell .sgq-screen-its form.panel.section-card{
+  margin-bottom:17px;
+  border-top:3px solid #2d8bcb;
+}
+.sgq-operational-shell .it-test-banner{
+  border-color:#cbdfee;
+  background:#edf6fd;
+  border-radius:13px;
+}
+.sgq-operational-shell .it-test-criterion{border-color:#dce5f0}
+.sgq-operational-shell .it-test-tabs{
+  background:#fff;
+  border:1px solid #dae5ef;
+  border-radius:13px;
+  box-shadow:var(--sgq-ui-shadow);
+}
+.sgq-operational-shell .it-test-tabs button.selected{color:#096eaf}
+.sgq-operational-shell .it-review-modal{border-radius:18px}
+
+/* Equipment registry: same KPI, toolbar, table and modal language. */
+.sgq-operational-shell .equipment-page .page-title{margin-bottom:18px}
+.sgq-operational-shell .equipment-summary{gap:13px;margin:0 0 16px}
+.sgq-operational-shell .equipment-summary>*,
+.sgq-operational-shell .equipment-row{
+  border:1px solid #dce6f1;
+  border-radius:15px;
+  background:#fff;
+  box-shadow:var(--sgq-ui-shadow);
+}
+.sgq-operational-shell .equipment-summary strong{color:#153b67}
+.sgq-operational-shell .equipment-toolbar{
+  border:1px solid #dbe5f0;
+  border-radius:13px;
+  box-shadow:var(--sgq-ui-shadow);
+  background:#fff;
+  padding:12px 15px;
+  margin-bottom:15px;
+}
+.sgq-operational-shell .equipment-row{margin-bottom:10px;transition:border-color .15s,box-shadow .15s}
+.sgq-operational-shell .equipment-row:hover{border-color:#91bfdf;box-shadow:var(--sgq-ui-shadow-hover)}
+.sgq-operational-shell .equipment-row.selected{border-color:#2e8ccb}
+.sgq-operational-shell .equipment-history,
+.sgq-operational-shell .equipment-editor{border-radius:18px}
+.sgq-operational-shell .equipment-section-tabs{
+  border:1px solid #e1e9f2;
+  border-radius:12px;
+  background:#f6f9fc;
+}
+.sgq-operational-shell .equipment-section-tabs button.active{color:#0867a6;background:#eaf4fd}
+
+/* Warehouse inspections: keep Contlog-specific fields and audit behavior untouched. */
+.sgq-operational-shell .sgq-warehouse-workspace{width:100%;max-width:1640px}
+.sgq-operational-shell .audit-overview{gap:13px;margin-bottom:20px}
+.sgq-operational-shell .audit-overview .metric-button{
+  border-radius:15px;
+  box-shadow:var(--sgq-ui-shadow);
+  border-color:#d9e5f1;
+}
+.sgq-operational-shell .audit-overview .metric{background:transparent;box-shadow:none;border:0}
+.sgq-operational-shell .audit-overview .metric strong{font-size:29px;color:#133a66}
+.sgq-operational-shell .audit-overview .metric-button.selected{
+  outline:1px solid #248ed5;
+  border-color:#409bda;
+  background:#eef7ff;
+}
+.sgq-operational-shell .audit-new-section,
+.sgq-operational-shell .audit-history{border-radius:16px}
+.sgq-operational-shell .audit-card{
+  border-color:#dde7f2;
+  box-shadow:var(--sgq-ui-shadow);
+}
+.sgq-operational-shell .audit-history-entry:hover{background:#f5faff}
+.sgq-operational-shell .audit-manual-panel{border-left:3px solid #88bbdd}
+.sgq-operational-shell .audit-session-header{align-items:center}
+.sgq-operational-shell .audit-progress-mini{border-radius:12px}
+.sgq-operational-shell .audit-manual-rows{border-color:#e0e9f1}
+.sgq-operational-shell .audit-checklist-button{color:#185f96}
+
+/* Insights: no duplicate totals; lift existing cards with dashboard visual grammar. */
+.sgq-operational-shell .sgq-insights .insights-heading{align-items:center}
+.sgq-operational-shell .sgq-insights .insights-heading h1{font-size:clamp(28px,2.5vw,35px);color:#103159}
+.sgq-operational-shell .sgq-insights .insights-kpis{gap:13px}
+.sgq-operational-shell .sgq-insights .insights-kpi-card{
+  padding:20px;
+  border:1px solid #d8e4ef;
+  border-radius:15px;
+  box-shadow:var(--sgq-ui-shadow);
+}
+.sgq-operational-shell .sgq-insights .insights-kpi-card strong{font-size:31px;color:#143a64}
+.sgq-operational-shell .sgq-insights .insights-kpi-card:hover{box-shadow:var(--sgq-ui-shadow-hover);border-color:#6bb1df}
+.sgq-operational-shell .sgq-insights .insights-table-panel{border-radius:16px}
+.sgq-operational-shell .sgq-insights .insights-table th{background:#f2f7fc;color:#496c90}
+.sgq-operational-shell .sgq-insights .insights-table td{border-color:#e8eef5}
+.sgq-operational-shell .sgq-insights .insights-detail-link{color:#0b69a7}
+.sgq-operational-shell .sgq-insights .insights-drilldown{border-radius:18px}
+
+/* Modo Fotos is a dedicated camera-first workflow: unify brand, keep capture controls prominent. */
+.sgq-operational-shell .sgq-mobile-photo{
+  max-width:1400px;
+  margin:0 auto;
+  background:transparent;
+  color:#143456;
+}
+.sgq-operational-shell .sgq-mobile-photo-header{
+  background:linear-gradient(110deg,#0a3054,#094b7a);
+  border-radius:15px 15px 0 0;
+  color:#fff;
+}
+.sgq-operational-shell .sgq-mobile-body{
+  background:#f5f8fc;
+  border:1px solid #dbe7f2;
+  border-top:0;
+  border-radius:0 0 15px 15px;
+}
+.sgq-operational-shell .sgq-mobile-process,
+.sgq-operational-shell .sgq-mobile-panel,
+.sgq-operational-shell .sgq-mobile-batch-photo,
+.sgq-operational-shell .sgq-mobile-saved figure{
+  border:1px solid #d9e5f1;
+  border-radius:13px;
+  background:#fff;
+  box-shadow:var(--sgq-ui-shadow);
+}
+.sgq-operational-shell .sgq-mobile-process:hover{border-color:#6eb4e2}
+.sgq-operational-shell .sgq-mobile-save{border-radius:12px;background:#056cae;color:#fff}
+
+/* Modal / dialog family: same whitespace, corners and hierarchy. */
+.sgq-operational-shell .sample-detail,
+.sgq-operational-shell .sgq-dialog,
+.sgq-operational-shell .audit-modal,
+.sgq-operational-shell .sgq-mobile-modal{
+  border:1px solid #d8e5f1;
+  border-radius:18px;
+  background:#fff;
+  box-shadow:0 22px 65px rgba(12,37,72,.18);
+}
+.sgq-operational-shell :is(.sample-detail,.sgq-dialog,.audit-modal) h2{color:#14375f;letter-spacing:-.02em}
+.sgq-operational-shell .modal-backdrop,
+.sgq-operational-shell .sgq-dialog-backdrop{background:rgba(9,31,59,.44)}
+.sgq-operational-shell :is(.sample-detail,.sgq-dialog) .close{border-radius:10px}
+.sgq-operational-shell .alert{border-radius:11px;border-color:#d5e4ef;background:#f1f8ff;color:#205273}
+.sgq-operational-shell .alert.error{background:#fff4f1;border-color:#edc6bc;color:#a23c2e}
+.sgq-operational-shell .alert.success{background:#effaf5;border-color:#bee8d4;color:#0c7554}
+
+/* Responsive: keep inspections usable instead of shrinking data fields below readability. */
+@media(max-width:1180px){
+  .sgq-operational-shell[data-sgq-screen]:not([data-sgq-screen="painel"]) > .workspace,
+  .sgq-operational-shell[data-sgq-screen]:not([data-sgq-screen="painel"]) > .sgq-kanban-page{padding:22px 17px 36px}
+  .sgq-operational-shell .page-title{align-items:flex-start}
+  .sgq-operational-shell .page-title .row-actions{justify-content:flex-start}
+  .sgq-operational-shell .inspection-stage-tabs{flex-wrap:wrap}
+}
+@media(max-width:760px){
+  .sgq-operational-shell[data-sgq-screen]:not([data-sgq-screen="painel"]) > .workspace,
+  .sgq-operational-shell[data-sgq-screen]:not([data-sgq-screen="painel"]) > .sgq-kanban-page,
+  .sgq-operational-shell[data-sgq-screen]:not([data-sgq-screen="painel"]) > .audit-workspace{padding:18px 10px 28px}
+  .sgq-operational-shell .page-title,
+  .sgq-operational-shell .audit-page-title{flex-direction:column;align-items:stretch}
+  .sgq-operational-shell .page-title .row-actions{display:flex;justify-content:flex-start;align-items:stretch;gap:8px}
+  .sgq-operational-shell .page-title .row-actions button{max-width:100%}
+  .sgq-operational-shell .panel.section-card{padding:17px 15px}
+  .sgq-operational-shell .section-title{flex-wrap:wrap;align-items:flex-start}
+  .sgq-operational-shell .inspection-stage-tabs{overflow:auto;flex-wrap:nowrap;max-width:100%;scrollbar-width:thin}
+  .sgq-operational-shell .inspection-stage-tab{flex:none;white-space:nowrap}
+  .sgq-operational-shell .stock-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .sgq-operational-shell .equipment-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .sgq-operational-shell .audit-overview{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:520px){
+  .sgq-operational-shell .page-title h1{font-size:27px}
+  .sgq-operational-shell .page-title .row-actions>*{flex:1 1 auto}
+  .sgq-operational-shell .section-title h2{font-size:16px}
+  .sgq-operational-shell .panel.section-card{padding:14px 12px}
+  .sgq-operational-shell .form-grid{grid-template-columns:minmax(0,1fr)}
+  .sgq-operational-shell .form-grid .span-2{grid-column:auto}
+  .sgq-operational-shell .sgq-stock-mode{width:100%}
+  .sgq-operational-shell .sgq-stock-mode>button{flex:1}
+  .sgq-operational-shell .stock-summary{gap:8px}
+  .sgq-operational-shell .stock-summary article{padding:13px}
+  .sgq-operational-shell .sgq-insights .insights-kpis{gap:8px}
+  .sgq-operational-shell .sgq-insights .insights-kpi-card{padding:13px}
+}
+@media(prefers-reduced-motion:reduce){
+  .sgq-operational-shell :is(.primary,.secondary,.danger,.success-button,.row-card,.sku-card,.equipment-row,.sgq-kanban-card){
+    transition:none!important;
+  }
+}
