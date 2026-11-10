@@ -40,7 +40,7 @@ test('preview no longer invents a two-page IT or replaces approved Word with SGQ
  assert.match(editor,/Documento oficial \(Word\)/)
  assert.match(editor,/Estrutura editável/)
  assert.match(editor,/<OfficialWordPreview/)
- assert.match(editor,/RASCUNHO|SIMULAÇÃO · NÃO OFICIAL/)
+ assert.match(editor,/PRÉVIA DE EDIÇÃO/)
 })
 
 test('editable view separates 18 checklist criteria, dimensional parameters and exceptional tests',()=>{
