@@ -7,10 +7,10 @@ const app=read('src/App.tsx')
 const editor=read('src/its/ItEditorDemo.tsx')
 const css=read('src/its/ItEditorDemo.css')
 
-test('test editor is opt-in inside the existing IT library, not a new production IT type',()=>{
+test('Nova IT editor is opt-in alongside the existing IT library',()=>{
  assert.match(app,/const ItEditorDemo=lazy\(\(\)=>import\('\.\/its\/ItEditorDemo'\)\)/)
  assert.match(app,/const \[itDemoOpen,setItDemoOpen\]=useState\(false\)/)
- assert.match(app,/Testar editor de IT/)
+ assert.match(app,/Nova IT/)
  assert.match(app,/itDemoOpen \? \(/)
  assert.match(app,/<ItEditorDemo officialVersions=\{itVersions\.filter/)
  assert.match(app,/onSubmit=\{uploadIt\}/)
@@ -20,7 +20,7 @@ test('editor has document identity and separate Word and editable structure view
  for(const part of ['cabecalho','caderno','criterios','rodape','previa']){
   assert.ok(editor.includes("key:'"+part+"'"),part)
  }
- for(const text of ['Inserir logotipo','Digite e formate o caderno técnico','Inserir imagem técnica','Tabela de especificações','Adicionar critério','Rodapé e controle documental','Documento oficial (Word)','Estrutura editável','Verificações','Análises dimensionais','Testes especiais']){
+ for(const text of ['Inserir logotipo','Conteúdo textual da IT','Inserir imagem técnica','Tabela de especificações','Adicionar critério','Rodapé e controle documental','Documento oficial (Word)','Estrutura editável','Verificações','Análises dimensionais','Testes especiais']){
   assert.ok(editor.includes(text),text)
  }
  assert.match(editor,/<OfficialWordPreview/)
@@ -31,7 +31,8 @@ test('editor has document identity and separate Word and editable structure view
  assert.match(editor,/resultFor\(c\)/)
 })
 test('prototype cannot alter real IT data or invoke backend writes',()=>{
- assert.match(editor,/Nenhum ajuste salva ou publica a IT original/)
+ assert.match(editor,/documentStatus/)
+ assert.match(editor,/Em Revisão/)
  assert.doesNotMatch(editor,/apiPost|apiPut|\.insert\(|\.update\(|\.upsert\(/)
  assert.match(editor,/apiGet<OfficialData>/)
  assert.match(editor,/authClient.storage.from\('it-documentos'\).download/)
