@@ -453,3 +453,34 @@
     max-height:calc(100dvh - 34px);
   }
 }
+
+/* Operational checklist upgrade: visible progress, actionable gaps and compact mobile navigation. */
+.sgq-operational-shell .sgq-warehouse-workspace .audit-context-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:0 0 15px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-context-stat{display:grid;gap:5px;padding:15px 16px;background:#fff;border:1px solid #dce7ee;border-radius:13px;min-width:0;box-shadow:0 1px 6px rgba(18,65,98,.035)}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-context-stat strong{font-size:24px;line-height:1;font-variant-numeric:tabular-nums;color:#284a64}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-context-stat span{font-size:12px;color:#5c7486;font-weight:650}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-context-stat.is-conforme strong{color:#218069}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-context-stat.is-nc strong{color:#ba493f}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-context-stat.is-na strong{color:#697e90}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-context-stat.is-pending strong{color:#b07a27}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-checklist-filters{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px;margin:0 0 14px;background:#fff;border:1px solid #dce7ee;border-radius:13px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-checklist-filters label{display:flex;align-items:center;gap:9px;flex:1 1 270px;min-width:0;height:42px;border:1px solid #d4e0e9;border-radius:9px;padding:0 12px;color:#71869a;background:#fafcfe}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-checklist-filters label:focus-within{border-color:#459dce;box-shadow:0 0 0 3px rgba(69,157,206,.13)}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-checklist-filters input{width:100%;height:100%;border:0;outline:0;box-shadow:none;background:transparent;font-size:13px;min-width:0}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-pending-toggle,.sgq-operational-shell .sgq-warehouse-workspace .audit-clear-filters{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;border:1px solid #d3e0e9;border-radius:9px;background:#fff;color:#355a73;padding:9px 13px;font-size:13px;font-weight:750;cursor:pointer}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-pending-toggle.selected{border-color:#4c9ac9;background:#eaf5fc;color:#125f89}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-pending-toggle b{display:grid;place-items:center;min-width:24px;height:23px;border-radius:8px;background:#edf3f7;color:#546f85}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-pending-toggle.selected b{background:#cbe9fb;color:#125f89}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-clear-filters{background:#f8fafc}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-filter-empty{display:flex;align-items:center;gap:10px;padding:20px;border:1px dashed #bdd9e9;border-radius:12px;background:#f9fcfe;color:#49718b;font-size:14px;margin:0 0 15px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-manual-row.has-nc{border-left:3px solid #d07368;background:#fffafa}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history-progress{display:block;margin-top:6px;color:#46708b;font-size:12px;font-weight:650}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-section-caption{display:block;margin-top:4px;color:#6a8191;font-size:12px}
+@media(max-width:1050px){.sgq-operational-shell .sgq-warehouse-workspace .audit-context-summary{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:650px){
+ .sgq-operational-shell .sgq-warehouse-workspace .audit-context-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ .sgq-operational-shell .sgq-warehouse-workspace .audit-context-stat{padding:12px}
+ .sgq-operational-shell .sgq-warehouse-workspace .audit-context-stat strong{font-size:21px}
+ .sgq-operational-shell .sgq-warehouse-workspace .audit-checklist-filters label{flex-basis:100%}
+ .sgq-operational-shell .sgq-warehouse-workspace .audit-pending-toggle{flex:1}
+}
