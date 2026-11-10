@@ -18,7 +18,7 @@ test('only textual notebook is replaced by rich WYSIWYG, while all other SGQ edi
  assert.match(editor,/it001SamplingRows\.map/)
  assert.match(editor,/dimensionalCriteria\.map/)
  assert.match(editor,/setCriteria\(snapshot.criteria.map/)
- assert.match(editor,/Nenhum ajuste salva ou publica a IT original/)
+ assert.match(editor,/documentStatus/)
  assert.doesNotMatch(editor,/apiPost|apiPut|\.insert\(|\.update\(|\.upsert\(/)
 })
 
