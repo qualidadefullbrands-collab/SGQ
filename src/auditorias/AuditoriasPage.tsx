@@ -94,6 +94,8 @@ function monthReference(date:string) {
   return new Intl.DateTimeFormat('pt-BR',{month:'long',year:'numeric'}).format(d)
 }
 
+function todayInBrazil(){return new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())}
+
 function formatDate(value:string) {
   if (!value) return '—'
   const d=new Date(value.length===10 ? value+'T12:00:00' : value)
@@ -139,6 +141,8 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
   const [equipmentStatus,setEquipmentStatus]=useState('pendente')
   const [equipmentNotes,setEquipmentNotes]=useState('')
   const [showChecklist,setShowChecklist]=useState(false)
+  const [checklistSearch,setChecklistSearch]=useState('')
+  const [onlyPending,setOnlyPending]=useState(false)
   const [showFinish,setShowFinish]=useState(false)
   const [notice,setNotice]=useState('')
   const [deletionCandidate,setDeletionCandidate]=useState<AuditExecution|null>(null)
@@ -157,6 +161,18 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
   const relevantCriteria=useMemo(()=>definition ? sectionForLocation(definition,rq016bArea) : [],[definition,rq016bArea])
   const answerKey=(key:string,local:string)=>key+'@@'+local.trim().toLowerCase()
   const answerMap=useMemo(()=>new Map(answers.map((a)=>[answerKey(a.item_key,a.local_ref),a])),[answers])
+  const currentAuditLocation=definition?.code==='RQ016'?'':currentLocation.trim()
+  const contextAnswers=useMemo(()=>relevantCriteria.map(c=>answerMap.get(answerKey(c.key,currentAuditLocation))),[relevantCriteria,answerMap,currentAuditLocation])
+  const contextDone=contextAnswers.filter(Boolean).length
+  const contextPending=relevantCriteria.length-contextDone
+  const contextC=contextAnswers.filter(a=>a?.resultado==='C').length
+  const contextNC=contextAnswers.filter(a=>a?.resultado==='NC').length
+  const contextNA=contextAnswers.filter(a=>a?.resultado==='NA').length
+  const visibleCriteria=useMemo(()=>relevantCriteria.filter(c=>{
+    const query=checklistSearch.trim().toLocaleLowerCase('pt-BR')
+    const matches=!query||[c.key,c.label,c.section].some(t=>String(t||'').toLocaleLowerCase('pt-BR').includes(query))
+    return matches&&(!onlyPending||!answerMap.has(answerKey(c.key,currentAuditLocation)))
+  }),[relevantCriteria,answerMap,checklistSearch,onlyPending,currentAuditLocation])
   const uniqueAnswered=useMemo(()=>new Set(answers.map((a)=>a.item_key)).size,[answers])
   const progressTotal=definition?.fixedChecklist ? definition.criteria.length : Math.max(active?.progresso_total ?? 0,uniqueAnswered)
   const progressDone=definition?.fixedChecklist ? uniqueAnswered : Math.max(active?.progresso_concluido ?? 0,uniqueAnswered)
@@ -255,7 +271,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
     setLoading(true)
     setNotice('')
     try {
-      const date=new Date().toISOString().slice(0,10)
+      const date=todayInBrazil()
       const created=await apiPost<any>('/api/auditorias/criar',{
         rqCode:def.code,
         rqVersion:def.version,
@@ -305,6 +321,8 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
         setRq016bArea('Ruas')
         setNotes({})
         setDraft('')
+        setChecklistSearch('')
+        setOnlyPending(false)
       }
       setShowChecklist(true)
     } catch (e:any) {
@@ -421,6 +439,12 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
 
   async function requestFinish(nextAnswers=answers) {
     if (!active || !definition) return
+    if(!navigator.onLine){setNotice('Conecte-se e sincronize os registros antes de concluir a inspeção.');return}
+    if(userId){
+      const pending=(await offlineOperations(userId).catch(()=>[])).some(item=>
+        item.kind==='audit-answer'&&item.id.includes(':audit-answer:'+active.id+':'))
+      if(pending){setNotice('Existem respostas no dispositivo aguardando sincronização. Sincronize antes de concluir.');return}
+    }
     if (definition.fixedChecklist) {
       const answered=new Set(nextAnswers.map((a)=>a.item_key))
       const missing=definition.criteria.filter((c)=>!answered.has(c.key))
@@ -599,7 +623,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
         </details>}
 
         <section className="panel section-card audit-new-section">
-          <div className="section-title"><h2>Nova inspeção</h2></div>
+          <div className="section-title"><div><h2>Nova inspeção</h2><small className="audit-section-caption">Selecione o roteiro aplicável ao armazém</small></div></div>
           <div className="audit-grid">
             {AUDIT_DEFINITIONS.map((def)=>{
               const ready=Boolean(templates.find((x)=>x.rq_code===def.code)?.storage_path)
@@ -641,6 +665,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
                 <div>
                   <strong>{x.rq_code.replace('RQ','RQ ')} · {x.titulo}</strong>
                   <span>{formatDate(x.data_avaliacao)} · {x.responsavel_nome || 'Responsável não informado'}</span>
+                  {x.progresso_total>0&&<small className="audit-history-progress">{x.progresso_concluido}/{x.progresso_total} itens · {Math.min(100,Math.round(x.progresso_concluido/x.progresso_total*100))}% concluído</small>}
                 </div>
                 <span className={'audit-status '+x.status}>{statusLabel(x.status)}</span>
               </button>
@@ -669,6 +694,14 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
 
       {notice&&<div className="audit-notice" role="status">{notice}<button type="button" onClick={()=>setNotice('')} aria-label="Fechar"><X size={15}/></button></div>}
       {definition?.fixedChecklist&&<div className="audit-progress"><div><span style={{width:progressPct+'%'}}/></div><small>{progressPct}%</small></div>}
+
+      <div className="audit-context-summary" aria-label="Resumo dos resultados do local selecionado">
+        <div className="audit-context-stat"><strong>{contextDone}/{relevantCriteria.length}</strong><span>Itens verificados</span></div>
+        <div className="audit-context-stat is-conforme"><strong>{contextC}</strong><span>Conformes</span></div>
+        <div className="audit-context-stat is-nc"><strong>{contextNC}</strong><span>Não conformes</span></div>
+        <div className="audit-context-stat is-na"><strong>{contextNA}</strong><span>Não aplicáveis</span></div>
+        <div className="audit-context-stat is-pending"><strong>{contextPending}</strong><span>Pendentes</span></div>
+      </div>
 
       <div className="panel section-card audit-manual-controls">
         {definition?.code==='RQ016B'&&<label>Área
@@ -713,22 +746,35 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
         </div>
       )}
 
+      {showChecklist&&<div className="audit-checklist-filters" aria-label="Filtros do checklist">
+        <label><Search size={17} aria-hidden="true"/>
+          <input type="search" aria-label="Buscar item do checklist" placeholder="Buscar código, seção ou verificação"
+            value={checklistSearch} onChange={e=>setChecklistSearch(e.target.value)}/>
+        </label>
+        <button type="button" className={'audit-pending-toggle'+(onlyPending?' selected':'')}
+          aria-pressed={onlyPending} onClick={()=>setOnlyPending(v=>!v)}>Somente pendentes <b>{contextPending}</b></button>
+        {(onlyPending||checklistSearch)&&<button type="button" className="audit-clear-filters"
+          onClick={()=>{setOnlyPending(false);setChecklistSearch('')}}>Limpar filtros</button>}
+      </div>}
+      {showChecklist&&visibleCriteria.length===0&&<div className="audit-filter-empty">
+        <CheckCircle2 size={19}/>{contextPending===0?'Todos os itens deste local foram respondidos.':'Nenhum item corresponde ao filtro.'}
+      </div>}
       {showChecklist&&<div className="audit-manual-sections">
-        {Array.from(new Set(relevantCriteria.map(c=>c.section))).map(section=>(
+        {Array.from(new Set(visibleCriteria.map(c=>c.section))).map(section=>(
           <section className="panel section-card audit-manual-panel" key={section}>
             <div className="audit-manual-panel-head">
               <h2>{section}</h2>
-              <span>{relevantCriteria.filter(c=>c.section===section).length} itens</span>
+              <span>{visibleCriteria.filter(c=>c.section===section).length} de {relevantCriteria.filter(c=>c.section===section).length} itens</span>
             </div>
             <div className="audit-manual-rows">
-              {relevantCriteria.filter(c=>c.section===section).map(c=>{
+              {visibleCriteria.filter(c=>c.section===section).map(c=>{
                 const local=localForManual()
                 const key=answerKey(c.key,local)
                 const current=answerMap.get(key)
                 const busy=savingRow===key
-                return <div className={'audit-manual-row '+(current?'is-answered':'')} key={c.key}>
+                return <div className={'audit-manual-row '+(current?'is-answered':'')+(current?.resultado==='NC'?' has-nc':'')} key={c.key}>
                   <div className="audit-manual-question"><b>{c.key}</b><span>{c.label}</span></div>
-                  <div className="audit-manual-answer">
+                  <div className="audit-manual-answer" role="group" aria-label={'Resultado de '+c.key}>
                     {(['C','NC','NA'] as const).map(result=>(
                       <button type="button" key={result}
                         aria-label={c.key+' '+result}
