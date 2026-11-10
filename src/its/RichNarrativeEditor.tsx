@@ -1,4 +1,4 @@
-import {useEffect} from 'react'
+import {useEffect,useRef} from 'react'
 import {EditorContent,useEditor} from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import {TableKit} from '@tiptap/extension-table'
@@ -10,6 +10,7 @@ import './RichNarrativeEditor.css'
 
 type Props={value:string;onChange?:(html:string)=>void;readOnly?:boolean}
 export default function RichNarrativeEditor({value,onChange,readOnly=false}:Props){
+ const lastLocalValue=useRef<string|null>(null)
  const editor=useEditor({
   extensions:[StarterKit.configure({heading:{levels:[1,2,3]}}),
    TableKit.configure({table:{resizable:true}}),
@@ -21,12 +22,14 @@ export default function RichNarrativeEditor({value,onChange,readOnly=false}:Prop
    class:'sgq-rich-document',role:'textbox','aria-multiline':'true',
    'aria-label':readOnly?'Prévia do conteúdo textual':'Editar conteúdo textual da IT',
   }},
-  onUpdate:({editor})=>onChange?.(sanitizeNarrativeHtml(editor.getHTML())),
+  onUpdate:({editor})=>{const html=sanitizeNarrativeHtml(editor.getHTML());lastLocalValue.current=html;onChange?.(html)},
  },[])
  useEffect(()=>{
   if(!editor)return
+  if(lastLocalValue.current===value)return
   const clean=sanitizeNarrativeHtml(value||'<p></p>')
   if(editor.getHTML()!==clean)editor.commands.setContent(clean,{emitUpdate:false})
+  lastLocalValue.current=null
  },[editor,value])
  useEffect(()=>{editor?.setEditable(!readOnly)},[editor,readOnly])
  if(!editor)return <div className="sgq-rich-loading">Preparando o editor…</div>
@@ -64,7 +67,7 @@ export default function RichNarrativeEditor({value,onChange,readOnly=false}:Prop
   <EditorContent editor={editor}/>
   {!readOnly&&<div className="sgq-rich-footer">
    <span>Títulos, parágrafos, tabelas e listas são editados visualmente.</span>
-   <span>{editor.storage.characterCount?.characters?.()??editor.getText().length} caracteres</span>
+   <span>{editor.getText().length} caracteres</span>
   </div>}
  </div>
 }
