@@ -11,7 +11,7 @@ const pkg=JSON.parse(read('package.json'))
 
 test('only textual notebook is replaced by rich WYSIWYG, while all other SGQ editor steps remain',()=>{
  for(const step of ['cabecalho','caderno','criterios','rodape','previa'])assert.match(editor,new RegExp("key:'"+step+"'"))
- assert.match(editor,/<RichNarrativeEditor value=\{notebookHtml\} onChange=/)
+ assert.match(editor,/<RichNarrativeEditor value=\{notebookHtml\} readOnly=\{richImportBusy\} onChange=/)
  assert.match(editor,/<RichNarrativeEditor value=\{notebookHtml\} readOnly/)
  assert.doesNotMatch(editor,/<textarea rows=\{14\} value=\{notebook\}/)
  assert.match(editor,/<OfficialWordPreview/)
