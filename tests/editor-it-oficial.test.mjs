@@ -35,7 +35,8 @@ test('official document is read from private authenticated storage and extracted
 test('demo editor presents actual official ITs and not a speculative official example',()=>{
  assert.match(app,/officialVersions=\{itVersions\.filter\(it=>it\.status==='publicada'\)/)
  assert.match(editor,/apiGet<OfficialData>\('\/api\/its\/'/)
- assert.match(editor,/^ const defaultOfficial=officialVersions.find\(v=>\/\^IT/m)
+ assert.doesNotMatch(editor,/^ const defaultOfficial=/m)
+ assert.match(editor,/onChange=\{e=>setSourceId\(e.target.value\)\}/)
  assert.match(editor,/setCriteria\(snapshot.criteria.map/)
  assert.match(editor,/sourceId/)
  assert.match(editor,/IT de referência/)
