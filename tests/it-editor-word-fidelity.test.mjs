@@ -68,3 +68,25 @@ test('Word viewer includes working zoom and explicit error retry',()=>{
  assert.match(styles,/\.it-original-viewport/)
  assert.match(styles,/\.it-test-preview-switch/)
 })
+
+test('IT001 02/2026 annex reproduces the original fixed sampling and box evaluation tables',()=>{
+ const rowPattern=/\['281 – 500 unidades','F','20','1 \/ 2','H','50','2 \/ 3'\]/
+ assert.match(editor,rowPattern)
+ assert.match(editor,/\['Acima de 150.000 unidades','M','315','10 \/ 11','P','800','21 \/ 22'\]/)
+ assert.match(editor,/const it001BoxRanges=\['1','2','3 – 6','7 – 12','13 – 20','21 – 30','31 – 42','43 – 56'\]/)
+ assert.match(editor,/\/\^IT\\s\*0\*01\$\/i.test\(officialLoaded.codigo\)/)
+ assert.match(editor,/it001IdentityRows.map/)
+ assert.match(editor,/it001SamplingRows.map/)
+ assert.match(editor,/it001BoxRanges.map/)
+})
+
+test('registration template keeps operational values blank and per-SKU dimensional grid has ten cells',()=>{
+ assert.match(editor,/Campos presentes no formulário oficial, sem preenchimento operacional/)
+ assert.match(editor,/Componente \/ SKU/)
+ assert.match(editor,/\[1,3,5,7,9,2,4,6,8,10\]\.map/)
+ assert.match(editor,/Resultado dimensional/)
+ assert.match(editor,/Resultado da inspeção · modelo/)
+ assert.match(editor,/Observação \/ conclusão/)
+ assert.match(editor,/annexAt=text.indexOf\('REGISTRO DE INSPEÇÃO'\)/)
+ assert.match(editor,/const narrative=annexAt>150\?text.slice\(0,annexAt\).trim\(\):text/)
+})
