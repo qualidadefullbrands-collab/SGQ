@@ -210,6 +210,9 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
  const add=()=>setCriteria(old=>[...old,{id:'demo-'+Date.now()+'-'+old.length,kind:'visual',title:'Novo critério',notes:'',unit:'',nominal:'',tolerance:'',measurement:'',answer:''}])
  const pick=(file:File|undefined,kind:'logo'|'image')=>{if(!file||!file.type.startsWith('image/'))return;const url=URL.createObjectURL(file);if(kind==='logo')setLogo(url);else{setTechnicalImage(url);setTechnicalName(file.name)}}
  const reset=()=>{
+  // Do not let a delayed Word conversion overwrite a manual restore.
+  richImportGeneration.current++
+  setRichImportBusy(false)
   const source=importSnapshot
   setHeader(source?{...source.header}:{...exampleHeader})
   setFooter(source?{...source.footer}:{...exampleFooter})
@@ -290,7 +293,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
      'Digite e formate o caderno técnico usando os controles abaixo.'}</p>
     {richImportBusy&&<p className="it-test-source-warning" role="status">Importando a formatação do documento Word…</p>}
     {richImportWarning&&<p className="it-test-source-warning" role="note">{richImportWarning}</p>}
-    <RichNarrativeEditor value={notebookHtml} onChange={html=>{
+    <RichNarrativeEditor value={notebookHtml} readOnly={richImportBusy} onChange={html=>{
      setNotebookHtml(html);setNotebook(narrativeTextFromHtml(html))
     }}/>
     <div className="it-test-toolbar">
