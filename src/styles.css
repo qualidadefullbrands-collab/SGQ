@@ -2694,7 +2694,31 @@ body:has(.login-shell) {background:#f3f6fa!important;color:#20374a}
 .sgq-operational-shell .sgq-stock-sku-issue{display:flex;align-items:center;gap:9px;flex-wrap:wrap;background:#fff;border:1px solid #f0dbc1;border-radius:8px;padding:9px}
 .sgq-operational-shell .sgq-stock-sku-issue strong{font-size:12px;color:#735238}
 .sgq-operational-shell .sgq-stock-sku-issue span{font-size:12px;color:#6e7e8b}
-.sgq-operational-shell .sgq-stock-sku-issue>div{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+/* Identity reconciliation is per stock record, not a global SKU merge. */
+.sgq-operational-shell .sgq-stock-sku-conflicts{gap:13px;background:#fffcf8;padding:16px;border-color:#ecd9bf}
+.sgq-operational-shell .sgq-sku-conflict-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.sgq-operational-shell .sgq-sku-conflict-heading>div{display:grid;gap:4px}
+.sgq-operational-shell .sgq-sku-conflict-heading b{font-size:15px;color:#69441f}
+.sgq-operational-shell .sgq-sku-conflict-heading>span{font-size:12px;font-weight:750;color:#91672f;background:#fbefdf;border:1px solid #edd5ba;border-radius:999px;padding:6px 10px}
+.sgq-operational-shell .sgq-stock-sku-issue{display:grid;gap:12px;padding:15px;border:1px solid #e6e9ef;border-radius:12px;background:#fff;box-shadow:0 2px 9px rgba(30,59,83,.035)}
+.sgq-operational-shell .sgq-stock-sku-issue>header{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.sgq-operational-shell .sgq-stock-sku-issue>header strong{font-size:14px;color:#233d53}
+.sgq-operational-shell .sgq-stock-sku-issue>header small{color:#687b8b}
+.sgq-operational-shell .sgq-stock-sku-verify{display:flex;flex-wrap:wrap;gap:9px}
+.sgq-operational-shell .sgq-stock-sku-verify>div{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
+.sgq-operational-shell .sgq-stock-sku-verify small{max-width:440px;overflow-wrap:anywhere;color:#6c8192}
+.sgq-operational-shell .sgq-stock-sku-positions{display:grid;gap:8px}
+.sgq-operational-shell .sgq-stock-sku-position{display:grid;grid-template-columns:minmax(185px,1fr) minmax(200px,240px) auto;gap:14px;align-items:end;padding:12px;border:1px solid #edf0f4;background:#fafcfe;border-radius:10px}
+.sgq-operational-shell .sgq-stock-sku-position-meta{display:grid;gap:3px;min-width:0}
+.sgq-operational-shell .sgq-stock-sku-position-meta b{font-size:13px;color:#1c4059}
+.sgq-operational-shell .sgq-stock-sku-position-meta span{font-size:12px;color:#536d81}
+.sgq-operational-shell .sgq-stock-sku-position-meta small{color:#718494}
+.sgq-operational-shell .sgq-stock-sku-position label{display:grid;gap:5px;min-width:0;font-size:12px;font-weight:750;color:#536d81}
+.sgq-operational-shell .sgq-stock-sku-position select{width:100%;min-width:0;height:39px;padding:0 10px;border:1px solid #cbdce9;border-radius:9px;background:#fff;color:#24455e;font-size:13px}
+.sgq-operational-shell .sgq-stock-sku-position .primary{height:39px;white-space:nowrap;padding:0 13px}
+@media(max-width:900px){.sgq-operational-shell .sgq-stock-sku-position{grid-template-columns:1fr 1fr}.sgq-operational-shell .sgq-stock-sku-position-meta{grid-column:1/-1}.sgq-operational-shell .sgq-stock-sku-position .primary{width:100%}}
+@media(max-width:520px){.sgq-operational-shell .sgq-stock-sku-position{grid-template-columns:1fr}.sgq-operational-shell .sgq-stock-sku-position-meta{grid-column:auto}}
+
 
 /* Subprocess references are suggestions only, never live links to earlier A/B data. */
 .sgq-subprocess-inheritance{display:grid;gap:4px;border:1px solid #dce7ed;border-radius:10px;padding:11px 13px;background:#f8fafc;color:#456477}
