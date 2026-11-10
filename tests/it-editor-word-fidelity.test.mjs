@@ -54,7 +54,8 @@ test('editable view separates 18 checklist criteria, dimensional parameters and 
  assert.match(editor,/As categorias originais \(Visual, Dimensional, Olfativo, Medição e Funcional\)/)
  assert.match(editor,/Componente \/ SKU/)
  assert.match(editor,/não informa nominal ou desvio/)
- assert.doesNotMatch(editor,/nominal:'24,00'[^]*?setOfficialLoaded\(option\)/)
+ assert.match(editor,/setCriteria\(snapshot.criteria.map/)
+ assert.match(editor,/isSymmetric\?numericDisplay\(lower\):''/)
 })
 
 test('Word viewer includes working zoom and explicit error retry',()=>{
