@@ -1293,8 +1293,10 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 (x.DistribuicaoCaixas?.Count ?? 0) > 0)
             .ToList();
 
-        // Uma inspeção por conjunto: cada produto permanece como item do mesmo grupo.
-        // A separação das análises dimensionais é feita visualmente, por item/SKU.
+        // Uma inspeção por entrada. Mais de um SKU na entrada exige um conjunto declarado.
+        // Produtos independentes precisam de entradas distintas, com laudos próprios.
+        if(items.Count>1&&!input.EhConjunto)
+            return Results.Json(Error("Existem vários SKUs nesta entrada. Marque Conjunto de componentes ou crie uma Nova Entrada para cada produto independente."),statusCode:400);
         var statisticalLot = items
             .Select(x => (long)Math.Floor(EffectiveReceived(x) / Math.Max(x.UnidadesPorConjunto <= 0 ? 1m : x.UnidadesPorConjunto, 0.000001m)))
             .Where(x => x > 0)
@@ -1379,7 +1381,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             return Results.Json(Error($"O subprocesso {subCode} já existe neste FST."),statusCode:409);
         var nonEmptyNames = items.Select(x => (x.Nome ?? "").Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
         var groupName = nonEmptyNames.Count > 0 ? string.Join(" + ", nonEmptyNames) : "Inspeção em preenchimento";
-        var isComponentSet = items.Count > 1;
+        var isComponentSet = input.EhConjunto && items.Count > 1;
 
         var createdGroup = await RestAsync(client, token, HttpMethod.Post, "grupos_inspecao", "select=id",
             new {
@@ -1514,7 +1516,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     versao = "2026-10",
                     modo_teste = true,
                     somente_it_obrigatoria = true,
-                    modelo_inspecao="conjunto",
+                    modelo_inspecao=isComponentSet?"conjunto":"individual",
                     quantidade_skus=items.Count,
                     request_id=requestId
                 }
@@ -3220,8 +3222,10 @@ app.MapGet("/api/processos/{id}/laudo-status", async (string id,HttpRequest requ
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         await CurrentUserId(client,token);
-        using var msg=new HttpRequestMessage(HttpMethod.Get,
-            $"{auditDocsUrl}/process-report-status/{Uri.EscapeDataString(id)}");
+        var entryId=request.Query["entrada"].ToString();
+        var statusUrl=$"{auditDocsUrl}/process-report-status/{Uri.EscapeDataString(id)}";
+        if(!string.IsNullOrWhiteSpace(entryId))statusUrl+="?entrada="+Uri.EscapeDataString(entryId);
+        using var msg=new HttpRequestMessage(HttpMethod.Get,statusUrl);
         msg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
         using var response=await client.SendAsync(msg);
         var raw=await response.Content.ReadAsStringAsync();
@@ -4343,6 +4347,7 @@ public class CreateInspectionRequest
 {
     public string? ProcessoId { get; set; }
     public string? SubprocessoCodigo { get; set; }
+    public bool EhConjunto { get; set; } = false;
     public bool Iniciar { get; set; } = true;
     public string? RequestId { get; set; }
     public string Codigo { get; set; } = "";
