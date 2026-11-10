@@ -172,3 +172,50 @@
  .sgq-operational-shell .it-test-paper-body h2{font-size:21px}
  .sgq-operational-shell .it-test-doc-footer{flex-wrap:wrap}
 }
+
+
+/* Published-IT reference loader: clearly distinguish official source from draft editing. */
+.sgq-operational-shell .it-test-official-source{
+ display:grid;gap:12px;padding:18px 20px;border:1px solid #c9dded;
+ border-radius:15px;background:#fff;box-shadow:0 3px 16px rgba(19,63,106,.055)
+}
+.sgq-operational-shell .it-test-source-head{display:flex;align-items:flex-start;gap:12px;color:#1469a1}
+.sgq-operational-shell .it-test-source-head>div{display:grid;gap:3px}
+.sgq-operational-shell .it-test-source-head strong{font-size:16px;color:#123961;line-height:1.35}
+.sgq-operational-shell .it-test-source-head small{color:#607b96;line-height:1.55;font-size:12px}
+.sgq-operational-shell .it-test-source-controls{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px}
+.sgq-operational-shell .it-test-source-controls>label{display:grid;gap:6px;flex:1 1 330px;min-width:0}
+.sgq-operational-shell .it-test-source-controls select{width:100%;min-height:44px}
+.sgq-operational-shell .it-test-source-controls button{min-height:44px;flex:0 1 auto;white-space:normal}
+.sgq-operational-shell .it-test-source-summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sgq-operational-shell .it-test-source-summary>span{
+ display:inline-flex;align-items:center;min-height:30px;padding:6px 10px;
+ border:1px solid #d8e9f7;border-radius:20px;background:#f0f8ff;
+ color:#235780;font-size:12px;line-height:1.25
+}
+.sgq-operational-shell .it-test-source-summary>span:first-child{color:#0869a4;background:#e6f4ff;border-color:#c4e3f8;font-weight:700}
+.sgq-operational-shell .it-test-source-nqa{margin:0;color:#4b6b89;font-size:12px;line-height:1.6}
+.sgq-operational-shell .it-test-source-error{
+ margin:0;padding:11px 13px;background:#fff3f1;border:1px solid #f3c8c1;
+ border-radius:10px;color:#a33226;font-size:13px
+}
+.sgq-operational-shell .it-test-source-warning{
+ margin:0;padding:11px 13px;background:#fffaf0;border:1px solid #eddaa7;
+ border-radius:10px;color:#775a1f;font-size:12px;line-height:1.55
+}
+.sgq-operational-shell .it-test-criterion-identification{display:grid;gap:5px;min-width:0}
+.sgq-operational-shell .it-test-criterion-identification small{font-size:11px;color:#1f75ac;font-weight:750}
+.sgq-operational-shell .it-test-criterion-identification strong{overflow-wrap:anywhere}
+.sgq-operational-shell .it-test-criteria .it-test-hint.span-2{
+ display:block;padding:8px 11px;margin:0;border:1px solid #dfebf4;
+ border-radius:9px;background:#f6faff;color:#566f87;font-weight:500
+}
+.sgq-operational-shell .it-test-pasted-content{overflow-wrap:anywhere;max-height:700px;overflow:auto}
+.sgq-operational-shell .it-test-doc-fields{flex-wrap:wrap}
+@media(max-width:720px){
+ .sgq-operational-shell .it-test-official-source{padding:15px 13px}
+ .sgq-operational-shell .it-test-source-controls{align-items:stretch;flex-direction:column}
+ .sgq-operational-shell .it-test-source-controls>label{flex:auto;width:100%}
+ .sgq-operational-shell .it-test-source-controls button{width:100%}
+ .sgq-operational-shell .it-test-criterion-head{align-items:flex-start}
+}
