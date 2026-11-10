@@ -73,6 +73,7 @@ function specification(c:Criterion){
 }
 export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:OfficialOption[]}){
  const [step,setStep]=useState<Step>('cabecalho')
+ const [documentStatus,setDocumentStatus]=useState<'Vigente'|'Em Revisão'|'Rascunho'|'Obsoleto'>('Rascunho')
  const [previewMode,setPreviewMode]=useState<'original'|'estrutura'>('original')
  const [header,setHeader]=useState<Header>({...exampleHeader})
  const [footer,setFooter]=useState<Footer>({...exampleFooter})
@@ -230,39 +231,26 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
  const dimensionalCriteria=criteria.filter(c=>c.origin==='dimensional'||(!c.origin&&c.kind==='dimensional'))
  const specialCriteria=criteria.filter(c=>c.origin==='teste')
  const isIt001Reference=!!officialLoaded&&/^IT\s*0*01$/i.test(officialLoaded.codigo)&&officialLoaded.versao==='02/2026'
- return <section className="it-test" aria-label="Editor de IT experimental">
-  <div className="it-test-banner">
-   <div className="it-test-banner-copy"><Settings2 size={21}/><div><strong>Editor de IT · Demonstração com documento oficial</strong><span>{officialLoaded?'Cópia editável de '+officialLoaded.codigo+' · versão '+officialLoaded.versao:'Selecione uma IT publicada para reproduzir seus critérios no editor.'} Nenhum ajuste salva ou publica a IT original.</span></div></div>
-   <button className="secondary" type="button" onClick={reset}><RotateCcw size={16}/> {officialLoaded?'Restaurar cópia':'Restaurar exemplo'}</button>
+ return <section className="it-test it-new-editor" aria-label="Editor de Instrução Técnica">
+  <div className="it-new-editor-toolbar">
+   <label className="it-new-editor-source">IT de referência
+    <select value={sourceId} disabled={loadBusy} onChange={e=>setSourceId(e.target.value)} aria-label="IT de referência">
+     <option value="">Nova IT em branco</option>
+     {officialVersions.map(v=><option key={v.id} value={v.id}>{v.codigo} · {v.titulo} · v{v.versao}</option>)}
+    </select>
+   </label>
+   <button type="button" className="secondary" disabled={!sourceId||loadBusy} onClick={()=>void loadOfficial(sourceId)}>
+    <RefreshCw size={16}/>{loadBusy?'Carregando…':'Importar'}
+   </button>
+   <label className="it-new-editor-status">Status
+    <select aria-label="Status da IT" value={documentStatus} onChange={e=>setDocumentStatus(e.target.value as typeof documentStatus)}>
+     <option>Vigente</option><option>Em Revisão</option><option>Rascunho</option><option>Obsoleto</option>
+    </select>
+   </label>
+   <button type="button" className="secondary" onClick={reset}><RotateCcw size={16}/> Restaurar</button>
   </div>
-
-  <div className="it-test-official-source" aria-label="Importar IT oficial para demonstração">
-   <div className="it-test-source-head"><FileText size={22} aria-hidden="true"/>
-    <div><strong>Reproduzir uma IT oficial</strong><small>Importa somente os dados publicados do SGQ. É uma cópia local para testar o layout, não uma nova versão.</small></div>
-   </div>
-   <div className="it-test-source-controls">
-    <label>Documento de referência
-     <select value={sourceId} disabled={loadBusy} onChange={e=>setSourceId(e.target.value)} aria-label="Selecionar IT oficial">
-      <option value="">Selecionar IT publicada</option>
-      {officialVersions.map(v=><option key={v.id} value={v.id}>{v.codigo} · {v.titulo} · v{v.versao}</option>)}
-     </select>
-    </label>
-    <button type="button" className="primary" disabled={!sourceId||loadBusy} onClick={()=>void loadOfficial(sourceId)}>
-     <RefreshCw size={16} aria-hidden="true"/>{loadBusy?'Carregando documento…':'Carregar no editor'}
-    </button>
-    {officialLoaded&&originalPath&&<button type="button" className="secondary" disabled={downloadingOriginal} onClick={()=>void downloadOriginal()}>
-     <Download size={16} aria-hidden="true"/>{downloadingOriginal?'Baixando…':'Baixar Word oficial'}
-    </button>}
-   </div>
-   {loadError&&<p className="it-test-source-error" role="alert">{loadError}</p>}
-   {officialLoaded&&<div className="it-test-source-summary" role="status">
-     <span><strong>{officialLoaded.codigo}</strong> · v{officialLoaded.versao}</span>
-     <span>{officialCounts.checks} verificações</span><span>{officialCounts.dimensions} dimensionais</span>
-     <span>{officialCounts.special} teste(s) especial(is)</span>
-    </div>}
-   {officialLoaded&&<p className="it-test-source-nqa">{nqaSummary}</p>}
-   {sourceWarning&&<p className="it-test-source-warning" role="note">{sourceWarning}</p>}
-  </div>
+  {loadError&&<p className="it-test-source-error" role="alert">{loadError}</p>}
+  {richImportWarning&&<p className="it-test-source-warning" role="note">{richImportWarning}</p>}
   <nav className="it-test-tabs" aria-label="Etapas do editor">
    {steps.map((x,i)=><button type="button" key={x.key} className={x.key===step?'selected':''} aria-current={x.key===step?'step':undefined} onClick={()=>setStep(x.key)}><span>{i+1}</span>{x.title}</button>)}
   </nav>
@@ -288,9 +276,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
    </>}
    {step==='caderno'&&<>
     <div className="section-title"><h2>Conteúdo textual da IT</h2><span className="it-test-hint">Editor visual · Calibri</span></div>
-    <p className="it-test-hint">{officialLoaded?
-     'Edite diretamente títulos, parágrafos, listas, negritos e tabelas importados do Word. A IT oficial permanece intacta.':
-     'Digite e formate o caderno técnico usando os controles abaixo.'}</p>
+
     {richImportBusy&&<p className="it-test-source-warning" role="status">Importando a formatação do documento Word…</p>}
     {richImportWarning&&<p className="it-test-source-warning" role="note">{richImportWarning}</p>}
     <RichNarrativeEditor value={notebookHtml} readOnly={richImportBusy} onChange={html=>{
@@ -302,7 +288,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
      <label className="it-test-checkbox"><input type="checkbox" checked={showSpecs} onChange={e=>setShowSpecs(e.target.checked)}/> Tabela de especificações</label>
     </div>
     {technicalImage&&<div className="it-test-image-preview"><img src={technicalImage} alt="Imagem técnica"/><span>{technicalName}</span></div>}
-    <p className="it-test-hint">{officialLoaded?'As alterações são apenas desta demonstração. Compare com Prévia → Documento oficial antes de aprovar qualquer modelo.':'A formatação feita aqui aparece na prévia da estrutura editável; este editor não salva nem publica a IT.'}</p>
+
    </>}
    {step==='criterios'&&<>
     <div className="section-title"><h2>Critérios da inspeção{officialLoaded?' · '+criteria.length+' itens':''}</h2><button type="button" className="secondary" onClick={add}><Plus size={16}/> Adicionar critério</button></div>
@@ -347,9 +333,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
   {step==='previa'&&<div className="it-test-preview">
     <div className="it-test-preview-title">
      <Eye size={20} aria-hidden="true"/>
-     <div><h2>{officialLoaded?'IT oficial · '+officialLoaded.codigo+' · '+officialLoaded.versao:'Prévia da estrutura editável'}</h2>
-      <p>{officialLoaded?'Confira a diagramação original ou a organização dos campos desta cópia de teste.':'Confira a organização dos campos editados, sem simular páginas oficiais.'}</p>
-     </div>
+     <div><h2>Prévia</h2></div>
     </div>
     {officialLoaded&&<div className="it-test-preview-switch" role="tablist" aria-label="Tipo de prévia">
       <button type="button" role="tab" aria-selected={previewMode==='original'}
@@ -367,7 +351,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
      <div className="it-original-error" role="alert">Esta IT não possui um Word original disponível. Use a visualização da estrutura editável.</div>}
     {(!officialLoaded||previewMode==='estrutura')&&<div className="it-structure-preview" aria-label="Simulação da estrutura para edição">
       <header className="it-structure-heading">
-       <div><span className="it-structure-stamp">CÓPIA DE SIMULAÇÃO · NÃO OFICIAL</span>
+       <div><span className="it-structure-stamp">PRÉVIA DE EDIÇÃO</span>
         <h3>{header.title||'Título da IT'}</h3>
         <p>{header.code||'Código não informado'} · Versão {header.revision||'—'} · Vigência {header.date?header.date.split('-').reverse().join('/'):'—'}</p>
        </div>
@@ -458,7 +442,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
        <span><strong>Aprovação:</strong> {footer.approved||'Consulte o Word oficial'}</span>
        <span>{footer.control||'Cópia de demonstração'}</span>
       </footer>
-      <p className="it-structure-disclaimer">Esta visualização é a estrutura editável, não um laudo emitido nem um documento aprovado. A formatação do Word original fica na aba “Documento oficial”.</p>
+      
     </div>}
   </div>}
   <div className="it-test-actions">
