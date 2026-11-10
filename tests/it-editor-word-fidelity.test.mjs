@@ -36,7 +36,7 @@ test('Word tables, logos, pagination and fonts are isolated from the SGQ app sty
 test('preview no longer invents a two-page IT or replaces approved Word with SGQ logo',()=>{
  assert.doesNotMatch(editor,/PaperHeader|PaperFooter|it-test-paper-stack|Página 1 do exemplo|Página 2 do exemplo/)
  assert.doesNotMatch(styles,/\.it-test-paper-stack|\.it-test-doc-header/)
- assert.match(editor,/setPreviewMode\('original'\);setStep\('previa'\)/)
+ assert.match(editor,/setPreviewMode\('original'\);setStep\('caderno'\)/)
  assert.match(editor,/Documento oficial \(Word\)/)
  assert.match(editor,/Estrutura editável/)
  assert.match(editor,/<OfficialWordPreview/)
