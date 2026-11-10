@@ -186,7 +186,7 @@ export default function InspectionsKanban({
         <label className="sgq-kanban-search">
           <Search size={17} aria-hidden="true"/>
           <input type="search" value={query} onChange={e=>{setQuery(e.target.value);setShownByLane({})}}
-            placeholder="Buscar FST, letra, NF ou cliente" aria-label="Buscar processos"/>
+            placeholder="Buscar FST, NF ou cliente" aria-label="Buscar processos"/>
         </label>
         <button type="button" className="primary sgq-kanban-new" onClick={onCreate}><Plus size={17}/> Novo Processo</button>
       </div>}
