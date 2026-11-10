@@ -2703,3 +2703,137 @@ body:has(.login-shell) {background:#f3f6fa!important;color:#20374a}
 .sgq-subprocess-inheritance small{color:#718598;font-size:11px;line-height:1.45}
 .sgq-saved-photo-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 .sgq-saved-photo-actions button{display:inline-flex;align-items:center;gap:4px}
+
+
+/* SGQ 2026 visual refresh — navigation, search and contextual controls.
+   Matches the referenced navy/ice-blue dashboard without changing workflows. */
+body:has(.sgq-operational-shell){background:linear-gradient(130deg,#f5f7fb,#f0f4fa 70%,#eef4fb)!important}
+.sgq-operational-shell{
+  --sgq-page:#f3f6fb;
+  --sgq-ink:#142f53;
+  --sgq-muted:#5d7596;
+  --sgq-border:#d9e3ef;
+  --sgq-accent:#0a70b5;
+  width:calc(100% - 244px);max-width:none;
+  margin:0 0 0 244px;padding:0 0 28px;
+  color:var(--sgq-ink);font-family:Inter,"Segoe UI",system-ui,sans-serif
+}
+.sgq-side-nav{
+  width:244px;padding:22px 12px 22px;gap:5px;
+  background:linear-gradient(165deg,#092c50 0%,#052444 48%,#052d57 100%)!important;
+  border-right:0!important;box-shadow:5px 0 26px #11395a16;
+  color:#e5f5ff;isolation:isolate
+}
+.sgq-side-nav:after{
+  content:"";position:fixed;bottom:0;left:0;width:244px;height:160px;
+  background:radial-gradient(ellipse at 100% 110%,rgba(17,157,218,.25),transparent 68%);
+  z-index:-1;pointer-events:none
+}
+.sgq-side-nav .sgq-side-brand{
+  display:flex;align-items:center;gap:13px;min-height:80px;padding:4px 10px 25px;
+  border-bottom:1px solid rgba(221,236,251,.12);color:#fff
+}
+.sgq-side-nav .sgq-brand-symbol{
+  flex:none;display:grid;place-items:center;width:43px;height:43px;color:#18b7f5;
+  filter:drop-shadow(0 3px 4px #00192d4d)
+}
+.sgq-side-nav .sgq-side-brand b{color:#fff;font-size:29px;font-weight:870;letter-spacing:-.045em;line-height:1}
+.sgq-side-nav .sgq-side-brand small{color:#b5cce3;font-size:12px;margin-top:5px}
+.sgq-side-nav .sgq-side-caption{margin:23px 15px 11px;font-size:10px;color:#8daccc;letter-spacing:.12em;font-weight:830}
+.sgq-side-nav>button{
+  color:#dbe9f9!important;font-size:14px;min-height:47px;padding:11px 14px;
+  border-radius:11px;margin-bottom:1px;border:1px solid transparent;
+  font-weight:650;background:transparent
+}
+.sgq-side-nav>button svg{color:#e1effc}
+.sgq-side-nav>button:hover{background:#164a74!important;color:#fff!important}
+.sgq-side-nav>button.selected{
+  color:#fff!important;background:linear-gradient(100deg,#106ca6,#085182)!important;
+  box-shadow:inset 3px 0 0 #12c8f5,0 4px 14px #001a3540!important;
+  border-color:#247baa;font-weight:800
+}
+.sgq-side-nav>button.selected svg{color:#fff}
+.sgq-side-nav .sgq-side-footer{border-top:1px solid #ffffff24;padding:18px 12px 1px;gap:6px}
+.sgq-side-nav .sgq-side-footer small{color:#b8d5ed;font-size:12px}
+.sgq-side-nav .sgq-side-footer button{color:#d9f3ff;font-weight:700}
+.sgq-operational-shell .topbar{
+  min-height:68px;position:sticky;top:0;z-index:30;
+  margin:0;background:rgba(255,255,255,.93)!important;
+  border-bottom:1px solid #dce5ef!important;box-shadow:0 3px 20px #244a7611!important;
+  display:grid;grid-template-columns:minmax(170px,1fr) minmax(220px,385px) minmax(225px,1fr);
+  align-items:center;gap:18px;padding:9px 26px!important
+}
+.sgq-operational-shell .sgq-topbar-context{display:flex;align-items:center;gap:10px;min-width:0;font-size:13px;color:#22547b}
+.sgq-operational-shell .sgq-topbar-context strong{font-size:14px;color:#17365c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sgq-operational-shell .sgq-topbar-context>span{font-weight:710}
+.sgq-operational-shell .sgq-topbar-chevron{color:#a3bad2;flex:none}
+.sgq-operational-shell .sgq-topbar-home{
+  width:35px;height:35px;padding:7px;border:0;border-radius:9px;background:transparent;
+  color:#115b99;display:grid;place-items:center;cursor:pointer
+}
+.sgq-operational-shell .sgq-topbar-home:hover{background:#edf5fc}
+.sgq-operational-shell .sgq-topbar-search{
+  display:flex;align-items:center;gap:9px;width:100%;height:43px;
+  padding:0 14px;border:1px solid #d0dced;border-radius:13px;background:#fafcff;
+  box-shadow:0 1px 4px rgba(17,52,94,.025);color:#486b90;min-width:0
+}
+.sgq-operational-shell .sgq-topbar-search:focus-within{border-color:#4fa1d8;box-shadow:0 0 0 3px #c9e5f94d}
+.sgq-operational-shell .sgq-topbar-search input{
+  flex:1;min-width:0;height:38px;min-height:0!important;width:100%;
+  border:0!important;padding:0!important;background:transparent!important;
+  box-shadow:none!important;outline:none!important;font-size:13px;color:#183d63
+}
+.sgq-operational-shell .sgq-topbar-search input::placeholder{color:#7188a4;opacity:1}
+.sgq-operational-shell .topbar .sgq-topbar-user-actions{
+  display:flex;justify-self:end;align-items:center;gap:12px;white-space:nowrap;color:#15395c
+}
+.sgq-operational-shell .sgq-topbar-bell{position:relative;display:grid;place-items:center;width:38px;height:39px;padding:8px!important;border:0;background:transparent!important;color:#1d4772!important}
+.sgq-operational-shell .sgq-topbar-bell:hover{background:#edf6fc!important}
+.sgq-operational-shell .sgq-topbar-notification-count{
+  position:absolute;right:0;top:0;display:grid;place-items:center;min-width:16px;height:16px;
+  padding:0 3px;border:2px solid #fff;border-radius:99px;background:#0994de;color:white;font-size:9px;font-weight:820
+}
+.sgq-operational-shell .sgq-topbar-divider{width:1px;height:31px;background:#d4e0ee;margin:0 5px}
+.sgq-operational-shell .sgq-user-avatar{
+  flex:none;display:grid;place-items:center;height:38px;width:38px;border-radius:50%;
+  background:linear-gradient(135deg,#b5dced,#0d70ad);color:#fff;
+  font-weight:870;font-size:13px;letter-spacing:.015em
+}
+.sgq-operational-shell .sgq-user-identity{display:grid;gap:3px;color:#173251;text-align:left}
+.sgq-operational-shell .sgq-user-identity strong{font-size:12px;font-weight:810;line-height:1.15}
+.sgq-operational-shell .sgq-user-identity small{font-size:11px;color:#5d7596;line-height:1.1;text-transform:capitalize}
+.sgq-operational-shell .sgq-topbar-signout{border:0;background:transparent!important;color:#66809d!important;padding:8px!important}
+.sgq-operational-shell .sgq-topbar-signout:hover{color:#124b79!important;background:#edf6fc!important}
+.sgq-operational-shell .sgq-topbar-user-actions .sgq-offline-indicator{
+  min-width:0;padding:7px 9px!important;border:1px solid #dbe6ef;background:#f6fafc;color:#53819a;
+  border-radius:8px;font-size:11px
+}
+.sgq-operational-shell .sgq-topbar-user-actions .sgq-offline-indicator span{display:none}
+@media(max-width:1180px){
+ .sgq-operational-shell .topbar{grid-template-columns:minmax(130px,1fr) minmax(175px,360px) auto;gap:10px;padding:8px 15px!important}
+ .sgq-operational-shell .sgq-user-identity{display:none}
+ .sgq-operational-shell .sgq-topbar-user-actions{gap:7px}
+}
+@media(max-width:850px){
+ .sgq-operational-shell{width:calc(100% - 18px)!important;margin:0 auto!important;padding-top:76px!important}
+ .sgq-side-nav{top:0;bottom:auto;left:0;right:0;width:100%;height:72px;display:flex;flex-direction:row;
+  align-items:center;gap:4px;padding:8px;overflow-x:auto;overflow-y:hidden;background:#092d50!important}
+ .sgq-side-nav:after{display:none}
+ .sgq-side-nav .sgq-side-brand{min-width:112px;padding:4px 10px 4px 4px;border-right:1px solid #ffffff28;border-bottom:0}
+ .sgq-side-nav .sgq-brand-symbol{width:30px;height:30px}
+ .sgq-side-nav .sgq-brand-symbol svg{width:27px}
+ .sgq-side-nav .sgq-side-brand b{font-size:23px}
+ .sgq-side-nav>button{white-space:nowrap;min-height:43px;font-size:12px;padding:9px}
+ .sgq-side-nav .sgq-side-caption,.sgq-side-nav .sgq-side-footer,.sgq-side-nav .sgq-side-brand small{display:none}
+ .sgq-operational-shell .topbar{top:0;position:sticky;grid-template-columns:minmax(90px,1fr) minmax(130px,1.3fr) auto;gap:7px}
+}
+@media(max-width:620px){
+ .sgq-operational-shell .topbar{grid-template-columns:minmax(95px,1fr) auto;padding:8px 4px!important}
+ .sgq-operational-shell .sgq-topbar-search{grid-column:1/-1;grid-row:2;height:41px}
+ .sgq-operational-shell .topbar .sgq-topbar-user-actions{grid-column:2;grid-row:1}
+ .sgq-operational-shell .sgq-topbar-context{grid-column:1;grid-row:1;gap:4px}
+ .sgq-operational-shell .sgq-topbar-context strong{font-size:12px}
+ .sgq-operational-shell .sgq-topbar-divider,.sgq-operational-shell .sgq-topbar-user-actions .sgq-offline-indicator{display:none}
+ .sgq-operational-shell .sgq-topbar-user-actions{gap:3px}
+ .sgq-operational-shell .sgq-user-avatar{height:32px;width:32px;font-size:11px}
+}

@@ -6,6 +6,8 @@ const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8')
 const ui=read('src/auditorias/AuditoriasPage.tsx')
 const styles=read('src/auditorias/warehouse-unified.css')
 const main=read('src/App.tsx')
+const dashboard=read('src/components/SgqDashboard.tsx')
+const dashboardStyles=read('src/components/SgqDashboard.css')
 
 test('warehouse reuses same SGQ page title, metric cards, panels and list rows',()=>{
   assert.match(ui,/className="audit-page audit-integrated sgq-warehouse-workspace"/)
@@ -16,9 +18,10 @@ test('warehouse reuses same SGQ page title, metric cards, panels and list rows',
   assert.match(ui,/audit-card row-card/)
   assert.match(ui,/className="panel queue audit-history"/)
   assert.match(ui,/className="queue-row audit-history-entry"/)
-  assert.match(main,/className="page-title"/)
-  assert.match(main,/className="metrics"/)
-  assert.match(main,/className="panel queue"/)
+  assert.match(main,/<SgqDashboard/)
+  assert.match(dashboard,/className="sgq-dashboard-kpis"/)
+  assert.match(dashboard,/className="sgq-dashboard-summary"/)
+  assert.match(dashboardStyles,/\.sgq-dashboard-kpis/)
 })
 
 test('warehouse does not show a second illustrated hero / redundant menu',()=>{

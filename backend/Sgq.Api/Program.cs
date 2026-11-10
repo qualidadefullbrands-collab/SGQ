@@ -623,7 +623,7 @@ app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory f
         var processesTask=RestAsync(client,token,HttpMethod.Get,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id&excluido_em=is.null&order=criado_em.desc");
         var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
+            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,concluida_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
         await Task.WhenAll(profileTask,processesTask,inspectionsTask);
         var (profile,found)=FirstRow(profileTask.Result);
         if(!found)return Results.Json(Error("Usuário sem perfil autorizado no SGQ."),statusCode:403);
@@ -698,7 +698,7 @@ app.MapGet("/api/app/listas", async (HttpRequest request,IHttpClientFactory fact
         var processes=RestAsync(client,token,HttpMethod.Get,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id&excluido_em=is.null&order=criado_em.desc");
         var inspections=RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
+            "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,concluida_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
         await Task.WhenAll(processes,inspections);
         return Results.Ok(new{data=new{processes=processes.Result,
             inspections=OperationalInspections(processes.Result,inspections.Result)},error=(object?)null});
