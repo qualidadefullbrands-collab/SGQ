@@ -36,6 +36,8 @@ type Props={
   movingInspectionId?:string|null
   onMove?:(id:string,target:'aberta'|'em_andamento')=>void
   mode?:'page'|'panel'
+  initialView?:'processos'|'kanban'
+  externalQuery?:string
   focusProcessId?:string|null
   onViewAll?:()=>void
   onOpen:(id:string)=>void
@@ -92,17 +94,17 @@ function InspectionMenu({inspection,process,canDelete,deletingProcessId,onReuseP
 
 export default function InspectionsKanban({
   inspections,processes,canDelete,deletingProcessId,canMove=false,movingInspectionId=null,onMove,
-  mode='page',focusProcessId=null,onViewAll,onOpen,onCreate,onReuseProcess,onEditProcess,
+  mode='page',initialView='processos',externalQuery,focusProcessId=null,onViewAll,onOpen,onCreate,onReuseProcess,onEditProcess,
   onDeleteProcess,onDeleteInspection,formatFst
 }:Props){
   const [query,setQuery]=useState('')
-  const [view,setView]=useState<'processos'|'kanban'>('processos')
+  const [view,setView]=useState<'processos'|'kanban'>(initialView)
   const [expandedProcessId,setExpandedProcessId]=useState<string|null>(null)
   const [shownByLane,setShownByLane]=useState<Record<string,number>>({})
   const [draggingId,setDraggingId]=useState<string|null>(null)
   const [overLane,setOverLane]=useState<string|null>(null)
   const pageSize=mode==='panel'?8:24
-  const search=normalized(query)
+  const search=normalized(externalQuery ?? query)
   const processById=useMemo(()=>new Map(processes.map(p=>[p.id,p])),[processes])
   const visible=useMemo(()=>{
     // Cancelled/archived records do not occupy an operational Kanban lane.
@@ -267,7 +269,7 @@ export default function InspectionsKanban({
       </div>}
     </section>}
     {(mode==='panel'||view==='kanban')&&<div className="sgq-kanban-board" aria-label="Quadro Kanban de inspeções">
-      {columnsToShow.map(column=><section className={'sgq-kanban-lane tone-'+column.tone}
+      {columnsToShow.map(column=><section id={'sgq-kanban-lane-'+column.status} className={'sgq-kanban-lane tone-'+column.tone}
         key={column.status} aria-label={column.label}
         data-drop-active={overLane===column.status}
         onDragOver={e=>{
@@ -293,12 +295,15 @@ export default function InspectionsKanban({
           <span className="sgq-kanban-lane-count">{column.items.length}</span>
         </div>
         <div className="sgq-kanban-lane-content">
-          {groupByFst(column.items.slice(0,shownByLane[column.status]??pageSize)).map(({key,children})=><section
-            className="sgq-kanban-process-group" key={key} aria-label={'Processo '+formatFst(processById.get(key)?.codigo??children[0]?.grupos_inspecao?.processos?.codigo)}>
-            <div className="sgq-kanban-process-group-title">
+          {(mode==='panel'
+            ?column.items.slice(0,shownByLane[column.status]??pageSize).map(item=>({key:item.id,children:[item]}))
+            :groupByFst(column.items.slice(0,shownByLane[column.status]??pageSize))
+          ).map(({key,children})=><section
+            className={'sgq-kanban-process-group '+(mode==='panel'?'sgq-panel-individual':'')} key={key} aria-label={'Processo '+formatFst(processById.get(key)?.codigo??children[0]?.grupos_inspecao?.processos?.codigo)}>
+            {mode!=='panel'&&<div className="sgq-kanban-process-group-title">
               <strong>{formatFst(processById.get(key)?.codigo??children[0]?.grupos_inspecao?.processos?.codigo)}</strong>
               <span>{children.length} inspeção(ões) independentes</span>
-            </div>
+            </div>}
             {children.map(item=>{
             const group=item.grupos_inspecao
             const process=processById.get(group?.processo_id??'')
@@ -323,9 +328,12 @@ export default function InspectionsKanban({
               onDragEnd={()=>{setDraggingId(null);setOverLane(null)}}>
               <div className="sgq-kanban-card-top">
                 <span className="sgq-kanban-fst">{fst}</span>
-                <InspectionMenu inspection={item} process={process} canDelete={canDelete} deletingProcessId={deletingProcessId}
+                {mode==='panel'?<span className="sgq-card-status-tag">
+                  {done?<CheckCircle2 size={12}/>:active?<Play size={12}/>:null}
+                  {done?'Concluída':active?'Em andamento':'Não iniciada'}
+                </span>:<InspectionMenu inspection={item} process={process} canDelete={canDelete} deletingProcessId={deletingProcessId}
                   onReuseProcess={onReuseProcess} onEditProcess={onEditProcess}
-                  onDeleteProcess={onDeleteProcess} onDeleteInspection={onDeleteInspection}/>
+                  onDeleteProcess={onDeleteProcess} onDeleteInspection={onDeleteInspection}/>}
               </div>
               <h3 title={client||'Cliente não informado'}>{client||'Cliente não informado'}</h3>
               {group?.nome&&<p className="sgq-kanban-group" title={group.nome}>{group.nome}</p>}
@@ -338,6 +346,9 @@ export default function InspectionsKanban({
                 </div>
               </div>}
               <div className="sgq-kanban-card-bottom">
+                {mode==='panel' && <InspectionMenu inspection={item} process={process} canDelete={canDelete} deletingProcessId={deletingProcessId}
+                  onReuseProcess={onReuseProcess} onEditProcess={onEditProcess}
+                  onDeleteProcess={onDeleteProcess} onDeleteInspection={onDeleteInspection}/>}
                 {result?<span className={'sgq-kanban-result '+(item.resultado==='aprovado'?'is-approved':'is-rejected')}>
                   {result}
                 </span>:<span className="sgq-kanban-card-spacer"/>}
