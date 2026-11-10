@@ -103,7 +103,7 @@ export default function SgqDashboard({
         <span className="sgq-kpi-copy"><strong>{formatCount(processCount)}</strong><span>Processos</span></span>
         <span className="sgq-kpi-hint">Ver todos <ArrowRight size={14}/></span>
       </button>
-      <button type="button" className="sgq-kpi-card is-focused" onClick={() => document.getElementById('sgq-dashboard-inspections')?.scrollIntoView({behavior:'smooth',block:'start'})} aria-label={formatCount(metrics.count)+' inspeções. Ir para o quadro'}>
+      <button type="button" className="sgq-kpi-card is-focused" onClick={() => {setStatusFilter('all');document.getElementById('sgq-dashboard-inspections')?.scrollIntoView({behavior:'smooth',block:'start'})}} aria-label={formatCount(metrics.count)+' inspeções. Ir para o quadro'}>
         <span className="sgq-kpi-icon sgq-kpi-sky"><ClipboardCheck size={29}/></span>
         <span className="sgq-kpi-copy"><strong>{formatCount(metrics.count)}</strong><span>Inspeções</span></span>
         <span className="sgq-kpi-hint">Ver quadro <ArrowRight size={14}/></span>
@@ -113,7 +113,7 @@ export default function SgqDashboard({
         <span className="sgq-kpi-copy"><strong>{formatCount(stockCount)}</strong><span>Estoque</span></span>
         <span className="sgq-kpi-hint">Ver estoque <ArrowRight size={14}/></span>
       </button>
-      <button type="button" className="sgq-kpi-card" onClick={() => document.getElementById('sgq-dashboard-inspections')?.scrollIntoView({behavior:'smooth',block:'start'})} aria-label={formatCount(metrics.done)+' inspeções concluídas'}>
+      <button type="button" className="sgq-kpi-card" onClick={() => {setStatusFilter('concluida');document.getElementById('sgq-dashboard-inspections')?.scrollIntoView({behavior:'smooth',block:'start'})}} aria-label={formatCount(metrics.done)+' inspeções concluídas'}>
         <span className="sgq-kpi-icon sgq-kpi-green"><CheckCircle2 size={29}/></span>
         <span className="sgq-kpi-copy"><strong>{formatCount(metrics.done)}</strong><span>Concluídas</span></span>
         <span className="sgq-kpi-hint">Total atual <CheckCircle2 size={14}/></span>
