@@ -239,6 +239,80 @@
 @media(prefers-reduced-motion:reduce){
  .sgq-operational-shell .it-original-loading svg{animation:none}
 }
+
+/* IT 001 v02/2026: preview of the real registration annex structure. */
+.sgq-operational-shell .it-structure-identification{min-width:680px;table-layout:fixed}
+.sgq-operational-shell .it-structure-identification th{width:20%;font-size:11px;vertical-align:middle}
+.sgq-operational-shell .it-structure-identification td{width:30%;height:36px}
+.sgq-operational-shell .it-structure-sampling{min-width:640px;text-align:center}
+.sgq-operational-shell .it-structure-sampling th,
+.sgq-operational-shell .it-structure-sampling td{text-align:center;padding:8px 7px;font-variant-numeric:tabular-nums}
+.sgq-operational-shell .it-structure-sampling thead tr:first-child th{
+ background:#e3ebf3;color:#173f65;border:1px solid #a4bccc;font-size:12px
+}
+.sgq-operational-shell .it-structure-sampling td:first-child{text-align:left;white-space:nowrap;font-weight:680}
+.sgq-operational-shell .it-structure-boxes{min-width:750px;text-align:center;margin-top:0;font-size:11px}
+.sgq-operational-shell .it-structure-boxes th{min-width:130px;text-align:left}
+.sgq-operational-shell .it-structure-boxes td{min-width:65px;text-align:center;font-variant-numeric:tabular-nums}
+.sgq-operational-shell .it-structure-level-row{
+ display:flex;flex-wrap:wrap;align-items:center;gap:16px;
+ padding:12px 14px;margin:0 0 12px;
+ border:1px solid #dce6f0;background:#f8fbff;border-radius:10px;
+ color:#385a79;font-size:12px
+}
+.sgq-operational-shell .it-structure-level-row strong{color:#163d64;font-weight:790}
+.sgq-operational-shell .it-structure-level-row span{white-space:nowrap}
+.sgq-operational-shell .it-structure-dim-sku{
+ display:flex;flex-wrap:wrap;align-items:center;gap:14px;
+ padding:12px 14px;margin-bottom:12px;background:#eff6fd;
+ border:1px solid #cddfec;border-radius:9px;color:#173f64;font-size:12px;font-weight:800
+}
+.sgq-operational-shell .it-structure-dim-sku strong{
+ color:#5a7692;font-weight:530
+}
+.sgq-operational-shell .it-structure-dimension-list{display:grid;gap:15px}
+.sgq-operational-shell .it-structure-dimension-item{
+ border:1px solid #c9dbe8;background:#fff;border-radius:10px;overflow:hidden
+}
+.sgq-operational-shell .it-structure-dimension-title{
+ display:grid;grid-template-columns:1fr 1fr 1fr 1.2fr;
+ align-items:stretch;background:#f3f7fb;border-bottom:1px solid #d8e5ef
+}
+.sgq-operational-shell .it-structure-dimension-title>*{
+ padding:11px 12px;border-right:1px solid #dbe6ee;font-size:11px;
+ color:#4f6980;line-height:1.45;overflow-wrap:anywhere
+}
+.sgq-operational-shell .it-structure-dimension-title>*:last-child{border-right:0}
+.sgq-operational-shell .it-structure-dimension-title strong{color:#163f64;font-size:12px;font-weight:820}
+.sgq-operational-shell .it-structure-dimension-grid{
+ display:grid;grid-template-columns:repeat(5,minmax(0,1fr))
+}
+.sgq-operational-shell .it-structure-dimension-grid>div{
+ display:flex;align-items:center;justify-content:flex-start;gap:8px;
+ border-bottom:1px solid #e2eaf2;border-right:1px solid #e2eaf2;
+ min-height:39px;padding:8px 11px;font-size:11px;color:#6b829a
+}
+.sgq-operational-shell .it-structure-dimension-grid>div:nth-child(5n){border-right:0}
+.sgq-operational-shell .it-structure-dimension-grid>div:nth-last-child(-n+5){border-bottom:0}
+.sgq-operational-shell .it-structure-dimension-grid small{font-size:10px;color:#7d95a9;font-weight:750}
+.sgq-operational-shell .it-structure-dimension-note{padding:11px;font-size:12px;color:#4f6a87}
+.sgq-operational-shell .it-structure-dimension-item>.it-structure-help{
+ margin:0;padding:10px 12px;border-top:1px solid #e2edf4;background:#f9fbfe
+}
+.sgq-operational-shell .it-structure-result-table{min-width:470px}
+.sgq-operational-shell .it-structure-result-table th{width:33%;font-size:11px}
+.sgq-operational-shell .it-structure-result-table td{min-height:42px;line-height:1.5}
+.sgq-operational-shell .it-structure-result-table tr:last-child td{height:90px}
+@media(max-width:950px){
+ .sgq-operational-shell .it-structure-dimension-title{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .sgq-operational-shell .it-structure-dimension-title>:nth-child(2){border-right:0}
+ .sgq-operational-shell .it-structure-dimension-title>:nth-child(-n+2){border-bottom:1px solid #dce5ef}
+}
+@media(max-width:620px){
+ .sgq-operational-shell .it-structure-dimension-title>*{padding:9px;font-size:10px}
+ .sgq-operational-shell .it-structure-dimension-grid>div{min-height:35px;padding:7px 5px;gap:4px;font-size:10px}
+ .sgq-operational-shell .it-structure-level-row{gap:10px;padding:10px;font-size:11px}
+}
 /* Published-IT reference loader: clearly distinguish official source from draft editing. */
 .sgq-operational-shell .it-test-official-source{
  display:grid;gap:12px;padding:18px 20px;border:1px solid #c9dded;
