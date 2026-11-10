@@ -6,6 +6,7 @@ import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperat
 import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSync'
 import InventoryPanel from './stock/InventoryPanel'
 import InspectionsKanban from './components/InspectionsKanban'
+import SgqDashboard from './components/SgqDashboard'
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
 const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
@@ -60,6 +61,7 @@ type InspectionRow = {
   nivel_inspecao: string | null
   codigo_amostragem: string | null
   criado_em: string
+  concluida_em?: string | null
   parametros_amostragem?: {lote_sequencial?:string|null;ordem_produto?:number;total_produtos?:number;produto_codigo?:string}|null
   grupos_inspecao?: {
     id: string
@@ -580,9 +582,9 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [tab, setTab] = useState<'painel' | 'insights' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile'>(()=>window.matchMedia('(max-width: 768px)').matches || new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'painel')
+  const [tab, setTab] = useState<'painel' | 'insights' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile' | 'quadro'>(()=>window.matchMedia('(max-width: 768px)').matches || new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'painel')
   const [itDemoOpen,setItDemoOpen]=useState(false)
-  const [dashboardView,setDashboardView]=useState<'processos'|'inspecoes'|'estoque'|'concluidas'>('inspecoes')
+  const [dashboardSearch,setDashboardSearch]=useState('')
   const [popupMessage,setPopupMessage]=useState('')
   const [aiConclusionBusy,setAiConclusionBusy]=useState(false)
   const [aiConclusionError,setAiConclusionError]=useState('')
@@ -3247,42 +3249,51 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   return (
     <main className="app-shell sgq-operational-shell">
       <aside className="sgq-side-nav">
-        <div className="sgq-side-brand"><ShieldCheck size={23}/><div><b>SGQ</b><small>Qualidade · Operações</small></div></div>
+        <div className="sgq-side-brand"><span className="sgq-brand-symbol"><Boxes size={31}/></span><div><b>SGQ</b><small>Qualidade · Operações</small></div></div>
         <div className="sgq-side-caption">OPERAÇÃO</div>
-        <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={18}/> Painel</button>
-        <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={18}/> Processos</button>
-        <button className="" onClick={()=>setTab('fotos-mobile')}><Camera size={18}/> Modo Fotos</button>
-        <button className={tab==='nova'?'selected':''} onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
-        <button className={tab==='estoque'?'selected':''} onClick={()=>setTab('estoque')}><Warehouse size={18}/> Estoque</button>
-        <button className={tab==='auditorias'?'selected':''} onClick={()=>{setTab('auditorias');setError('')}}><ClipboardCheck size={18}/> Inspeções Armazém</button>
+        <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={19}/> Painel</button>
+        <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
+        <button className={tab==='quadro'?'selected':''} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Inspeções</button>
+        <button className={tab==='estoque'?'selected':''} onClick={()=>setTab('estoque')}><Boxes size={19}/> Estoque</button>
+        <button onClick={()=>setTab('fotos-mobile')}><Camera size={19}/> Modo Fotos</button>
+        <button className={tab==='auditorias'?'selected':''} onClick={()=>{setTab('auditorias');setError('')}}><Warehouse size={19}/> Inspeções Armazém</button>
         <div className="sgq-side-caption">QUALIDADE</div>
-        <button className={tab==='its'?'selected':''} onClick={()=>setTab('its')}><FileText size={18}/> Instruções técnicas</button>
-        <button className={tab==='equipamentos'?'selected':''} onClick={()=>{setTab('equipamentos');void refreshEquipments()}}><Wrench size={18}/> Equipamentos</button>
+        <button className={tab==='its'?'selected':''} onClick={()=>setTab('its')}><FileText size={19}/> Instruções técnicas</button>
+        <button className={tab==='equipamentos'?'selected':''} onClick={()=>{setTab('equipamentos');void refreshEquipments()}}><Wrench size={19}/> Equipamentos</button>
         <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button type="button" onClick={()=>void supabase.auth.signOut()}><LogOut size={14}/> Sair</button></div>
       </aside>
       <header className="topbar" aria-label="Cabeçalho do SGQ">
         <div className="sgq-topbar-context">
-          <PackageSearch size={22} aria-hidden="true"/>
+          <button type="button" className="sgq-topbar-home" onClick={()=>setTab('painel')} aria-label="Ir ao Painel"><LayoutDashboard size={19}/></button>
           <span>SGQ</span>
-          <span className="sgq-topbar-separator" aria-hidden="true">/</span>
+          <ChevronRight size={15} className="sgq-topbar-chevron" aria-hidden="true"/>
           <strong>{({
-            painel:'Painel',insights:'Insights',inspecoes:'Processos',nova:'Nova inspeção',
+            painel:'Painel',insights:'Insights',inspecoes:'Processos',quadro:'Inspeções',nova:'Nova inspeção',
             execucao:'Execução da inspeção',estoque:'Estoque',
             auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos',
           } as Record<typeof tab,string>)[tab]}</strong>
         </div>
-        <div className="userbox">
-          <span>{profile.nome || 'Usuário'} · {profile.perfil}</span>
-          {omieUnread>0 && <button type="button" className="secondary small"
-            onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}} title="Pedidos de venda novos do Omie">
-            <Bell size={15}/> {omieUnread} novo(s) PV
-          </button>}
+        <label className="sgq-topbar-search" htmlFor="sgq-global-search">
+          <Search size={20} aria-hidden="true"/>
+          <input id="sgq-global-search" type="search" value={dashboardSearch}
+            placeholder="Buscar inspeções, processos, clientes..."
+            onChange={e=>{setDashboardSearch(e.target.value);if(tab!=='painel')setTab('painel')}}
+            aria-label="Buscar inspeções, processos, clientes e NFs"/>
+        </label>
+        <div className="userbox sgq-topbar-user-actions">
+          <button type="button" className="sgq-topbar-bell" onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}
+            aria-label={omieUnread?'Ver '+omieUnread+' novos pedidos Omie':'Abrir pedidos de venda Omie'} title="Pedidos de venda recebidos do Omie">
+            <Bell size={22}/>{omieUnread>0&&<span className="sgq-topbar-notification-count">{omieUnread}</span>}
+          </button>
+          <span className="sgq-topbar-divider" aria-hidden="true"/>
+          <span className="sgq-user-avatar" aria-hidden="true">{(profile.nome||'SGQ').trim().split(/\s+/).slice(0,2).map(word=>word[0]?.toUpperCase()).join('')}</span>
+          <span className="sgq-user-identity"><strong>{profile.nome || 'Usuário'}</strong><small>{profile.perfil}</small></span>
           <button type="button" className="sgq-offline-indicator" data-pending={offlinePending>0||offlineConflicts>0} title={offlineError||'Sincronização do dispositivo'}
             onClick={()=>{if(isOnline&&userId)void syncOfflineNow(userId);else setPopupMessage(offlineConflicts?'Existem registros com conflito. Seus dados permanecem salvos neste dispositivo.':'Os registros pendentes estão salvos neste dispositivo.')}}>
             {isOnline?<CloudUpload size={15}/>:<CloudOff size={15}/>}
-            {offlineConflicts?'Revisar '+offlineConflicts:offlinePending?offlinePending+' pendente(s)':!isOnline?'Salvo offline':'Sincronizado'}
+            <span>{offlineConflicts?'Revisar '+offlineConflicts:offlinePending?offlinePending+' pendente(s)':!isOnline?'Salvo offline':'Sincronizado'}</span>
           </button>
-          <button type="button" aria-label="Sair do SGQ" title="Sair" onClick={()=>void supabase.auth.signOut()}><LogOut size={18}/></button>
+          <button type="button" className="sgq-topbar-signout" aria-label="Sair do SGQ" title="Sair" onClick={()=>void supabase.auth.signOut()}><LogOut size={18}/></button>
         </div>
       </header>
 
@@ -3317,44 +3328,21 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
       {tab==='painel' && (
-        <section className="workspace">
-          <div className="page-title">
-            <div><span className="eyebrow">SGQ</span><h1>Painel</h1></div>
-            <div className="row-actions">
-              <button className="secondary small" type="button" onClick={()=>setTab('insights')} title="Ver Insights"><BarChart3 size={15}/> Insights</button>
-              <button className="primary" onClick={()=>{resetNewInspection();setTab('nova')}}><Plus size={18}/> Nova inspeção</button>
-            </div>
-          </div>
-          <section className="metrics">
-            <button type="button" className={'metric-button '+(dashboardView==='processos'?'selected':'')} onClick={()=>setDashboardView('processos')}><Metric icon={ClipboardCheck} label="Processos" value={processes.length}/></button>
-            <button type="button" className={'metric-button '+(dashboardView==='inspecoes'?'selected':'')} onClick={()=>setDashboardView('inspecoes')}><Metric icon={ShieldCheck} label="Inspeções" value={inspections.length}/></button>
-            <button type="button" className={'metric-button '+(dashboardView==='estoque'?'selected':'')} onClick={()=>setDashboardView('estoque')}><Metric icon={Boxes} label="Estoque" value={samples.length}/></button>
-            <button type="button" className={'metric-button '+(dashboardView==='concluidas'?'selected':'')} onClick={()=>setDashboardView('concluidas')}><Metric icon={FileText} label="Concluídas" value={inspections.filter((i)=>i.status==='concluida').length}/></button>
-          </section>
-          {dashboardView==='processos' && <section className="panel queue"><div className="section-title"><h2>Processos</h2><button className="secondary" type="button" onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}>Ver todos</button></div>
-            {processes.slice(0,25).map(p=>{
-              const children=inspections.filter(i=>i.grupos_inspecao?.processo_id===p.id)
-              const overview=children.map(i=>{
-                const sub=i.grupos_inspecao?.subprocesso_codigo
-                return (sub?'Subprocesso '+sub:i.numero)+(i.grupos_inspecao?.nota_fiscal?' · NF '+i.grupos_inspecao.nota_fiscal:' · NF não informada')
-              }).join(' | ')
-              return <div className="queue-row" key={p.id}><div>
-                <strong>{formatFst(p.codigo)} - {p.cliente||'Cliente não informado'}</strong>
-                <span>{overview||'Nenhum subprocesso cadastrado'}</span>
-              </div><button className="secondary small" onClick={()=>{setFocusedProcessId(p.id);setTab('inspecoes')}}>Abrir processo</button></div>
-            })}
-            {!processes.length&&<p>Nenhum processo ativo no momento. Os registros arquivados permanecem preservados no SGQ.</p>}
-          </section>}
-          {dashboardView==='estoque' && <section className="panel queue"><div className="section-title"><h2>Estoque</h2><button className="secondary" onClick={()=>setTab('estoque')}>Abrir estoque</button></div>
-            {samples.slice(0,25).map(item=><div className="queue-row" key={item.id}><div><strong>{formatFst(item.processo_referencia)} - {item.cliente_referencia||'Cliente não informado'}</strong><span>{item.sku||item.descricao} · {item.saldo} {item.unidade_controle}</span></div><button className="secondary small" onClick={()=>{setTab('estoque');setSelectedSample(item)}}>Ver item</button></div>)}
-            {!samples.length&&<p>Nenhuma amostra em estoque.</p>}
-          </section>}
-          {dashboardView==='concluidas' && <section className="panel queue"><div className="section-title"><h2>Inspeções concluídas</h2><button className="secondary" onClick={()=>setTab('inspecoes')}>Ver todas</button></div>
-            {inspections.filter(i=>i.status==='concluida').slice(0,25).map(i=><div className="queue-row" key={i.id}><div><strong>{inspectionDisplay(i)}</strong><span>{statusLabel(i.resultado)} · {formatDateBR(i.criado_em)}</span></div><button className="secondary small" onClick={()=>openInspection(i.id)}>Abrir relatório</button></div>)}
-            {!inspections.some(i=>i.status==='concluida')&&<p>Nenhuma inspeção concluída.</p>}
-          </section>}
+        <SgqDashboard
+          inspections={inspections}
+          processCount={processes.length}
+          stockCount={samples.length}
+          searchQuery={dashboardSearch}
+          onSearchChange={setDashboardSearch}
+          onNewInspection={()=>{resetNewInspection();setTab('nova')}}
+          onInsights={()=>setTab('insights')}
+          onProcesses={()=>{setFocusedProcessId(null);setTab('inspecoes')}}
+          onStock={()=>setTab('estoque')}
+          onAllInspections={()=>setTab('quadro')}
+        >
           <InspectionsKanban
             mode="panel"
+            externalQuery={dashboardSearch}
             inspections={inspections}
             processes={processes}
             canDelete={!!canDelete}
@@ -3363,7 +3351,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             onMove={(id,target)=>void moveInspectionOnBoard(id,target)}
             deletingProcessId={deletingProcessId}
             formatFst={formatFst}
-            onViewAll={()=>{setFocusedProcessId(null);setTab('inspecoes')}}
+            onViewAll={()=>setTab('quadro')}
             onOpen={id=>void openInspection(id)}
             onCreate={()=>{resetNewInspection();setTab('nova')}}
             onReuseProcess={id=>{const p=processes.find(x=>x.id===id);if(p)reuseProcess(p)}}
@@ -3371,7 +3359,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             onDeleteProcess={id=>{const p=processes.find(x=>x.id===id);if(p)void deleteProcess(p)}}
             onDeleteInspection={id=>{const i=inspections.find(x=>x.id===id);if(i)void deleteInspection(i)}}
           />
-        </section>
+        </SgqDashboard>
       )}
 
       {tab==='inspecoes' && <>
@@ -3424,6 +3412,23 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         onDeleteProcess={id=>{const process=processes.find(p=>p.id===id);if(process)void deleteProcess(process)}}
         onDeleteInspection={id=>{const item=inspections.find(i=>i.id===id);if(item)void deleteInspection(item)}}
       /> </>}
+
+      {tab==='quadro' && <InspectionsKanban key="quadro" initialView="kanban"
+        inspections={inspections}
+        processes={processes}
+        canDelete={!!canDelete}
+        deletingProcessId={deletingProcessId}
+        canMove={!!canWrite}
+        movingInspectionId={kanbanMovingId}
+        onMove={(id,target)=>void moveInspectionOnBoard(id,target)}
+        formatFst={formatFst}
+        onOpen={id=>void openInspection(id)}
+        onCreate={()=>{resetNewInspection();setTab('nova')}}
+        onReuseProcess={id=>{const process=processes.find(p=>p.id===id);if(process)reuseProcess(process)}}
+        onEditProcess={id=>{const process=processes.find(p=>p.id===id);if(process)editProcessFull(process)}}
+        onDeleteProcess={id=>{const process=processes.find(p=>p.id===id);if(process)void deleteProcess(process)}}
+        onDeleteInspection={id=>{const item=inspections.find(i=>i.id===id);if(item)void deleteInspection(item)}}
+      />}
 
       {tab==='nova' && (
         <section className="workspace">
@@ -4665,7 +4670,4 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   )
 }
 
-function Metric({ icon: Icon, label, value }: { icon: any; label: string; value: number }) {
-  return <article className="metric"><Icon size={22}/><div><strong>{value}</strong><span>{label}</span></div></article>
-}
 
