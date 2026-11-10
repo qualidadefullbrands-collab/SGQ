@@ -41,7 +41,7 @@ export default function OfficialWordPreview({storagePath,fileName}:Props){
 
   void(async()=>{
    try{
-    if(!/^modelos\/[\w.\-/]+\.docx$/i.test(storagePath)||storagePath.includes('..'))
+    if(!/^[^?#]+\.docx$/i.test(storagePath)||storagePath.split('/').some(part=>part==='..'||part==='.')||storagePath.startsWith('/'))
      throw new Error('Caminho do documento oficial inválido.')
     const {data,error:storageError}=await authClient.storage.from('it-documentos').download(storagePath)
     if(storageError||!data)throw new Error(storageError?.message||'O Word não está acessível para esta sessão.')
@@ -96,10 +96,8 @@ export default function OfficialWordPreview({storagePath,fileName}:Props){
    <AlertCircle size={20}/><div><strong>Não foi possível exibir o Word oficial</strong><p>{error}</p>
     <button type="button" className="secondary" onClick={()=>setRetry(v=>v+1)}><RefreshCw size={16}/> Tentar novamente</button></div>
   </div>}
-  <div className="it-original-viewport" hidden={!!error||loading} style={{zoom:zoom/100}}>
+  <div className="it-original-viewport" style={{zoom:zoom/100,visibility:loading?'hidden':'visible'}}>
    <div ref={hostRef} className="it-original-mount" />
   </div>
-  {/* Keep the renderer mounted during loading so it can finish constructing pages. */}
-  {(loading||!!error)&&<div className="it-original-hidden-mount"><div ref={undefined}/></div>}
  </section>
 }
