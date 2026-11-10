@@ -3648,7 +3648,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {itSuggestionNote && <p className="field-hint" role="status">{itSuggestionNote}</p>}
             </section>
 
-            {skuRows.filter(skuRowHasData).length>1&&<section className="panel section-card" aria-label="Agrupamento de SKUs">
+            {new Set(skuRows.filter(skuRowHasData).map(row=>row.sku.trim().toUpperCase()).filter(Boolean)).size>1&&<section className="panel section-card" aria-label="Agrupamento de SKUs">
               <label className="check-option"><input type="checkbox" checked={isComponentSet} onChange={e=>setIsComponentSet(e.target.checked)}/>
                 <span>Os SKUs desta entrada formam um conjunto de componentes</span></label>
               <small className="field-hint">Produtos independentes devem ser cadastrados em uma Nova Entrada do mesmo FST, com inspeção e laudo próprios.</small>
