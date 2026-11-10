@@ -258,7 +258,7 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
   }catch(e:any){setError(String(e?.message||'Não foi possível substituir.'))}
   finally{busyRef.current=false;setBusy(false)}
  }
- return <main className="sgq-mobile-photo">
+ return <main className="sgq-mobile-photo sgq-operational-shell" data-sgq-screen="fotos-mobile">
   <header className="sgq-mobile-photo-header"><div className="sgq-mobile-logo"><ShieldCheck size={24}/><div><strong>SGQ</strong><small>Modo Fotos</small></div></div><button type="button" onClick={()=>{if(clearDraft())onExit()}} disabled={busy}>SGQ completo</button></header>
   <div className="sgq-mobile-body">
    <div className="sgq-mobile-title">
