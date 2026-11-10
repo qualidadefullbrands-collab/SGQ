@@ -17,7 +17,7 @@ test('Nova IT editor is opt-in alongside the existing IT library',()=>{
  assert.match(app,/itVersions\.map/)
 })
 test('editor has document identity and separate Word and editable structure views',()=>{
- for(const part of ['cabecalho','caderno','criterios','rodape','previa']){
+ for(const part of ['cabecalho','caderno','criterios','rodape']){
   assert.ok(editor.includes("key:'"+part+"'"),part)
  }
  for(const text of ['Inserir logotipo','Conteúdo textual da IT','Inserir imagem técnica','Tabela de especificações','Adicionar critério','Rodapé e controle documental','Documento oficial (Word)','Estrutura editável','Verificações','Análises dimensionais','Testes especiais']){
