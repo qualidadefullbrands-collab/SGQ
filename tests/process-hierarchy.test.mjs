@@ -15,7 +15,7 @@ test('process view is the default and shows the real parent FST hierarchy',()=>{
  assert.match(board,/grupos_inspecao\?\.processo_id===process\.id/)
  assert.match(board,/sgq-process-node/)
  assert.match(board,/sgq-process-children/)
- assert.match(board,/'Subprocesso '\+sub\.letter/)
+ assert.match(board,/'Entrada '\+sub\.letter/)
  assert.match(board,/sub\.invoice\?'NF '/)
  assert.match(board,/sub\.items\.map\(item=>/)
  assert.match(board,/onOpen\(item\.id\)/)
