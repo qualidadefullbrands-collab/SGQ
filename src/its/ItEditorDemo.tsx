@@ -395,7 +395,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
          {c.notes&&<p className="it-structure-help">{c.notes}</p>}
         </div>)}
        </div>
-       {isIt001Reference&&<div className="it-structure-level-row"><strong>Resultado dimensional</strong><span>☐ Aprovado</span><span>☐ Reprovado</span></div>
+       {isIt001Reference&&<div className="it-structure-level-row"><strong>Resultado dimensional</strong><span>☐ Aprovado</span><span>☐ Reprovado</span></div>}
       </section>}
       {!!specialCriteria.length&&<section className="it-structure-section">
        <div className="it-structure-section-head"><h3>Testes especiais</h3><span>{specialCriteria.length} teste(s)</span></div>
