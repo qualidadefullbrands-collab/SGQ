@@ -765,7 +765,8 @@ export default function App() {
     }
     setWordCheckBusy(true)
     try{
-      const response=await apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status')
+      const entrada=detail?.grupo_inspecao_id||detail?.grupos_inspecao?.id
+      const response=await apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status'+(entrada?'?entrada='+encodeURIComponent(entrada):''))
       setWordStatus(parseWordStatus(response))
     }catch(e:any){
       setWordStatus({ready:false,pending:[],error:'Falha de comunicação ao verificar o Word: '+String(e?.message||'sem resposta')})
@@ -785,7 +786,8 @@ export default function App() {
     if(!processId){setWordStatus(null);return}
     let active=true
     setWordStatus(null)
-    void apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status')
+    const entrada=detail?.grupo_inspecao_id||detail?.grupos_inspecao?.id
+    void apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status'+(entrada?'?entrada='+encodeURIComponent(entrada):''))
       .then(response=>{if(active)setWordStatus(parseWordStatus(response))})
       .catch((e:any)=>{if(active)setWordStatus({ready:false,pending:[],
         error:'Falha de comunicação com o serviço Word: '+String(e?.message||'sem resposta')})})
@@ -908,7 +910,7 @@ export default function App() {
     return valid.length ? Math.min(...valid) : 0
   }, [skuRows])
 
-  const isComponentSet = skuRows.length > 1
+  const [isComponentSet,setIsComponentSet] = useState(false)
   const previewPlan = useMemo(
     () => samplingPlan(statisticalLot, inspection.inspectionLevel),
     [statisticalLot, inspection.inspectionLevel],
@@ -1319,7 +1321,7 @@ export default function App() {
       processoId: '', subprocessoCodigo: 'A', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
       dataInspecao: '', itVersionId: '', inspectionLevel: 'I', observacaoInterna: '',
     })
-    setSkuRows([emptySku()])
+    setSkuRows([emptySku()]);setIsComponentSet(false)
   }
 
   function fillTestInspectionData() {
@@ -1446,7 +1448,7 @@ export default function App() {
       }).catch(()=>undefined)
     }
     setExpandedSkuIndex(0)
-    setSkuRows([emptySku()])
+    setSkuRows([emptySku()]);setIsComponentSet(false)
     setTab('nova')
     setMessage('Nova inspeção independente. Confira os valores sugeridos antes de salvar.')
   }
@@ -2206,7 +2208,7 @@ export default function App() {
     const photos=rows.map((row,index)=>row.fotoFile?{index,file:row.fotoFile}:null).filter(Boolean)
     const payload={
       codigo:parentFstCode(inspection.codigo),processoId:inspection.processoId||null,
-      subprocessoCodigo:inspection.subprocessoCodigo,
+      subprocessoCodigo:inspection.subprocessoCodigo,ehConjunto:isComponentSet,
       requestId:createRequestId.current,
       cliente:inspection.cliente.trim()||null,notaFiscal:inspection.notaFiscal.trim()||null,
       origem:inspection.origem.trim()||null,transporte:inspection.transporte.trim()||null,
@@ -2348,7 +2350,7 @@ export default function App() {
     const created=await apiPost<any>('/api/inspecoes/criar',{
       codigo:parentFstCode(inspection.codigo),
       processoId:inspection.processoId||null,
-      subprocessoCodigo:inspection.subprocessoCodigo,
+      subprocessoCodigo:inspection.subprocessoCodigo,ehConjunto:isComponentSet,
       requestId:createRequestId.current,
       cliente:inspection.cliente.trim() || null,
       notaFiscal:inspection.notaFiscal.trim() || null,
@@ -3146,9 +3148,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
     if(!detail.it_versao_id){
       return setError('Esta inspeção não possui IT vinculada. Vincule uma IT para gerar o Word oficial.')
     }
-    const parentId=detail.grupos_inspecao?.processo_id as string|undefined
-    const consolidated=Boolean(detail.grupos_inspecao?.subprocesso_codigo&&parentId)
-    const collectionName=consolidated?'':askCollectionName()
+    const collectionName=askCollectionName()
     if(collectionName===null)return
     setWordDownloading(true)
     try{
@@ -3156,7 +3156,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       const token=session.data.session?.access_token
       if(!token){setError('Sua sessão expirou. Entre novamente no SGQ.');return}
       const suffix=collectionName?'?nomeConjunto='+encodeURIComponent(collectionName):''
-      const url=consolidated?`${apiUrl}/api/processos/${parentId}/laudo`:`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo${suffix}`
+      const url=`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo${suffix}`
       const response=await fetch(url,{
         method:'POST',headers:{Authorization:`Bearer ${token}`},
       })
@@ -3460,7 +3460,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     const p=processes.find(p=>p.id===e.target.value)
                     if(p)reuseProcess(p);else resetNewInspection()
                   }}>
-                    <option value="">Novo FST</option>
+                    <option value="">Novo Processo</option>
                     {processes.map(p=><option key={p.id} value={p.id}>{formatFst(p.codigo)} · {p.cliente||'Cliente não informado'}</option>)}
                   </select>
                 </label>}
@@ -3480,7 +3480,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
 
                 </div>
-                <label>Subprocesso
+                <label>Entrada
                   <select value={inspection.subprocessoCodigo} disabled={!!editingProcessId||!!editingInspectionId}
                     onChange={e=>setInspection({...inspection,subprocessoCodigo:e.target.value,notaFiscal:''})}>
                     {Array.from({length:26},(_,i)=>String.fromCharCode(65+i)).map(c=><option key={c} value={c}>{c}</option>)}
@@ -3648,6 +3648,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {itSuggestionNote && <p className="field-hint" role="status">{itSuggestionNote}</p>}
             </section>
 
+            {skuRows.filter(skuRowHasData).length>1&&<section className="panel section-card" aria-label="Agrupamento de SKUs">
+              <label className="check-option"><input type="checkbox" checked={isComponentSet} onChange={e=>setIsComponentSet(e.target.checked)}/>
+                <span>Os SKUs desta entrada formam um conjunto de componentes</span></label>
+              <small className="field-hint">Produtos independentes devem ser cadastrados em uma Nova Entrada do mesmo FST, com inspeção e laudo próprios.</small>
+            </section>}
             <section className="calc-strip">
               <div><small>Tipo</small><strong>{isComponentSet?'Conjunto / componentes':'Produto independente'}</strong></div>
               <div><small>Lote estatístico</small><strong>{statisticalLot?statisticalLot.toLocaleString('pt-BR'):'—'}</strong></div>
@@ -4165,9 +4170,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
       {tab==='its' && (
         <section className="workspace sgq-screen-its">
-          <div className="page-title"><div><span className="eyebrow">QUALIDADE · CONTROLE DOCUMENTAL</span><h1>{itDemoOpen?'Editor de IT · Teste':'Biblioteca de ITs'}</h1>
-            <p className="page-subtitle">Gerencie versões, vigência e critérios das instruções técnicas.</p></div>
-            <button type="button" className={itDemoOpen?'secondary':'primary'} onClick={()=>setItDemoOpen(x=>!x)}>{itDemoOpen?'Voltar à biblioteca':'Testar editor de IT'}</button>
+          <div className="page-title"><div><span className="eyebrow">QUALIDADE · CONTROLE DOCUMENTAL</span><h1>{itDemoOpen?'Nova IT':'Biblioteca de ITs'}</h1>
+            {!itDemoOpen&&<p className="page-subtitle">Gerencie versões, vigência e critérios das instruções técnicas.</p>}</div>
+            <button type="button" className={itDemoOpen?'secondary':'primary'} onClick={()=>setItDemoOpen(x=>!x)}>{itDemoOpen?'Voltar à biblioteca':'Nova IT'}</button>
           </div>
           {itDemoOpen ? (
             <Suspense fallback={<div className="panel section-card">Carregando editor de IT…</div>}>
