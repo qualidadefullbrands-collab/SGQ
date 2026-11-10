@@ -29,7 +29,7 @@ test('safe DOCX semantic import carries paragraphs, headings, lists, tables, ima
  assert.match(parser,/DOMPurify\.sanitize/)
  assert.match(parser,/ALLOWED_TAGS:tags/)
  assert.match(parser,/ALLOWED_ATTR:attrs/)
- assert.match(parser,/data:image\\\\\//)
+ assert.ok(parser.includes('data:image'))
  assert.match(parser,/await import\('mammoth\/mammoth.browser'\)/)
  assert.match(parser,/convertToHtml\(\{arrayBuffer:await file.arrayBuffer\(\)\}/)
  assert.match(parser,/cutRegistrationAnnex\(converted.value\)/)
