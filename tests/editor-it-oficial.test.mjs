@@ -52,9 +52,9 @@ test('checklist, dimensional parameters, and special tests keep source classific
  assert.match(editor,/numericDisplay\(d\.alvo\)/)
  assert.match(editor,/isSymmetric\?numericDisplay\(lower\):''/)
  assert.match(editor,/answer:'' as Answer/)
- assert.match(editor,/Sem tolerância aprovada/)
- assert.match(editor,/não reproduz imagens, tabelas e a paginação exata/)
- assert.match(editor,/Consultar Word oficial/)
+ assert.match(editor,/Sem desvio cadastrado/)
+ assert.match(editor,/Prévia → Documento oficial/)
+ assert.match(editor,/Baixar Word oficial/)
 })
 
 test('official IT preview is visually scoped to the SGQ editor without overriding the other modules',()=>{
