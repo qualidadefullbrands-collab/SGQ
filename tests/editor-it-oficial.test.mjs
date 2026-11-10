@@ -38,11 +38,10 @@ test('demo editor presents actual official ITs and not a speculative official ex
  assert.match(editor,/^ const defaultOfficial=officialVersions.find\(v=>\/\^IT/m)
  assert.match(editor,/setCriteria\(snapshot.criteria.map/)
  assert.match(editor,/sourceId/)
- assert.match(editor,/officialCounts.checks/)
- assert.match(editor,/officialCounts.dimensions/)
- assert.match(editor,/officialCounts.special/)
- assert.match(editor,/Cópia editável de/)
- assert.match(editor,/Nunca|Nenhum ajuste salva ou publica a IT original/)
+ assert.match(editor,/IT de referência/)
+ assert.match(editor,/documentStatus/)
+ assert.match(editor,/Rascunho/)
+ assert.doesNotMatch(editor,/Nenhum ajuste salva ou publica a IT original/)
 })
 
 test('checklist, dimensional parameters, and special tests keep source classification and unapproved tolerances blank',()=>{
@@ -53,8 +52,8 @@ test('checklist, dimensional parameters, and special tests keep source classific
  assert.match(editor,/isSymmetric\?numericDisplay\(lower\):''/)
  assert.match(editor,/answer:'' as Answer/)
  assert.match(editor,/Sem desvio cadastrado/)
- assert.match(editor,/Prévia → Documento oficial/)
- assert.match(editor,/Baixar Word oficial/)
+ assert.match(editor,/<OfficialWordPreview/)
+ assert.match(editor,/richImportWarning/)
 })
 
 test('official IT preview is visually scoped to the SGQ editor without overriding the other modules',()=>{
