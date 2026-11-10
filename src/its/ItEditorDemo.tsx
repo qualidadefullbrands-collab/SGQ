@@ -35,6 +35,23 @@ const exampleCriteria:Criterion[]=[
  {id:'demo3',kind:'dimensional',title:'Diâmetro externo',notes:'Medir no ponto indicado no caderno.',unit:'mm',nominal:'24,00',tolerance:'0,20',measurement:'24,10',answer:''},
  {id:'demo4',kind:'dimensional',title:'Altura total',notes:'Medir da base à extremidade superior.',unit:'mm',nominal:'112,00',tolerance:'0,50',measurement:'112,20',answer:''}
 ]
+// NQA and registration matrix checked against IT 001, revision 02/2026.
+const it001IdentityRows=[
+ ['Produto / descrição','Código do cliente'],['Cliente','Processo FST'],
+ ['Nota fiscal','Lote'],['Material','Capacidade'],['Origem','Transporte'],
+ ['Quantidade recebida','Quantidade por caixa'],['Nº de caixas recebidas','Chegada no CD'],
+ ['Data da inspeção',''],
+] as const
+const it001SamplingRows=[
+ ['281 – 500 unidades','F','20','1 / 2','H','50','2 / 3'],
+ ['501 – 1.200 unidades','G','32','1 / 2','J','80','3 / 4'],
+ ['1.201 – 3.200 unidades','H','50','2 / 3','K','125','5 / 6'],
+ ['3.201 – 10.000 unidades','J','80','3 / 4','L','200','7 / 8'],
+ ['10.001 – 35.000 unidades','K','125','5 / 6','M','315','10 / 11'],
+ ['35.001 – 150.000 unidades','L','200','7 / 8','N','500','14 / 15'],
+ ['Acima de 150.000 unidades','M','315','10 / 11','P','800','21 / 22'],
+] as const
+const it001BoxRanges=['1','2','3 – 6','7 – 12','13 – 20','21 – 30','31 – 42','43 – 56'] as const
 const numeric=(text:string)=>Number(text.replace(',','.'))
 function resultFor(c:Criterion):Answer {
  if(c.kind!=='dimensional')return c.answer
@@ -123,8 +140,12 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
   const newFooter:Footer={prepared:'',approved:'',control:'Cópia de demonstração · referência '+(meta?.codigo||option.codigo)+' / '+version.versao}
   const counts={checks:importedChecks.length,dimensions:importedDimensions.length,special:importedTests.length}
   const summary='NQA crítico '+decimal(version.nqa_critico)+'% · grave '+decimal(version.nqa_grave)+'% · tolerável '+decimal(version.nqa_toleravel)+'% · plano '+(version.tipo_plano_padrao||'não informado')+' / '+(version.regime_inspecao_padrao||'não informado')
+  const text=data.documento_texto||''
+  // Exclude the separately structured registration annex from narrative text.
+  const annexAt=text.indexOf('REGISTRO DE INSPEÇÃO')
+  const narrative=annexAt>150?text.slice(0,annexAt).trim():text
   const snapshot:Snapshot={
-   header:newHeader,footer:newFooter,notebook:data.documento_texto||'',
+   header:newHeader,footer:newFooter,notebook:narrative,
    criteria:[...importedChecks,...importedDimensions,...importedTests],
    documentPath:data.arquivo_storage_path||null,documentName:version.arquivo_nome||'IT-oficial.docx',
    warnings:data.aviso_documento,counts,nqa:summary
@@ -173,6 +194,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
  const checklistCriteria=criteria.filter(c=>c.origin==='checklist'||(!c.origin&&c.kind!=='dimensional'))
  const dimensionalCriteria=criteria.filter(c=>c.origin==='dimensional'||(!c.origin&&c.kind==='dimensional'))
  const specialCriteria=criteria.filter(c=>c.origin==='teste')
+ const isIt001Reference=!!officialLoaded&&/^IT\s*0*01$/i.test(officialLoaded.codigo)&&officialLoaded.versao==='02/2026'
  return <section className="it-test" aria-label="Editor de IT experimental">
   <div className="it-test-banner">
    <div className="it-test-banner-copy"><Settings2 size={21}/><div><strong>Editor de IT · Demonstração com documento oficial</strong><span>{officialLoaded?'Cópia editável de '+officialLoaded.codigo+' · versão '+officialLoaded.versao:'Selecione uma IT publicada para reproduzir seus critérios no editor.'} Nenhum ajuste salva ou publica a IT original.</span></div></div>
