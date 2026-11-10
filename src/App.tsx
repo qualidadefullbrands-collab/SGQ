@@ -3379,7 +3379,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
             </div>
             {omieInboxError && <p className="field-status bad">{omieInboxError}</p>}
-            {!omieInbox.length && <p className="section-note">Nenhum pedido importado ainda. A recepção começa quando os webhooks são ativados no Omie.</p>}
+            {!omieInbox.length && <p className="section-note">Nenhum pedido recebido nesta caixa de entrada. Consulte os PVs diretamente no Omie ou atualize a integração.</p>}
             {omieInbox.length>0 && <div className="checklist compact-checklist">
               {omieInbox.slice(0,20).map(order=><div className="check-row" key={order.id}>
                 <div className="check-copy">
