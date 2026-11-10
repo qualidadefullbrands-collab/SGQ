@@ -312,7 +312,7 @@
 .sgq-operational-shell .dimension-param{overflow:hidden}
 .sgq-operational-shell .photo-card{border-color:#dce7f1;box-shadow:var(--sgq-ui-shadow);border-radius:13px;overflow:hidden}
 .sgq-operational-shell .photo-gallery{gap:13px}
-.sgq-operational-shell .photo-gallery img{object-fit:cover}
+.sgq-operational-shell .photo-gallery img{object-fit:contain;background:#f7fafd}
 .sgq-operational-shell .result-panel{border-color:#cddfeb}
 .sgq-operational-shell .result-actions{display:flex;gap:10px;flex-wrap:wrap}
 .sgq-operational-shell .retention-panel{border-color:#e0e7ef}
