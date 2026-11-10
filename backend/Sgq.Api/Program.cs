@@ -1328,9 +1328,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 ?version.GetString():null;
             if(!string.IsNullOrWhiteSpace(parentIt))
             {
-                if(!string.IsNullOrWhiteSpace(effectiveIt)&&!string.Equals(effectiveIt,parentIt,StringComparison.OrdinalIgnoreCase))
-                    return Results.Json(Error("A IT dos subprocessos deve ser a mesma do FST principal."),statusCode:409);
-                effectiveIt=parentIt!;
+                // A IT do FST é o padrão inicial. Cada entrada pode selecionar outra IT.
+                if(string.IsNullOrWhiteSpace(effectiveIt))effectiveIt=parentIt!;
             }
             else if(!string.IsNullOrWhiteSpace(effectiveIt))
             {
@@ -1715,17 +1714,19 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         {
             if(!Guid.TryParse(input.ItVersionId,out _))
                 return Results.Json(Error("Identificador da IT inválido."),statusCode:400);
-            if(!string.IsNullOrWhiteSpace(parentIt)&&!string.Equals(input.ItVersionId,parentIt,StringComparison.OrdinalIgnoreCase))
-                return Results.Json(Error("A IT pertence ao FST principal e não pode ser diferente por subprocesso."),statusCode:409);
+            // A IT específica da entrada não altera a IT padrão do processo.
             if(string.IsNullOrWhiteSpace(parentIt))
                 await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(processId)}",
                     new{it_versao_id=input.ItVersionId},"return=minimal");
             await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
                 new {it_versao_id=input.ItVersionId},"return=minimal");
+            await RestAsync(client,token,HttpMethod.Patch,"grupo_inspecao_its",
+                $"grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}",
+                new {principal=false},"return=minimal");
             await RestAsync(client,token,HttpMethod.Post,"grupo_inspecao_its",
                 "on_conflict=grupo_inspecao_id,it_versao_id",
                 new {grupo_inspecao_id=groupId,it_versao_id=input.ItVersionId,principal=true},
-                "resolution=ignore-duplicates,return=minimal");
+                "resolution=merge-duplicates,return=minimal");
         }
         if(isSubprocess)
         {
