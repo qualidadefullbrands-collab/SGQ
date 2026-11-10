@@ -3,6 +3,8 @@ import {apiGet,authClient} from '../lib/supabase'
 import {ArrowDown,ArrowUp,BookOpen,Check,ChevronLeft,ChevronRight,ClipboardCheck,Download,Eye,FileText,ImagePlus,Plus,RefreshCw,RotateCcw,Settings2,Trash2} from 'lucide-react'
 import './ItEditorDemo.css'
 import OfficialWordPreview from './OfficialWordPreview'
+import RichNarrativeEditor from './RichNarrativeEditor'
+import {importNarrativeFromDocx,plainToRichHtml,narrativeTextFromHtml} from './richNarrative'
 
 type Step='cabecalho'|'caderno'|'criterios'|'rodape'|'previa'
 type Kind='visual'|'dimensional'|'funcional'
@@ -21,7 +23,7 @@ type OfficialData={
  testes:Array<{id:string;ordem:number;nome:string;procedimento:string|null;criterio_aprovacao:string|null;destrutivo:boolean}>,
  documento_texto:string;aviso_documento:string|null;arquivo_storage_path:string|null
 }
-type Snapshot={header:Header;footer:Footer;notebook:string;criteria:Criterion[];documentPath:string|null;documentName:string;warnings:string|null;nqa:string;counts:{checks:number;dimensions:number;special:number}}
+type Snapshot={header:Header;footer:Footer;notebook:string;notebookHtml:string;criteria:Criterion[];documentPath:string|null;documentName:string;warnings:string|null;nqa:string;counts:{checks:number;dimensions:number;special:number}}
 const steps:{key:Step;title:string}[]=[
  {key:'cabecalho',title:'Cabeçalho'},{key:'caderno',title:'Caderno'},
  {key:'criterios',title:'Critérios'},{key:'rodape',title:'Rodapé'},{key:'previa',title:'Prévia'}
@@ -75,6 +77,10 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
  const [header,setHeader]=useState<Header>({...exampleHeader})
  const [footer,setFooter]=useState<Footer>({...exampleFooter})
  const [notebook,setNotebook]=useState(exampleNotebook)
+ const [notebookHtml,setNotebookHtml]=useState(()=>plainToRichHtml(exampleNotebook))
+ const [richImportBusy,setRichImportBusy]=useState(false)
+ const [richImportWarning,setRichImportWarning]=useState('')
+ const richImportGeneration=useRef(0)
  const [criteria,setCriteria]=useState<Criterion[]>(exampleCriteria.map(c=>({...c})))
  const [logo,setLogo]=useState<string|null>(null)
  const [technicalImage,setTechnicalImage]=useState<string|null>(null)
@@ -101,8 +107,10 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
  },[defaultOfficial?.id])
  async function loadOfficial(id:string){
   if(!id)return setLoadError('Selecione uma IT publicada.')
-  setLoadBusy(true);setLoadError('')
+  const importToken=++richImportGeneration.current
+  setLoadBusy(true);setLoadError('');setRichImportWarning('');setRichImportBusy(false)
   const response=await apiGet<OfficialData>('/api/its/'+encodeURIComponent(id)+'/editor-oficial')
+  if(importToken!==richImportGeneration.current)return
   setLoadBusy(false)
   if(response.error||!response.data){
    setLoadError(response.error?.message||'Não foi possível carregar a IT oficial.')
@@ -145,19 +153,41 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
   const annexAt=text.indexOf('REGISTRO DE INSPEÇÃO')
   const narrative=annexAt>150?text.slice(0,annexAt).trim():text
   const snapshot:Snapshot={
-   header:newHeader,footer:newFooter,notebook:narrative,
+   header:newHeader,footer:newFooter,notebook:narrative,notebookHtml:plainToRichHtml(narrative),
    criteria:[...importedChecks,...importedDimensions,...importedTests],
    documentPath:data.arquivo_storage_path||null,documentName:version.arquivo_nome||'IT-oficial.docx',
    warnings:data.aviso_documento,counts,nqa:summary
   }
   setImportSnapshot(snapshot)
   setHeader({...snapshot.header});setFooter({...snapshot.footer})
-  setNotebook(snapshot.notebook);setCriteria(snapshot.criteria.map(c=>({...c})))
+  setNotebook(snapshot.notebook);setNotebookHtml(snapshot.notebookHtml)
+  setCriteria(snapshot.criteria.map(c=>({...c})))
   setOriginalPath(snapshot.documentPath);setOriginalName(snapshot.documentName)
   setSourceWarning(snapshot.warnings)
   setOfficialCounts(counts);setNqaSummary(summary)
   setOfficialLoaded(option);setSourceId(id);setPreviewMode('original');setStep('previa')
   setLogo(null);setTechnicalImage(null);setTechnicalName('');setShowSpecs(true)
+  const path=data.arquivo_storage_path
+  if(path?.toLowerCase().endsWith('.docx')){
+   setRichImportBusy(true)
+   void (async()=>{
+    try{
+     const file=await authClient.storage.from('it-documentos').download(path)
+     if(file.error||!file.data)throw new Error('Arquivo Word indisponível para conversão.')
+     const imported=await importNarrativeFromDocx(file.data)
+     if(importToken!==richImportGeneration.current)return
+     setNotebookHtml(imported.html)
+     const plain=narrativeTextFromHtml(imported.html)
+     setNotebook(plain)
+     setImportSnapshot(current=>current?.documentPath===path?
+      {...current,notebook:plain,notebookHtml:imported.html}:current)
+     if(imported.warnings.length)setRichImportWarning('Alguns elementos do Word podem exigir conferência no original.')
+    }catch{
+     if(importToken===richImportGeneration.current)
+      setRichImportWarning('Não foi possível importar a formatação. Foi mantida uma transcrição organizada; a IT oficial continua intacta.')
+    }finally{if(importToken===richImportGeneration.current)setRichImportBusy(false)}
+   })()
+  }else setRichImportWarning('Documento sem DOCX disponível: o conteúdo foi organizado a partir da transcrição.')
  }
  async function downloadOriginal(){
   if(!originalPath)return
@@ -184,6 +214,8 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
   setHeader(source?{...source.header}:{...exampleHeader})
   setFooter(source?{...source.footer}:{...exampleFooter})
   setNotebook(source?source.notebook:exampleNotebook)
+  setNotebookHtml(source?source.notebookHtml:plainToRichHtml(exampleNotebook))
+  setRichImportWarning('')
   setCriteria(source?source.criteria.map(c=>({...c})):exampleCriteria.map(c=>({...c})))
   setOriginalPath(source?.documentPath||null);setOriginalName(source?.documentName||'')
   setSourceWarning(source?.warnings||null);setShowSpecs(true)
