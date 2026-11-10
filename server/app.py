@@ -359,7 +359,10 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
     for item in inspections:
         by_group.setdefault(item["grupo_inspecao_id"],[]).append(item)
     ids=",".join(row["id"] for row in inspections)
-    version_id=parent.get("it_versao_id")
+    # Para um laudo de entrada, valide os critérios da IT daquela inspeção.
+    # A consolidação de FST permanece vinculada à IT padrão do processo.
+    version_id=(inspections[0].get("it_versao_id") if group_id and inspections
+                else parent.get("it_versao_id"))
     checks,dims,tests=[],[],[]
     if version_id:
         checks,dims,tests=await __import__("asyncio").gather(
@@ -423,7 +426,7 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
             if row.get("resultado") not in ("aprovado","reprovado"):
                 pending.append(f"{label}: resultado da inspeção não definido.")
             if not version_id or row.get("it_versao_id")!=version_id:
-                pending.append(f"{label}: IT diferente da IT única do FST.")
+                pending.append(f"{label}: IT vinculada à inspeção não corresponde ao documento selecionado.")
             if not row.get("data_inspecao"):
                 pending.append(f"{label}: data da inspeção não preenchida.")
             if not row.get("responsavel_id"):
