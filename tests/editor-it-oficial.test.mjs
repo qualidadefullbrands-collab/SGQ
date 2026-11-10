@@ -29,7 +29,7 @@ test('official document is read from private authenticated storage and extracted
  assert.match(endpoint,/documentText=string.Join/)
  assert.match(endpoint,/documentWarning/)
  assert.match(endpoint,/12_000_000/)
- assert.match(endpoint,/30_000/)
+ assert.match(endpoint,/30000/)
 })
 
 test('demo editor presents actual official ITs and not a speculative official example',()=>{
@@ -53,7 +53,7 @@ test('checklist, dimensional parameters, and special tests keep source classific
  assert.match(editor,/isSymmetric\?numericDisplay\(lower\):''/)
  assert.match(editor,/answer:'' as Answer/)
  assert.match(editor,/Sem tolerância aprovada/)
- assert.match(editor,/sem tabelas e a paginação exata/)
+ assert.match(editor,/não reproduz imagens, tabelas e a paginação exata/)
  assert.match(editor,/Consultar Word oficial/)
 })
 
