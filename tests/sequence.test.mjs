@@ -16,8 +16,8 @@ const dimensionals=section(ui,'<section id="sec-dimensionais"','<section id="sec
 const processCards=section(ui,'<div className="inspection-sublist">','{!related.length')
 
 test('a kit creates exactly one inspection row',()=>{
-  assert.match(creation,/var isComponentSet = input\.EhConjunto && items\.Count > 1;/)
-  assert.match(creation,/items.Count>1&&!input.EhConjunto/)
+  assert.match(creation,/var isComponentSet = input\.EhConjunto && distinctSkuCount > 1;/)
+  assert.match(creation,/distinctSkuCount>1&&!input.EhConjunto/)
   assert.match(creation,/tipo = isComponentSet \? "kit_componentes" : "individual"/)
   assert.equal((creation.match(/HttpMethod\.Post, "inspecoes"/g)||[]).length,1)
   assert.equal((creation.match(/HttpMethod\.Post, "grupos_inspecao"/g)||[]).length,1)
