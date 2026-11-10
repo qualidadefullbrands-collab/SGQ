@@ -3743,7 +3743,7 @@ app.MapPost("/api/estoque/corrigir-sku",async(CorrectSampleSkuRequest input,Http
                     }},"return=minimal");
         }catch(Exception logError){
             app.Logger.LogError(logError,"Falha ao registrar auditoria da correção SKU {AmostraId}",input.AmostraId);
-            return Results.Json(Error("A posição foi corrigida, mas houve falha no registro de auditoria. Não repita a correção; avise o gestor."),statusCode:503);
+            return Results.Ok(new{data=new{ok=true,alterado=true,auditoriaPendente=true,sku=correct,descricao=omie.Name},error=(object?)null});
         }
         return Results.Ok(new{data=new{ok=true,alterado=true,sku=correct,descricao=omie.Name},error=(object?)null});
     }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
