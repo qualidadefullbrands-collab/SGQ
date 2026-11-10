@@ -7,6 +7,7 @@ import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSyn
 import InventoryPanel from './stock/InventoryPanel'
 import InspectionsKanban from './components/InspectionsKanban'
 import SgqDashboard from './components/SgqDashboard'
+import './SgqOperationsTheme.css'
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
 const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
@@ -3247,7 +3248,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   const samplingDone = detail ? (detail.total_inspecionado ?? 0) >= (detail.tamanho_amostra ?? 0) || (!!detail.limite_rejeicao && detail.total_nao_conforme >= detail.limite_rejeicao) : false
 
   return (
-    <main className="app-shell sgq-operational-shell">
+    <main className="app-shell sgq-operational-shell" data-sgq-screen={tab}>
       <aside className="sgq-side-nav">
         <div className="sgq-side-brand"><span className="sgq-brand-symbol"><Boxes size={31}/></span><div><b>SGQ</b><small>Qualidade · Operações</small></div></div>
         <div className="sgq-side-caption">OPERAÇÃO</div>
@@ -3363,7 +3364,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
       {tab==='inspecoes' && <>
-        <section className="workspace" aria-label="Pedidos de venda recebidos do Omie">
+        <section className="workspace sgq-screen-processos" aria-label="Pedidos de venda recebidos do Omie">
           <div className="panel section-card" style={{marginBottom:16}}>
             <div className="section-title">
               <div><h2>Pedidos de venda · Omie</h2>
@@ -3431,9 +3432,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       />}
 
       {tab==='nova' && (
-        <section className="workspace">
+        <section className="workspace sgq-workspace-form sgq-screen-nova">
           <div className="page-title">
-            <div><span className="eyebrow">INSPEÇÃO</span><h1>{editingInspectionId?'Editar inspeção':editingProcessId?'Editar processo':'Nova inspeção'}</h1></div>
+            <div><span className="eyebrow">OPERAÇÃO · INSPEÇÕES</span><h1>{editingInspectionId?'Editar inspeção':editingProcessId?'Editar processo':'Nova inspeção'}</h1>
+              <p className="page-subtitle">Identifique o FST, confirme o recebimento e selecione a instrução técnica para iniciar a inspeção.</p>
+            </div>
             <div className="row-actions">
               
               {processes[0] && <button className="secondary" type="button" onClick={()=>reuseProcess(processes[0])}><Copy size={16}/> Reutilizar últimos dados gerais</button>}
@@ -3661,11 +3664,12 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
       {tab==='execucao' && detail && (
-        <section className="workspace execution">
+        <section className="workspace execution sgq-screen-execucao">
           <div className="page-title">
             <div>
-              <span className="eyebrow">{formatFst(detail.grupos_inspecao?.processos?.codigo)}</span>
+              <span className="eyebrow">INSPEÇÃO · {formatFst(detail.grupos_inspecao?.processos?.codigo)}</span>
               <h1>{detail.grupos_inspecao?.processos?.cliente || detail.grupos_inspecao?.nome || 'Inspeção'}</h1>
+              <p className="page-subtitle">Registre cada etapa, confira as evidências e emita o laudo ao concluir.</p>
             </div>
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
@@ -4160,8 +4164,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       </Suspense>}
 
       {tab==='its' && (
-        <section className="workspace">
-          <div className="page-title"><div><span className="eyebrow">DOCUMENTOS</span><h1>{itDemoOpen?'Editor de IT · Teste':'Biblioteca de ITs'}</h1></div>
+        <section className="workspace sgq-screen-its">
+          <div className="page-title"><div><span className="eyebrow">QUALIDADE · CONTROLE DOCUMENTAL</span><h1>{itDemoOpen?'Editor de IT · Teste':'Biblioteca de ITs'}</h1>
+            <p className="page-subtitle">Gerencie versões, vigência e critérios das instruções técnicas.</p></div>
             <button type="button" className={itDemoOpen?'secondary':'primary'} onClick={()=>setItDemoOpen(x=>!x)}>{itDemoOpen?'Voltar à biblioteca':'Testar editor de IT'}</button>
           </div>
           {itDemoOpen ? (
@@ -4252,7 +4257,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
       {tab==='estoque' && (
-        <section className="workspace stock-page">
+        <section className="workspace stock-page sgq-screen-estoque">
           <div className="page-title stock-page-title">
             <div>
               <span className="eyebrow">CONTROLE DE ESTOQUE</span>
