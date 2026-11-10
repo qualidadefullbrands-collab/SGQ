@@ -2,6 +2,7 @@ import {useEffect,useRef,useState} from 'react'
 import {apiGet,authClient} from '../lib/supabase'
 import {ArrowDown,ArrowUp,BookOpen,Check,ChevronLeft,ChevronRight,ClipboardCheck,Download,Eye,FileText,ImagePlus,Plus,RefreshCw,RotateCcw,Settings2,Trash2} from 'lucide-react'
 import './ItEditorDemo.css'
+import OfficialWordPreview from './OfficialWordPreview'
 
 type Step='cabecalho'|'caderno'|'criterios'|'rodape'|'previa'
 type Kind='visual'|'dimensional'|'funcional'
@@ -42,31 +43,18 @@ function resultFor(c:Criterion):Answer {
  if(!Number.isFinite(nominal)||!Number.isFinite(tol)||!Number.isFinite(measurement)||tol<0)return ''
  return Math.abs(measurement-nominal)<=tol+0.00000001?'C':'NC'
 }
-const showDate=(s:string)=>s&&s.split('-').length===3?s.split('-').reverse().join('/'):'—'
 const numericDisplay=(v:number|null|undefined)=>v==null?'':String(v).replace('.',',')
 const decimal=(v:number|null|undefined)=>v==null?'não informado':String(v).replace('.',',')
 function specification(c:Criterion){
  if(c.kind!=='dimensional')return c.group||'Verificação'
  if(c.nominal.trim()&&c.tolerance.trim())return c.nominal+' ± '+c.tolerance+' '+c.unit
  if(c.minimum||c.maximum)return (c.minimum||'—')+' a '+(c.maximum||'—')+' '+c.unit
- if(c.nominal)return 'Nominal '+c.nominal+' '+c.unit+' · sem tolerância'
- return 'Sem tolerância aprovada'+(c.unit?' ('+c.unit+')':'')
-}
-function PaperHeader({header,logo}:{header:Header;logo:string|null}){
- return <div className="it-test-doc-header">
-  <div className="it-test-doc-logo">{logo?<img src={logo} alt="Logotipo da empresa"/>:<img src="/sgq-icon.svg" alt="Marca SGQ de exemplo"/>}</div>
-  <div className="it-test-doc-company"><b>{header.company||'Empresa'}</b><span>{header.sgq||'Sistema de Gestão da Qualidade'}</span></div>
-  <div className="it-test-doc-meta"><b>{header.code||'Código'}</b><span>Rev. {header.revision||'—'}</span><span>{showDate(header.date)}</span></div>
- </div>
-}
-function PaperFooter({footer,page}:{footer:Footer;page:number}){
- return <footer className="it-test-doc-footer">
-  <div><span>Elaborado por: {footer.prepared||'—'}</span><span>Aprovado por: {footer.approved||'—'}</span></div>
-  <div><span>{footer.control||'SGQ'}</span><b>Prévia {page}/2</b></div>
- </footer>
+ if(c.nominal)return 'Nominal '+c.nominal+' '+c.unit+' · sem desvio definido'
+ return 'Sem desvio cadastrado'+(c.unit?' ('+c.unit+')':'')
 }
 export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:OfficialOption[]}){
  const [step,setStep]=useState<Step>('cabecalho')
+ const [previewMode,setPreviewMode]=useState<'original'|'estrutura'>('original')
  const [header,setHeader]=useState<Header>({...exampleHeader})
  const [footer,setFooter]=useState<Footer>({...exampleFooter})
  const [notebook,setNotebook]=useState(exampleNotebook)
@@ -147,7 +135,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
   setOriginalPath(snapshot.documentPath);setOriginalName(snapshot.documentName)
   setSourceWarning(snapshot.warnings)
   setOfficialCounts(counts);setNqaSummary(summary)
-  setOfficialLoaded(option);setSourceId(id);setStep('cabecalho')
+  setOfficialLoaded(option);setSourceId(id);setPreviewMode('original');setStep('previa')
   setLogo(null);setTechnicalImage(null);setTechnicalName('');setShowSpecs(true)
  }
  async function downloadOriginal(){
@@ -178,14 +166,17 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
   setCriteria(source?source.criteria.map(c=>({...c})):exampleCriteria.map(c=>({...c})))
   setOriginalPath(source?.documentPath||null);setOriginalName(source?.documentName||'')
   setSourceWarning(source?.warnings||null);setShowSpecs(true)
-  setLogo(null);setTechnicalImage(null);setTechnicalName('');setStep('cabecalho')
+  setLogo(null);setTechnicalImage(null);setTechnicalName('');setStep('cabecalho');setPreviewMode('estrutura')
  }
  const results=criteria.map(resultFor)
  const count=(a:Answer)=>results.filter(x=>x===a).length
+ const checklistCriteria=criteria.filter(c=>c.origin==='checklist'||(!c.origin&&c.kind!=='dimensional'))
+ const dimensionalCriteria=criteria.filter(c=>c.origin==='dimensional'||(!c.origin&&c.kind==='dimensional'))
+ const specialCriteria=criteria.filter(c=>c.origin==='teste')
  return <section className="it-test" aria-label="Editor de IT experimental">
   <div className="it-test-banner">
    <div className="it-test-banner-copy"><Settings2 size={21}/><div><strong>Editor de IT · Demonstração com documento oficial</strong><span>{officialLoaded?'Cópia editável de '+officialLoaded.codigo+' · versão '+officialLoaded.versao:'Selecione uma IT publicada para reproduzir seus critérios no editor.'} Nenhum ajuste salva ou publica a IT original.</span></div></div>
-   <button className="secondary" type="button" onClick={reset}><RotateCcw size={16}/> Restaurar exemplo</button>
+   <button className="secondary" type="button" onClick={reset}><RotateCcw size={16}/> {officialLoaded?'Restaurar cópia':'Restaurar exemplo'}</button>
   </div>
 
   <div className="it-test-official-source" aria-label="Importar IT oficial para demonstração">
@@ -203,7 +194,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
      <RefreshCw size={16} aria-hidden="true"/>{loadBusy?'Carregando documento…':'Carregar no editor'}
     </button>
     {officialLoaded&&originalPath&&<button type="button" className="secondary" disabled={downloadingOriginal} onClick={()=>void downloadOriginal()}>
-     <Download size={16} aria-hidden="true"/>{downloadingOriginal?'Baixando…':'Consultar Word oficial'}
+     <Download size={16} aria-hidden="true"/>{downloadingOriginal?'Baixando…':'Baixar Word oficial'}
     </button>}
    </div>
    {loadError&&<p className="it-test-source-error" role="alert">{loadError}</p>}
@@ -239,9 +230,9 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
     </div>
    </>}
    {step==='caderno'&&<>
-    <div className="section-title"><h2>Caderno de inspeção</h2></div>
-    {officialLoaded&&<p className="it-test-hint">Conteúdo textual extraído do Word oficial. Figuras, tabelas e paginação devem ser conferidas no arquivo original.</p>}
-    <label className="it-test-caderno-label">{officialLoaded?'Texto do Word oficial (editável nesta demonstração)':'Cole ou escreva o conteúdo'}
+    <div className="section-title"><h2>Conteúdo textual da IT</h2></div>
+    {officialLoaded&&<p className="it-test-hint">Transcrição auxiliar do Word. As tabelas, os diagramas, os cabeçalhos e a paginação são exibidos em Prévia → Documento oficial; a edição deste texto não modifica o arquivo publicado.</p>}
+    <label className="it-test-caderno-label">{officialLoaded?'Transcrição editável (sem layout de tabelas)':'Cole ou escreva o conteúdo'}
      <textarea rows={14} value={notebook} onChange={e=>setNotebook(e.target.value)} placeholder="Cole o texto do caderno aqui"/>
     </label>
     <div className="it-test-toolbar">
@@ -250,7 +241,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
      <label className="it-test-checkbox"><input type="checkbox" checked={showSpecs} onChange={e=>setShowSpecs(e.target.checked)}/> Tabela de especificações</label>
     </div>
     {technicalImage&&<div className="it-test-image-preview"><img src={technicalImage} alt="Imagem técnica"/><span>{technicalName}</span></div>}
-    <p className="it-test-hint">{officialLoaded?'A prévia representa os dados e o texto da IT publicada, mas não reproduz imagens, tabelas e a paginação exata do Word original. Nenhuma alteração será gravada.':'Nesta tela experimental é possível colar texto e anexar uma imagem. A importação completa de arquivos Word/PDF com formatação será uma etapa posterior.'}</p>
+    <p className="it-test-hint">{officialLoaded?'Para conferir a formatação original, abra Prévia → Documento oficial. Aqui você está alterando apenas a transcrição textual desta demonstração; nenhuma alteração será gravada.':'Nesta tela experimental é possível colar texto e anexar uma imagem. A importação completa de arquivos Word/PDF com formatação será uma etapa posterior.'}</p>
    </>}
    {step==='criterios'&&<>
     <div className="section-title"><h2>Critérios da inspeção{officialLoaded?' · '+criteria.length+' itens':''}</h2><button type="button" className="secondary" onClick={add}><Plus size={16}/> Adicionar critério</button></div>
@@ -266,15 +257,16 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
       </div></div>
       <div className="form-grid it-test-grid">
        <label>Descrição<input value={c.title} onChange={e=>update(c.id,{title:e.target.value})}/></label>
-       <label>Tipo<select value={c.kind} onChange={e=>update(c.id,{kind:e.target.value as Kind})}><option value="visual">Visual · C/NC/NA</option><option value="dimensional">Dimensional · tolerância</option><option value="funcional">Funcional · C/NC/NA</option></select></label>
+       {c.origin==='checklist'?<label>Grupo da verificação<input value={c.group||''} onChange={e=>update(c.id,{group:e.target.value})}/></label>:
+         <label>Tipo de registro<select value={c.kind} onChange={e=>update(c.id,{kind:e.target.value as Kind})}><option value="visual">C / NC / NA</option><option value="dimensional">Medição dimensional</option><option value="funcional">Teste funcional</option></select></label>}
        <label className="span-2">Orientação<textarea rows={2} value={c.notes} onChange={e=>update(c.id,{notes:e.target.value})}/></label>
        {c.kind==='dimensional'?<>
         <label>Nominal<input inputMode="decimal" value={c.nominal} onChange={e=>update(c.id,{nominal:e.target.value})}/></label>
         <label>Tolerância ±<input inputMode="decimal" value={c.tolerance} onChange={e=>update(c.id,{tolerance:e.target.value})}/></label>
         <label>Unidade<input value={c.unit} onChange={e=>update(c.id,{unit:e.target.value})}/></label>
         <label>Leitura simulada<input inputMode="decimal" value={c.measurement} onChange={e=>update(c.id,{measurement:e.target.value})}/></label>
-        {officialLoaded&&!c.nominal&&!c.tolerance&&<small className="it-test-hint span-2">Sem tolerância aprovada no cadastro oficial. Não foi atribuído valor presumido.</small>}
-       </>:<label>Resultado de exemplo<select value={c.answer} onChange={e=>update(c.id,{answer:e.target.value as Answer})}><option value="">Sem resposta</option><option value="C">Conforme</option><option value="NC">Não conforme</option><option value="NA">Não aplicável</option></select></label>}
+        {officialLoaded&&!c.nominal&&!c.tolerance&&<small className="it-test-hint span-2">O cadastro oficial não informa nominal ou desvio para este parâmetro. A medição e a média são registradas na inspeção; nenhum número foi presumido.</small>}
+       </>:<label>{c.origin==='checklist'?'Resposta simulada · C/NC/NA':'Resultado de exemplo'}<select value={c.answer} onChange={e=>update(c.id,{answer:e.target.value as Answer})}><option value="">Sem resposta</option><option value="C">Conforme</option><option value="NC">Não conforme</option><option value="NA">Não aplicável</option></select></label>}
       </div>
      </article>)}
      {!criteria.length&&<div className="empty">Nenhum critério cadastrado no teste.</div>}
@@ -292,41 +284,82 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
   </div>}
 
   {step==='previa'&&<div className="it-test-preview">
-   <div className="it-test-preview-title"><Eye size={20}/><div><h2>Prévia da estrutura da IT{officialLoaded?' · '+officialLoaded.codigo:''}</h2>
-    <p>{officialLoaded?'Reprodução editável a partir dos dados publicados; não é uma cópia da diagramação original do Word.':'O caderno aparece antes da própria inspeção, na sequência prevista.'}</p></div></div>
-   <div className="it-test-paper-stack">
-    <article className="it-test-paper" aria-label="Página 1 do exemplo">
-     <PaperHeader header={header} logo={logo}/>
-     <div className="it-test-paper-body">
-      <span className="it-test-kicker">INSTRUÇÃO DE TRABALHO</span><h2>{header.title||'Título da IT'}</h2>
-      <div className="it-test-doc-fields"><span>Cliente: {header.client||'—'}</span><span>Produto: {header.product||'—'}</span><span>SKU: {header.sku||'—'}</span></div>
-      <h3><BookOpen size={18}/> Caderno de inspeção</h3>
-      <div className="it-test-pasted-content">{notebook||'Nenhum conteúdo incluído.'}</div>
-      {technicalImage&&<figure className="it-test-doc-figure"><img src={technicalImage} alt="Imagem técnica do caderno"/><figcaption>{technicalName}</figcaption></figure>}
-      {showSpecs&&<><h4>Especificações de referência</h4><div className="it-test-table-scroll"><table><thead><tr><th>Parâmetro</th><th>Especificação</th><th>Unidade</th></tr></thead><tbody>
-       {criteria.filter(c=>c.kind==='dimensional').map(c=><tr key={c.id}><td>{c.title}</td><td>{specification(c)}</td><td>{c.unit||'—'}</td></tr>)}
-      </tbody></table></div></>}
-     </div><PaperFooter footer={footer} page={1}/>
-    </article>
-    <article className="it-test-paper" aria-label="Página 2 do exemplo">
-     <PaperHeader header={header} logo={logo}/>
-     <div className="it-test-paper-body">
-      <span className="it-test-kicker">REGISTRO DE INSPEÇÃO · DEMONSTRAÇÃO</span><h2>Inspeção do produto</h2>
-      <div className="it-test-doc-fields"><span>Produto: {header.product||'—'}</span><span>SKU: {header.sku||'—'}</span><span>Data da inspeção: —</span></div>
-      <h3><ClipboardCheck size={18}/> Resultados</h3>
-      <div className="it-test-summary"><span>Conformes <b>{count('C')}</b></span><span>Não conformes <b>{count('NC')}</b></span><span>Não aplicáveis <b>{count('NA')}</b></span></div>
-      <div className="it-test-table-scroll"><table><thead><tr><th>#</th><th>Critério</th><th>Especificação</th><th>Leitura / resposta</th><th>Status</th></tr></thead><tbody>
-       {criteria.map((c,i)=>{const r=resultFor(c);return <tr key={c.id}><td>{i+1}</td><td><b>{c.title||'—'}</b><small>{c.notes}</small></td>
-        <td>{specification(c)}</td>
-        <td>{c.kind==='dimensional'?(c.measurement?c.measurement+' '+c.unit:'Sem leitura'):r==='C'?'Conforme':r==='NC'?'Não conforme':r==='NA'?'Não aplicável':'Pendente'}</td>
-        <td><span className={'it-test-result '+(r||'pending')}>{r||'—'}</span></td>
-       </tr>})}
-      </tbody></table></div>
-      <div className="it-test-record"><b>Observações e evidências</b><p>Reservado aos registros e fotos da inspeção executada no SGQ.</p></div>
-     </div><PaperFooter footer={footer} page={2}/>
-    </article>
-   </div>
-   <p className="it-test-hint">Prévia em dois blocos para avaliação da organização visual. Não corresponde à paginação oficial nem gera nova versão da IT. Compare com o Word original.</p>
+    <div className="it-test-preview-title">
+     <Eye size={20} aria-hidden="true"/>
+     <div><h2>{officialLoaded?'IT oficial · '+officialLoaded.codigo+' · '+officialLoaded.versao:'Prévia da estrutura editável'}</h2>
+      <p>{officialLoaded?'Confira a diagramação original ou a organização dos campos desta cópia de teste.':'Confira a organização dos campos editados, sem simular páginas oficiais.'}</p>
+     </div>
+    </div>
+    {officialLoaded&&<div className="it-test-preview-switch" role="tablist" aria-label="Tipo de prévia">
+      <button type="button" role="tab" aria-selected={previewMode==='original'}
+       className={previewMode==='original'?'selected':''} onClick={()=>setPreviewMode('original')}>
+       <FileText size={17}/> Documento oficial (Word)
+      </button>
+      <button type="button" role="tab" aria-selected={previewMode==='estrutura'}
+       className={previewMode==='estrutura'?'selected':''} onClick={()=>setPreviewMode('estrutura')}>
+       <ClipboardCheck size={17}/> Estrutura editável
+      </button>
+    </div>}
+    {officialLoaded&&previewMode==='original'&&originalPath&&
+     <OfficialWordPreview key={officialLoaded.id} storagePath={originalPath} fileName={originalName}/>}
+    {officialLoaded&&previewMode==='original'&&!originalPath&&
+     <div className="it-original-error" role="alert">Esta IT não possui um Word original disponível. Use a visualização da estrutura editável.</div>}
+    {(!officialLoaded||previewMode==='estrutura')&&<div className="it-structure-preview" aria-label="Simulação da estrutura para edição">
+      <header className="it-structure-heading">
+       <div><span className="it-structure-stamp">CÓPIA DE SIMULAÇÃO · NÃO OFICIAL</span>
+        <h3>{header.title||'Título da IT'}</h3>
+        <p>{header.code||'Código não informado'} · Versão {header.revision||'—'} · Vigência {header.date?header.date.split('-').reverse().join('/'):'—'}</p>
+       </div>
+       <div className="it-structure-metadata">
+        <span>Cliente <strong>{header.client||'A definir'}</strong></span>
+        <span>Produto / SKU <strong>{header.product||'A definir'} / {header.sku||'A definir'}</strong></span>
+       </div>
+      </header>
+      <section className="it-structure-section">
+       <h3><BookOpen size={18}/> Conteúdo textual</h3>
+       <p className="it-structure-help">Esta área é uma transcrição de apoio; não reproduz a hierarquia de tabelas e páginas do documento oficial.</p>
+       <div className="it-structure-body">{notebook||'Nenhum texto incluído nesta cópia.'}</div>
+       {technicalImage&&<figure className="it-test-doc-figure"><img src={technicalImage} alt="Figura anexada à cópia"/><figcaption>{technicalName}</figcaption></figure>}
+      </section>
+      <section className="it-structure-section">
+       <div className="it-structure-section-head"><h3><ClipboardCheck size={18}/> Verificações</h3><span>{checklistCriteria.length} itens</span></div>
+       <p className="it-structure-help">As categorias originais (Visual, Dimensional, Olfativo, Medição e Funcional) foram preservadas.</p>
+       <div className="it-test-table-scroll"><table className="it-structure-table">
+        <thead><tr><th scope="col">Nº</th><th scope="col">Análise / requisito</th><th scope="col">Tipo de teste</th><th scope="col">C</th><th scope="col">NC</th><th scope="col">NA</th></tr></thead>
+        <tbody>{checklistCriteria.map((c,i)=><tr key={c.id}>
+         <td>{i+1}</td><td><strong>{c.title||'—'}</strong>{c.notes&&<small>{c.notes}</small>}</td><td>{c.group||'Verificação'}</td>
+         <td className="it-structure-check">{resultFor(c)==='C'?'✓':'—'}</td>
+         <td className="it-structure-check">{resultFor(c)==='NC'?'✓':'—'}</td>
+         <td className="it-structure-check">{resultFor(c)==='NA'?'✓':'—'}</td>
+        </tr>)}</tbody>
+       </table></div>
+      </section>
+      {showSpecs&&<section className="it-structure-section">
+       <div className="it-structure-section-head"><h3>Análises dimensionais</h3><span>{dimensionalCriteria.length} parâmetros</span></div>
+       <p className="it-structure-help">Os valores nominais e desvios somente aparecem quando cadastrados na IT. As medições reais permanecem vinculadas a Componente / SKU durante a inspeção.</p>
+       <div className="it-test-table-scroll"><table className="it-structure-table">
+        <thead><tr><th scope="col">Parâmetro</th><th scope="col">Especificação / desvio</th><th scope="col">Leitura de exemplo</th><th scope="col">Observação</th></tr></thead>
+        <tbody>{dimensionalCriteria.map(c=><tr key={c.id}>
+         <td><strong>{c.title||'—'}</strong></td><td>{specification(c)}</td>
+         <td>{c.measurement?c.measurement+' '+c.unit:'Sem medição simulada'}</td>
+         <td>{c.notes||'—'}</td>
+        </tr>)}</tbody>
+       </table></div>
+      </section>}
+      {!!specialCriteria.length&&<section className="it-structure-section">
+       <div className="it-structure-section-head"><h3>Testes especiais</h3><span>{specialCriteria.length} teste(s)</span></div>
+       {specialCriteria.map(c=><div className="it-structure-special" key={c.id}>
+        <strong>{c.title}</strong><p>{c.notes||'Procedimento não informado.'}</p>
+        <small>Resultado de exemplo: {c.answer||'Não registrado'}</small>
+       </div>)}
+      </section>}
+      <footer className="it-structure-footer">
+       <span><strong>Elaboração:</strong> {footer.prepared||'Não estruturada no cadastro'}</span>
+       <span><strong>Aprovação:</strong> {footer.approved||'Consulte o Word oficial'}</span>
+       <span>{footer.control||'Cópia de demonstração'}</span>
+      </footer>
+      <p className="it-structure-disclaimer">Esta visualização é a estrutura editável, não um laudo emitido nem um documento aprovado. A formatação do Word original fica na aba “Documento oficial”.</p>
+    </div>}
   </div>}
   <div className="it-test-actions">
    <button className="secondary" type="button" disabled={index===0} onClick={()=>setStep(steps[index-1].key)}><ChevronLeft size={16}/> Anterior</button>
