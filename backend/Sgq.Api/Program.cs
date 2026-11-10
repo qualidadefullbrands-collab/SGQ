@@ -3647,7 +3647,7 @@ app.MapGet("/api/estoque/conflitos-sku",async(HttpRequest request,IHttpClientFac
         var token=Token(request);var client=factory.CreateClient("supabase");
         await CurrentUserId(client,token);
         var rows=await RestAsync(client,token,HttpMethod.Get,"vw_saldo_amostras",
-            "select=sku,descricao&status=eq.ativa&limit=4000");
+            "select=id,codigo,sku,descricao,produto_id,saldo,endereco,processo_referencia&status=eq.ativa&limit=4000");
         var issues=new List<object>();
         if(rows is {ValueKind:JsonValueKind.Array}){
             foreach(var group in rows.Value.EnumerateArray()
@@ -3656,7 +3656,15 @@ app.MapGet("/api/estoque/conflitos-sku",async(HttpRequest request,IHttpClientFac
                 .GroupBy(x=>StockText(x,"descricao")!.Trim().ToUpperInvariant())){
                 var codes=group.Select(x=>StockText(x,"sku")!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToArray();
                 if(codes.Length>1)
-                    issues.Add(new{descricao=StockText(group.First(),"descricao"),skus=codes,registros=group.Count()});
+                    issues.Add(new{
+                        descricao=StockText(group.First(),"descricao"),skus=codes,registros=group.Count(),
+                        posicoes=group.Select(p=>new {
+                            id=StockText(p,"id"),codigo=StockText(p,"codigo"),
+                            sku=StockText(p,"sku"),descricao=StockText(p,"descricao"),
+                            endereco=StockText(p,"endereco"),processo=StockText(p,"processo_referencia"),
+                            saldo=p.TryGetProperty("saldo",out var stock)&&stock.ValueKind==JsonValueKind.Number?stock.GetDecimal():0m
+                        }).OrderBy(p=>p.codigo).ToArray()
+                    });
             }
         }
         return Results.Ok(new {data=new {conflitos=issues},error=(object?)null});
@@ -3675,6 +3683,71 @@ app.MapPost("/api/estoque/validar-sku",async(ProductLookupRequest input,HttpRequ
             conflito=other==null?null:other},error=(object?)null});
     }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao validar SKU no Omie.",e.Message),statusCode:502);}
+});
+
+// Resolve ambiguous labels one physical stock record at a time; never merge products or rewrite stock movements.
+app.MapPost("/api/estoque/corrigir-sku",async(CorrectSampleSkuRequest input,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(input.AmostraId,out _)||string.IsNullOrWhiteSpace(input.SkuCorreto)||
+           string.IsNullOrWhiteSpace(input.SkuAnterior))
+            return Results.Json(Error("Selecione uma posição de estoque e o SKU correto."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        if(!await InventoryAuthorized(client,token))
+            return Results.Json(Error("Perfil sem permissão para corrigir SKUs do estoque."),statusCode:403);
+        var rows=await RestAsync(client,token,HttpMethod.Get,"vw_saldo_amostras",
+            $"select=id,codigo,sku,descricao,produto_id,saldo&id=eq.{Uri.EscapeDataString(input.AmostraId)}&status=eq.ativa&limit=1");
+        var (current,found)=FirstRow(rows);
+        if(!found)return Results.Json(Error("Posição de estoque não localizada ou inativa."),statusCode:404);
+        var oldSku=StockText(current!.Value,"sku")??"";
+        if(!string.Equals(oldSku,input.SkuAnterior.Trim(),StringComparison.OrdinalIgnoreCase))
+            return Results.Json(Error("A identificação desta amostra mudou. Atualize a tela e confira novamente."),statusCode:409);
+        var correct=input.SkuCorreto.Trim();
+        var omie=await OmieStockProduct(client,token,correct);
+        if(!omie.Found)return Results.Json(Error(omie.Error),statusCode:422);
+        var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
+            $"select=id,sku,nome&sku=ilike.{Uri.EscapeDataString(correct)}&limit=1");
+        var (product,exists)=FirstRow(productRows);
+        string productId;
+        if(exists)productId=product!.Value.GetProperty("id").GetString()!;
+        else{
+            var added=await RestAsync(client,token,HttpMethod.Post,"produtos","select=id",
+                new {sku=correct,nome=omie.Name},"return=representation");
+            var (created,success)=FirstRow(added);
+            if(!success)throw new InvalidOperationException("Não foi possível registrar o SKU validado no Omie.");
+            productId=created!.Value.GetProperty("id").GetString()!;
+        }
+        var oldProductId=StockText(current.Value,"produto_id");
+        var oldDescription=StockText(current.Value,"descricao");
+        if(string.Equals(oldSku,correct,StringComparison.OrdinalIgnoreCase)&&
+           string.Equals(oldDescription?.Trim(),omie.Name?.Trim(),StringComparison.Ordinal))
+            return Results.Ok(new{data=new{ok=true,alterado=false,sku=correct,descricao=omie.Name},error=(object?)null});
+
+        var expectedProduct=string.IsNullOrWhiteSpace(oldProductId)?"produto_id=is.null":
+            $"produto_id=eq.{Uri.EscapeDataString(oldProductId)}";
+        var updated=await RestAsync(client,token,HttpMethod.Patch,"amostras",
+            $"select=id&id=eq.{Uri.EscapeDataString(input.AmostraId)}&status=eq.ativa&{expectedProduct}",
+            new {produto_id=productId,descricao=omie.Name},"return=representation");
+        if(!FirstRow(updated).found)
+            return Results.Json(Error("A posição foi alterada por outro usuário. Atualize a tela antes de corrigir."),statusCode:409);
+        // Record the precise before/after identity; quantities and movements remain untouched.
+        try{
+            await RestAsync(client,token,HttpMethod.Post,"audit_log","",
+                new {usuario_id=userId,entidade="amostras",entidade_id=input.AmostraId,
+                    acao="correcao_sku_omie",dados=new {
+                        sku_anterior=oldSku,descricao_anterior=oldDescription,produto_id_anterior=oldProductId,
+                        sku_novo=correct,descricao_nova=omie.Name,produto_id_novo=productId,
+                        motivo=string.IsNullOrWhiteSpace(input.Motivo)?"Identificação conferida no Omie":input.Motivo.Trim(),
+                        registrado_em=DateTimeOffset.UtcNow
+                    }},"return=minimal");
+        }catch(Exception logError){
+            app.Logger.LogError(logError,"Falha ao registrar auditoria da correção SKU {AmostraId}",input.AmostraId);
+            return Results.Json(Error("A posição foi corrigida, mas houve falha no registro de auditoria. Não repita a correção; avise o gestor."),statusCode:503);
+        }
+        return Results.Ok(new{data=new{ok=true,alterado=true,sku=correct,descricao=omie.Name},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao corrigir SKU desta posição de estoque.",e.Message),statusCode:500);}
 });
 
 app.MapPost("/api/amostras/criar", async (CreateSampleRequest input,HttpRequest request,IHttpClientFactory factory)=>
@@ -4393,6 +4466,12 @@ public sealed class BoxDistribution
 }
 public sealed class EditInspectionDataRequest : CreateInspectionRequest { }
 
+public sealed class CorrectSampleSkuRequest {
+    public string AmostraId { get; set; } = "";
+    public string SkuAnterior { get; set; } = "";
+    public string SkuCorreto { get; set; } = "";
+    public string? Motivo { get; set; }
+}
 public sealed class CreateInventoryRequest { public string? Endereco { get; set; } }
 public sealed class CountInventoryRequest {
     public string AmostraId { get; set; } = "";
