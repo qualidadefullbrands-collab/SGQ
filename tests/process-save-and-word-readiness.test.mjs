@@ -224,3 +224,18 @@ test('dimensional NC is shown on equivalent verification without duplicate Ac/Re
  assert.match(app,/Confirme as NC únicas na amostragem para não duplicar unidades/)
  assert.match(app,/hasDimensionalNc \|\|/)
 })
+
+test('Omie registration handshake succeeds after token validation, but PVs require the correct app',()=>{
+ const code=source('supabase/functions/sgq-omie-pv-webhook/index.ts')
+ const endpoint=code.split('Deno.serve(async request => {')[1]||''
+ const verify=endpoint.indexOf('secureEqual(await sha256(token), data.token_sha256)')
+ const topic=endpoint.indexOf('const topic = String(body.topic || "")')
+ const ignore=endpoint.indexOf('if (!ALLOWED.has(topic))')
+ const validate=endpoint.indexOf('if (body.appHash !== APP_HASH)')
+ const eventSave=endpoint.indexOf('admin.from("sgq_omie_eventos").insert(')
+ assert.ok(verify>=0 && topic>verify && ignore>topic && validate>ignore && eventSave>validate)
+ assert.match(endpoint,/return response\(\{ accepted: true, ignored: true, type: "handshake" \}, 200\)/)
+ assert.match(endpoint,/return response\(\{ error: "invalid_app" \}, 403\)/)
+ assert.match(endpoint,/if \(!\/\^\[a-zA-Z0-9-\]/)
+ assert.match(endpoint,/EdgeRuntime\.waitUntil\(processEvent\(/)
+})

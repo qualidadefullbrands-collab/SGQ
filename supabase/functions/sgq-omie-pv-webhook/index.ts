@@ -156,9 +156,17 @@ Deno.serve(async request => {
     if (error || !data || !secureEqual(await sha256(token), data.token_sha256))
       return response({ error: "unauthorized" }, 401);
     const body = await request.json();
-    if (!body || body.appHash !== APP_HASH) return response({ error: "invalid_app" }, 403);
+    if (!body || typeof body !== "object" || Array.isArray(body))
+      return response({ error: "invalid_payload" }, 400);
     const topic = String(body.topic || "");
-    if (!ALLOWED.has(topic)) return response({ accepted: true, ignored: true });
+    // Ao cadastrar o webhook, o Omie envia uma solicitação de teste que não
+    // precisa ter os campos appHash/messageId de um evento operacional.
+    // O token já foi verificado acima; confirma o teste sem importar dados.
+    if (!ALLOWED.has(topic))
+      return response({ accepted: true, ignored: true, type: "handshake" }, 200);
+    // Nunca aceitar um PV de outro aplicativo nem um evento sem identificação.
+    if (body.appHash !== APP_HASH)
+      return response({ error: "invalid_app" }, 403);
     const messageId = String(body.messageId || "");
     if (!/^[a-zA-Z0-9-]{10,100}$/.test(messageId)) return response({ error: "invalid_message_id" }, 400);
     const { error: insertError } = await admin.from("sgq_omie_eventos").insert({
