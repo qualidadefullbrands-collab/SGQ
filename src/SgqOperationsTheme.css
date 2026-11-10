@@ -471,7 +471,8 @@
 .sgq-operational-shell .sgq-insights .insights-drilldown{border-radius:18px}
 
 /* Modo Fotos is a dedicated camera-first workflow: unify brand, keep capture controls prominent. */
-.sgq-operational-shell .sgq-mobile-photo{
+.sgq-operational-shell .sgq-mobile-photo,
+.sgq-mobile-photo.sgq-operational-shell{
   max-width:1400px;
   margin:0 auto;
   background:transparent;
