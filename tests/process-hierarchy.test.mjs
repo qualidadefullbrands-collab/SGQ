@@ -8,7 +8,8 @@ const app=read('src/App.tsx')
 const css=read('src/components/InspectionsKanban.css')
 
 test('process view is the default and shows the real parent FST hierarchy',()=>{
- assert.match(board,/useState<'processos'\|'kanban'>\('processos'\)/)
+ assert.match(board,/useState<'processos'\|'kanban'>\(initialView\)/)
+ assert.match(board,/initialView='processos'/)
  assert.match(board,/processTree=useMemo\(/)
  assert.match(board,/processes\.map\(process=>/)
  assert.match(board,/grupos_inspecao\?\.processo_id===process\.id/)
@@ -47,7 +48,8 @@ test('edit parent FST does not change child invoice or redirect to open inspecti
  const save=app.split('async function saveProcessEdit(e: React.FormEvent)')[1]?.split('async function deleteProcess')[0]||''
  assert.match(save,/notaFiscal:null/)
  assert.match(app,/focusProcessId=\{focusedProcessId\}/)
- assert.match(app,/setFocusedProcessId\(p\.id\)/)
+ assert.match(app,/focusProcessId=\{focusedProcessId\}/)
+ assert.match(app,/onEditProcess=\{id=>\{const process=processes\.find/)
 })
 
 test('hierarchy renders as compact responsive process and subprocess cards',()=>{
