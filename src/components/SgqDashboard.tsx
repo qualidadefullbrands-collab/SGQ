@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { ArrowRight, BarChart3, CheckCircle2, ClipboardCheck, Filter, Layers3, Package, Plus, TrendingUp, X } from 'lucide-react'
 import './SgqDashboard.css'
 
@@ -20,7 +20,7 @@ type Props = {
   onProcesses: () => void
   onStock: () => void
   onAllInspections: () => void
-  children: React.ReactNode
+  children: ReactNode
 }
 
 function dayStart(date: Date): Date {
@@ -196,3 +196,4 @@ export default function SgqDashboard({
       </button>
     </section>
   </section>
+}
