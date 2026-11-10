@@ -483,6 +483,9 @@
   border-radius:15px 15px 0 0;
   color:#fff;
 }
+.sgq-operational-shell .sgq-mobile-photo-header .sgq-mobile-logo{color:#fff}
+.sgq-operational-shell .sgq-mobile-photo-header .sgq-mobile-logo small{color:#bcdaf0}
+.sgq-operational-shell .sgq-mobile-photo-header>button{background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.25)}
 .sgq-operational-shell .sgq-mobile-body{
   background:#f5f8fc;
   border:1px solid #dbe7f2;
