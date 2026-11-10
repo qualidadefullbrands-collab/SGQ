@@ -1,6 +1,8 @@
 using System.Net.Http.Headers;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.IO.Compression;
+using System.Xml.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -2617,6 +2619,93 @@ app.MapGet("/api/its/{id}/revisao", async (string id,HttpRequest request,IHttpCl
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao carregar revisão da IT.",e.Message),statusCode:500);}
+});
+
+
+app.MapGet("/api/its/{id}/editor-oficial", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    // Read-only copy of an approved IT: never creates a revision or modifies the original.
+    try
+    {
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var versionRows=await RestAsync(client,token,HttpMethod.Get,"it_versoes",
+            $"select=id,versao,status,vigencia,arquivo_nome,arquivo_storage_path,arquivo_mime,nivel_inspecao_padrao,regime_inspecao_padrao,tipo_plano_padrao,nqa_critico,nqa_grave,nqa_toleravel,instrucoes_trabalho(codigo,titulo)&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (version,found)=FirstRow(versionRows);
+        if(!found)return Results.Json(Error("IT não localizada."),statusCode:404);
+        var row=version!.Value;
+        if(row.GetProperty("status").GetString()!="publicada")
+            return Results.Json(Error("Somente versões oficiais publicadas podem ser reproduzidas no editor."),statusCode:409);
+        var checks=RestAsync(client,token,HttpMethod.Get,"it_checklist",
+            $"select=id,ordem,grupo,requisito,instrucao,classificacao_sugerida&it_versao_id=eq.{Uri.EscapeDataString(id)}&ativo=eq.true&order=ordem.asc");
+        var dimensions=RestAsync(client,token,HttpMethod.Get,"it_parametros_dimensionais",
+            $"select=id,ordem,nome,unidade,minimo,alvo,maximo,observacao,tipo_referencia&it_versao_id=eq.{Uri.EscapeDataString(id)}&ativo=eq.true&order=ordem.asc");
+        var special=RestAsync(client,token,HttpMethod.Get,"it_testes_especiais",
+            $"select=id,ordem,nome,procedimento,criterio_aprovacao,destrutivo&it_versao_id=eq.{Uri.EscapeDataString(id)}&ativo=eq.true&order=ordem.asc");
+        await Task.WhenAll(checks,dimensions,special);
+
+        string documentText="";
+        string? documentWarning=null;
+        var storagePath=row.TryGetProperty("arquivo_storage_path",out var filePath)
+            && filePath.ValueKind==JsonValueKind.String?filePath.GetString():null;
+        if(string.IsNullOrWhiteSpace(storagePath))
+            documentWarning="Esta versão não possui um arquivo Word original vinculado.";
+        else if(!storagePath.EndsWith(".docx",StringComparison.OrdinalIgnoreCase))
+            documentWarning="O documento original não está em formato Word (.docx).";
+        else if(storagePath.Contains("..",StringComparison.Ordinal))
+            documentWarning="O caminho do documento oficial é inválido.";
+        else
+        {
+            try
+            {
+                using var msg=new HttpRequestMessage(HttpMethod.Get,
+                    $"{supabaseUrl}/storage/v1/object/authenticated/it-documentos/{EncodedPath(storagePath)}");
+                ApplyAuth(msg,token);
+                using var res=await client.SendAsync(msg,HttpCompletionOption.ResponseHeadersRead);
+                if(!res.IsSuccessStatusCode)
+                    documentWarning="O arquivo Word original não pôde ser consultado. Os critérios estruturados continuam disponíveis.";
+                else if(res.Content.Headers.ContentLength>12_000_000)
+                    documentWarning="O arquivo Word é grande demais para extrair texto no editor.";
+                else
+                {
+                    var bytes=await res.Content.ReadAsByteArrayAsync();
+                    if(bytes.Length>12_000_000)throw new InvalidDataException("Word acima do limite permitido.");
+                    using var memory=new MemoryStream(bytes);
+                    using var archive=new ZipArchive(memory,ZipArchiveMode.Read);
+                    var xmlFile=archive.GetEntry("word/document.xml");
+                    if(xmlFile is null||xmlFile.Length>5_000_000)
+                        throw new InvalidDataException("Corpo do documento ausente ou grande demais.");
+                    using var xmlStream=xmlFile.Open();
+                    var xml=XDocument.Load(xmlStream);
+                    XNamespace w="http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+                    var paragraphs=xml.Descendants(w+"p")
+                        .Select(p=>string.Concat(p.Descendants(w+"t").Select(t=>t.Value)).Trim())
+                        .Where(t=>t.Length>0).ToList();
+                    documentText=string.Join("\n",paragraphs);
+                    if(documentText.Length>30000)
+                    {
+                        documentText=documentText[..30000];
+                        documentWarning="Texto extraído parcialmente: limite de 30 mil caracteres. Consulte o Word original para a versão integral.";
+                    }
+                    if(string.IsNullOrWhiteSpace(documentText))
+                        documentWarning="Não foi possível extrair texto legível do Word original.";
+                }
+            }
+            catch(Exception)
+            {
+                documentWarning="O texto do Word não pôde ser extraído. Os critérios oficiais continuam disponíveis.";
+            }
+        }
+        return Results.Ok(new {data=new {
+            versao=row,checklist=checks.Result,dimensionais=dimensions.Result,
+            testes=special.Result,documento_texto=documentText,
+            aviso_documento=documentWarning,
+            fonte="Versão publicada do SGQ; texto do Word extraído sem formatação, imagens ou tabelas.",
+            arquivo_storage_path=storagePath
+        },error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception){return Results.Json(Error("Falha ao preparar a IT oficial para o editor."),statusCode:500);}
 });
 
 app.MapGet("/api/inspecoes/{id}/chat", async (string id,HttpRequest request,IHttpClientFactory factory)=>

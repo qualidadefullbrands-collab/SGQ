@@ -4171,7 +4171,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </div>
           {itDemoOpen ? (
             <Suspense fallback={<div className="panel section-card">Carregando editor de IT…</div>}>
-              <ItEditorDemo/>
+              <ItEditorDemo officialVersions={itVersions.filter(it=>it.status==='publicada').map(it=>({
+                  id:it.id,codigo:it.instrucoes_trabalho?.codigo||'IT',
+                  titulo:it.instrucoes_trabalho?.titulo||'',versao:it.versao
+                }))}/>
             </Suspense>
           ) : (<>
           {canManageIts && (
