@@ -284,18 +284,22 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
     </div>
    </>}
    {step==='caderno'&&<>
-    <div className="section-title"><h2>Conteúdo textual da IT</h2></div>
-    {officialLoaded&&<p className="it-test-hint">Transcrição auxiliar do Word. As tabelas, os diagramas, os cabeçalhos e a paginação são exibidos em Prévia → Documento oficial; a edição deste texto não modifica o arquivo publicado.</p>}
-    <label className="it-test-caderno-label">{officialLoaded?'Transcrição editável (sem layout de tabelas)':'Cole ou escreva o conteúdo'}
-     <textarea rows={14} value={notebook} onChange={e=>setNotebook(e.target.value)} placeholder="Cole o texto do caderno aqui"/>
-    </label>
+    <div className="section-title"><h2>Conteúdo textual da IT</h2><span className="it-test-hint">Editor visual · Calibri</span></div>
+    <p className="it-test-hint">{officialLoaded?
+     'Edite diretamente títulos, parágrafos, listas, negritos e tabelas importados do Word. A IT oficial permanece intacta.':
+     'Digite e formate o caderno técnico usando os controles abaixo.'}</p>
+    {richImportBusy&&<p className="it-test-source-warning" role="status">Importando a formatação do documento Word…</p>}
+    {richImportWarning&&<p className="it-test-source-warning" role="note">{richImportWarning}</p>}
+    <RichNarrativeEditor value={notebookHtml} onChange={html=>{
+     setNotebookHtml(html);setNotebook(narrativeTextFromHtml(html))
+    }}/>
     <div className="it-test-toolbar">
      <label className="it-test-upload"><ImagePlus size={17}/> Inserir imagem técnica<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>pick(e.target.files?.[0],'image')}/></label>
      {technicalImage&&<button type="button" className="secondary small" onClick={()=>{setTechnicalImage(null);setTechnicalName('')}}>Remover imagem</button>}
      <label className="it-test-checkbox"><input type="checkbox" checked={showSpecs} onChange={e=>setShowSpecs(e.target.checked)}/> Tabela de especificações</label>
     </div>
     {technicalImage&&<div className="it-test-image-preview"><img src={technicalImage} alt="Imagem técnica"/><span>{technicalName}</span></div>}
-    <p className="it-test-hint">{officialLoaded?'Para conferir a formatação original, abra Prévia → Documento oficial. Aqui você está alterando apenas a transcrição textual desta demonstração; nenhuma alteração será gravada.':'Nesta tela experimental é possível colar texto e anexar uma imagem. A importação completa de arquivos Word/PDF com formatação será uma etapa posterior.'}</p>
+    <p className="it-test-hint">{officialLoaded?'As alterações são apenas desta demonstração. Compare com Prévia → Documento oficial antes de aprovar qualquer modelo.':'A formatação feita aqui aparece na prévia da estrutura editável; este editor não salva nem publica a IT.'}</p>
    </>}
    {step==='criterios'&&<>
     <div className="section-title"><h2>Critérios da inspeção{officialLoaded?' · '+criteria.length+' itens':''}</h2><button type="button" className="secondary" onClick={add}><Plus size={16}/> Adicionar critério</button></div>
@@ -371,8 +375,8 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
       </header>
       <section className="it-structure-section">
        <h3><BookOpen size={18}/> Conteúdo textual</h3>
-       <p className="it-structure-help">Esta área é uma transcrição de apoio; não reproduz a hierarquia de tabelas e páginas do documento oficial.</p>
-       <div className="it-structure-body">{notebook||'Nenhum texto incluído nesta cópia.'}</div>
+       <p className="it-structure-help">Esta prévia reproduz títulos, negritos, listas e tabelas editados no Caderno. A paginação oficial permanece no Word original.</p>
+       <div className="it-structure-body"><RichNarrativeEditor value={notebookHtml} readOnly/></div>
        {technicalImage&&<figure className="it-test-doc-figure"><img src={technicalImage} alt="Figura anexada à cópia"/><figcaption>{technicalName}</figcaption></figure>}
       </section>
       {isIt001Reference&&<section className="it-structure-section">
