@@ -16,17 +16,17 @@ test('test editor is opt-in inside the existing IT library, not a new production
  assert.match(app,/onSubmit=\{uploadIt\}/)
  assert.match(app,/itVersions\.map/)
 })
-test('editor has document identity and header, body, criteria, footer and two-page preview',()=>{
+test('editor has document identity and separate Word and editable structure views',()=>{
  for(const part of ['cabecalho','caderno','criterios','rodape','previa']){
   assert.ok(editor.includes("key:'"+part+"'"),part)
  }
- for(const text of ['Inserir logotipo','Cole ou escreva o conteúdo','Inserir imagem técnica','Tabela de especificações','Adicionar critério','Rodapé e controle documental','Inspeção do produto','Observações e evidências']){
+ for(const text of ['Inserir logotipo','Cole ou escreva o conteúdo','Inserir imagem técnica','Tabela de especificações','Adicionar critério','Rodapé e controle documental','Documento oficial (Word)','Estrutura editável','Verificações','Análises dimensionais','Testes especiais']){
   assert.ok(editor.includes(text),text)
  }
- assert.match(editor,/function PaperHeader/)
- assert.match(editor,/function PaperFooter/)
- assert.match(editor,/page=\{1\}/)
- assert.match(editor,/page=\{2\}/)
+ assert.match(editor,/<OfficialWordPreview/)
+ assert.match(editor,/previewMode==='original'/)
+ assert.match(editor,/previewMode==='estrutura'/)
+ assert.doesNotMatch(editor,/function PaperHeader|function PaperFooter|Página \{page\} de 2/)
  assert.match(editor,/criteria\.map/)
  assert.match(editor,/resultFor\(c\)/)
 })
@@ -42,7 +42,9 @@ test('prototype cannot alter real IT data or invoke backend writes',()=>{
 test('editor layout is scoped, responsive, and consistent with SGQ',()=>{
  assert.match(css,/\.sgq-operational-shell \.it-test/)
  assert.match(css,/\.panel\.section-card/)
- assert.match(css,/\.it-test-paper/)
+ assert.match(css,/\.it-original-preview/)
+ assert.match(css,/\.it-structure-preview/)
+ assert.doesNotMatch(css,/\.it-test-paper-stack/)
  assert.match(css,/@media\(max-width:620px\)/)
  assert.match(css,/white-space:pre-wrap/)
 })
