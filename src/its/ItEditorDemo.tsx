@@ -26,17 +26,11 @@ type OfficialData={
 type Snapshot={header:Header;footer:Footer;notebook:string;notebookHtml:string;criteria:Criterion[];documentPath:string|null;documentName:string;warnings:string|null;nqa:string;counts:{checks:number;dimensions:number;special:number}}
 const steps:{key:Step;title:string}[]=[
  {key:'cabecalho',title:'Cabeçalho'},{key:'caderno',title:'Caderno'},
- {key:'criterios',title:'Critérios'},{key:'rodape',title:'Rodapé'},{key:'previa',title:'Prévia'}
+ {key:'criterios',title:'Critérios'},{key:'rodape',title:'Rodapé'}
 ]
-const exampleHeader:Header={company:'Full Brands',sgq:'Sistema de Gestão da Qualidade',code:'IT-024',title:'Inspeção de frascos plásticos',revision:'01',date:'2026-10-28',client:'Cliente de exemplo',sku:'FR-100-EX',product:'Frasco plástico 100 mL'}
-const exampleFooter:Footer={prepared:'Setor da Qualidade',approved:'Responsável pela aprovação',control:'Documento controlado · SGQ'}
-const exampleNotebook='1. OBJETIVO\nEstabelecer as verificações de recebimento do produto.\n\n2. PREPARAÇÃO\nConfirmar código, lote e quantidade recebida. Separar a amostra conforme o plano de inspeção.\n\n3. VERIFICAÇÕES\nAvaliar a integridade visual, conferir identificação e realizar medições dimensionais com instrumentos adequados.\n\n4. REGISTROS\nRegistrar resultados, observações e evidências fotográficas quando necessário.'
-const exampleCriteria:Criterion[]=[
- {id:'demo1',kind:'visual',title:'Integridade da embalagem',notes:'Verificar danos, deformações e trincas.',unit:'',nominal:'',tolerance:'',measurement:'',answer:'C'},
- {id:'demo2',kind:'visual',title:'Identificação e rotulagem',notes:'Conferir identificação e legibilidade.',unit:'',nominal:'',tolerance:'',measurement:'',answer:'C'},
- {id:'demo3',kind:'dimensional',title:'Diâmetro externo',notes:'Medir no ponto indicado no caderno.',unit:'mm',nominal:'24,00',tolerance:'0,20',measurement:'24,10',answer:''},
- {id:'demo4',kind:'dimensional',title:'Altura total',notes:'Medir da base à extremidade superior.',unit:'mm',nominal:'112,00',tolerance:'0,50',measurement:'112,20',answer:''}
-]
+const exampleHeader:Header={company:'Full Brands',sgq:'Sistema de Gestão da Qualidade',code:'',title:'',revision:'01',date:'',client:'',sku:'',product:''}
+const exampleFooter:Footer={prepared:'',approved:'',control:'Documento controlado · SGQ'}
+const exampleNotebook=''
 // NQA and registration matrix checked against IT 001, revision 02/2026.
 const it001IdentityRows=[
  ['Produto / descrição','Código do cliente'],['Cliente','Processo FST'],
@@ -82,7 +76,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
  const [richImportBusy,setRichImportBusy]=useState(false)
  const [richImportWarning,setRichImportWarning]=useState('')
  const richImportGeneration=useRef(0)
- const [criteria,setCriteria]=useState<Criterion[]>(exampleCriteria.map(c=>({...c})))
+ const [criteria,setCriteria]=useState<Criterion[]>([])
  const [logo,setLogo]=useState<string|null>(null)
  const [technicalImage,setTechnicalImage]=useState<string|null>(null)
  const [technicalName,setTechnicalName]=useState('')
@@ -98,14 +92,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
  const [originalName,setOriginalName]=useState('')
  const [downloadingOriginal,setDownloadingOriginal]=useState(false)
  const [importSnapshot,setImportSnapshot]=useState<Snapshot|null>(null)
- const initialLoad=useRef(false)
- const defaultOfficial=officialVersions.find(v=>/^IT\s*0*01$/i.test(v.codigo))||officialVersions[0]
- useEffect(()=>{
-  if(!defaultOfficial||initialLoad.current)return
-  initialLoad.current=true
-  setSourceId(defaultOfficial.id)
-  void loadOfficial(defaultOfficial.id)
- },[defaultOfficial?.id])
+
  async function loadOfficial(id:string){
   if(!id)return setLoadError('Selecione uma IT publicada.')
   const importToken=++richImportGeneration.current
@@ -146,7 +133,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
    title:meta?.titulo||option.titulo,revision:version.versao,date:version.vigencia||'',
    client:'',sku:'',product:''
   }
-  const newFooter:Footer={prepared:'',approved:'',control:'Cópia de demonstração · referência '+(meta?.codigo||option.codigo)+' / '+version.versao}
+  const newFooter:Footer={prepared:'',approved:'',control:'Referência '+(meta?.codigo||option.codigo)+' / '+version.versao}
   const counts={checks:importedChecks.length,dimensions:importedDimensions.length,special:importedTests.length}
   const summary='NQA crítico '+decimal(version.nqa_critico)+'% · grave '+decimal(version.nqa_grave)+'% · tolerável '+decimal(version.nqa_toleravel)+'% · plano '+(version.tipo_plano_padrao||'não informado')+' / '+(version.regime_inspecao_padrao||'não informado')
   const text=data.documento_texto||''
@@ -166,7 +153,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
   setOriginalPath(snapshot.documentPath);setOriginalName(snapshot.documentName)
   setSourceWarning(snapshot.warnings)
   setOfficialCounts(counts);setNqaSummary(summary)
-  setOfficialLoaded(option);setSourceId(id);setPreviewMode('original');setStep('previa')
+  setOfficialLoaded(option);setSourceId(id);setPreviewMode('original');setStep('caderno')
   setLogo(null);setTechnicalImage(null);setTechnicalName('');setShowSpecs(true)
   const path=data.arquivo_storage_path
   if(path?.toLowerCase().endsWith('.docx')){
@@ -220,10 +207,10 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
   setNotebook(source?source.notebook:exampleNotebook)
   setNotebookHtml(source?source.notebookHtml:plainToRichHtml(exampleNotebook))
   setRichImportWarning('')
-  setCriteria(source?source.criteria.map(c=>({...c})):exampleCriteria.map(c=>({...c})))
+  setCriteria(source?source.criteria.map(c=>({...c})):[])
   setOriginalPath(source?.documentPath||null);setOriginalName(source?.documentName||'')
   setSourceWarning(source?.warnings||null);setShowSpecs(true)
-  setLogo(null);setTechnicalImage(null);setTechnicalName('');setStep('cabecalho');setPreviewMode('estrutura')
+  setLogo(null);setTechnicalImage(null);setTechnicalName('');setStep('cabecalho');setPreviewMode('estrutura');setDocumentStatus('Rascunho')
  }
  const results=criteria.map(resultFor)
  const count=(a:Answer)=>results.filter(x=>x===a).length
@@ -311,12 +298,12 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
         <label>Nominal<input inputMode="decimal" value={c.nominal} onChange={e=>update(c.id,{nominal:e.target.value})}/></label>
         <label>Tolerância ±<input inputMode="decimal" value={c.tolerance} onChange={e=>update(c.id,{tolerance:e.target.value})}/></label>
         <label>Unidade<input value={c.unit} onChange={e=>update(c.id,{unit:e.target.value})}/></label>
-        <label>Leitura simulada<input inputMode="decimal" value={c.measurement} onChange={e=>update(c.id,{measurement:e.target.value})}/></label>
+        <label>Leitura de exemplo<input inputMode="decimal" value={c.measurement} onChange={e=>update(c.id,{measurement:e.target.value})}/></label>
         {officialLoaded&&!c.nominal&&!c.tolerance&&<small className="it-test-hint span-2">O cadastro oficial não informa nominal ou desvio para este parâmetro. A medição e a média são registradas na inspeção; nenhum número foi presumido.</small>}
-       </>:<label>{c.origin==='checklist'?'Resposta simulada · C/NC/NA':'Resultado de exemplo'}<select value={c.answer} onChange={e=>update(c.id,{answer:e.target.value as Answer})}><option value="">Sem resposta</option><option value="C">Conforme</option><option value="NC">Não conforme</option><option value="NA">Não aplicável</option></select></label>}
+       </>:<label>{c.origin==='checklist'?'Resposta · C/NC/NA':'Resultado'}<select value={c.answer} onChange={e=>update(c.id,{answer:e.target.value as Answer})}><option value="">Sem resposta</option><option value="C">Conforme</option><option value="NC">Não conforme</option><option value="NA">Não aplicável</option></select></label>}
       </div>
      </article>)}
-     {!criteria.length&&<div className="empty">Nenhum critério cadastrado no teste.</div>}
+     {!criteria.length&&<div className="empty">Nenhum critério cadastrado.</div>}
     </div>
    </>}
    {step==='rodape'&&<>
@@ -424,7 +411,7 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
        <div className="it-structure-section-head"><h3>Testes especiais</h3><span>{specialCriteria.length} teste(s)</span></div>
        {specialCriteria.map(c=><div className="it-structure-special" key={c.id}>
         <strong>{c.title}</strong><p>{c.notes||'Procedimento não informado.'}</p>
-        <small>Resultado de exemplo: {c.answer||'Não registrado'}</small>
+        <small>Resultado: {c.answer||'Não registrado'}</small>
        </div>)}
       </section>}
       {isIt001Reference&&<section className="it-structure-section">
