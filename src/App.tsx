@@ -3634,8 +3634,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
             <section className="panel section-card inspection-it-choice">
               <div className="section-title"><h2>IT aplicável</h2><button className="secondary small" type="button" disabled={itSuggestBusy} onClick={()=>void suggestApplicableIt(true)}><Sparkles size={16}/>{itSuggestBusy?'Analisando…':'Sugerir com IA'}</button></div>
-              <label>IT do FST principal
-                <select value={inspection.itVersionId} disabled={!!inspection.processoId&&!!processes.find(p=>p.id===inspection.processoId)?.it_versao_id} onChange={e=>{
+              <label>IT desta entrada
+                <select value={inspection.itVersionId} onChange={e=>{
                   manualItSelection.current=true
                   const selected=itVersions.find(it=>it.id===e.target.value)
                   setInspection(old=>({...old,itVersionId:e.target.value,inspectionLevel:selected?.nivel_inspecao_padrao||old.inspectionLevel}))
