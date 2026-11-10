@@ -1295,7 +1295,9 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
 
         // Uma inspeção por entrada. Mais de um SKU na entrada exige um conjunto declarado.
         // Produtos independentes precisam de entradas distintas, com laudos próprios.
-        if(items.Count>1&&!input.EhConjunto)
+        var distinctSkuCount=items.Select(x=>(x.Sku??"").Trim().ToUpperInvariant())
+            .Where(x=>!string.IsNullOrWhiteSpace(x)).Distinct().Count();
+        if(distinctSkuCount>1&&!input.EhConjunto)
             return Results.Json(Error("Existem vários SKUs nesta entrada. Marque Conjunto de componentes ou crie uma Nova Entrada para cada produto independente."),statusCode:400);
         var statisticalLot = items
             .Select(x => (long)Math.Floor(EffectiveReceived(x) / Math.Max(x.UnidadesPorConjunto <= 0 ? 1m : x.UnidadesPorConjunto, 0.000001m)))
@@ -1381,7 +1383,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             return Results.Json(Error($"O subprocesso {subCode} já existe neste FST."),statusCode:409);
         var nonEmptyNames = items.Select(x => (x.Nome ?? "").Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
         var groupName = nonEmptyNames.Count > 0 ? string.Join(" + ", nonEmptyNames) : "Inspeção em preenchimento";
-        var isComponentSet = input.EhConjunto && items.Count > 1;
+        var isComponentSet = input.EhConjunto && distinctSkuCount > 1;
 
         var createdGroup = await RestAsync(client, token, HttpMethod.Post, "grupos_inspecao", "select=id",
             new {
