@@ -20,7 +20,7 @@ test('editor has document identity and separate Word and editable structure view
  for(const part of ['cabecalho','caderno','criterios','rodape','previa']){
   assert.ok(editor.includes("key:'"+part+"'"),part)
  }
- for(const text of ['Inserir logotipo','Cole ou escreva o conteúdo','Inserir imagem técnica','Tabela de especificações','Adicionar critério','Rodapé e controle documental','Documento oficial (Word)','Estrutura editável','Verificações','Análises dimensionais','Testes especiais']){
+ for(const text of ['Inserir logotipo','Digite e formate o caderno técnico','Inserir imagem técnica','Tabela de especificações','Adicionar critério','Rodapé e controle documental','Documento oficial (Word)','Estrutura editável','Verificações','Análises dimensionais','Testes especiais']){
   assert.ok(editor.includes(text),text)
  }
  assert.match(editor,/<OfficialWordPreview/)

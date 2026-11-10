@@ -3,6 +3,8 @@ import {apiGet,authClient} from '../lib/supabase'
 import {ArrowDown,ArrowUp,BookOpen,Check,ChevronLeft,ChevronRight,ClipboardCheck,Download,Eye,FileText,ImagePlus,Plus,RefreshCw,RotateCcw,Settings2,Trash2} from 'lucide-react'
 import './ItEditorDemo.css'
 import OfficialWordPreview from './OfficialWordPreview'
+import RichNarrativeEditor from './RichNarrativeEditor'
+import {importNarrativeFromDocx,plainToRichHtml,narrativeTextFromHtml} from './richNarrative'
 
 type Step='cabecalho'|'caderno'|'criterios'|'rodape'|'previa'
 type Kind='visual'|'dimensional'|'funcional'
@@ -21,7 +23,7 @@ type OfficialData={
  testes:Array<{id:string;ordem:number;nome:string;procedimento:string|null;criterio_aprovacao:string|null;destrutivo:boolean}>,
  documento_texto:string;aviso_documento:string|null;arquivo_storage_path:string|null
 }
-type Snapshot={header:Header;footer:Footer;notebook:string;criteria:Criterion[];documentPath:string|null;documentName:string;warnings:string|null;nqa:string;counts:{checks:number;dimensions:number;special:number}}
+type Snapshot={header:Header;footer:Footer;notebook:string;notebookHtml:string;criteria:Criterion[];documentPath:string|null;documentName:string;warnings:string|null;nqa:string;counts:{checks:number;dimensions:number;special:number}}
 const steps:{key:Step;title:string}[]=[
  {key:'cabecalho',title:'Cabeçalho'},{key:'caderno',title:'Caderno'},
  {key:'criterios',title:'Critérios'},{key:'rodape',title:'Rodapé'},{key:'previa',title:'Prévia'}
@@ -75,6 +77,10 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
  const [header,setHeader]=useState<Header>({...exampleHeader})
  const [footer,setFooter]=useState<Footer>({...exampleFooter})
  const [notebook,setNotebook]=useState(exampleNotebook)
+ const [notebookHtml,setNotebookHtml]=useState(()=>plainToRichHtml(exampleNotebook))
+ const [richImportBusy,setRichImportBusy]=useState(false)
+ const [richImportWarning,setRichImportWarning]=useState('')
+ const richImportGeneration=useRef(0)
  const [criteria,setCriteria]=useState<Criterion[]>(exampleCriteria.map(c=>({...c})))
  const [logo,setLogo]=useState<string|null>(null)
  const [technicalImage,setTechnicalImage]=useState<string|null>(null)
@@ -101,8 +107,10 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
  },[defaultOfficial?.id])
  async function loadOfficial(id:string){
   if(!id)return setLoadError('Selecione uma IT publicada.')
-  setLoadBusy(true);setLoadError('')
+  const importToken=++richImportGeneration.current
+  setLoadBusy(true);setLoadError('');setRichImportWarning('');setRichImportBusy(false)
   const response=await apiGet<OfficialData>('/api/its/'+encodeURIComponent(id)+'/editor-oficial')
+  if(importToken!==richImportGeneration.current)return
   setLoadBusy(false)
   if(response.error||!response.data){
    setLoadError(response.error?.message||'Não foi possível carregar a IT oficial.')
@@ -145,19 +153,41 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
   const annexAt=text.indexOf('REGISTRO DE INSPEÇÃO')
   const narrative=annexAt>150?text.slice(0,annexAt).trim():text
   const snapshot:Snapshot={
-   header:newHeader,footer:newFooter,notebook:narrative,
+   header:newHeader,footer:newFooter,notebook:narrative,notebookHtml:plainToRichHtml(narrative),
    criteria:[...importedChecks,...importedDimensions,...importedTests],
    documentPath:data.arquivo_storage_path||null,documentName:version.arquivo_nome||'IT-oficial.docx',
    warnings:data.aviso_documento,counts,nqa:summary
   }
   setImportSnapshot(snapshot)
   setHeader({...snapshot.header});setFooter({...snapshot.footer})
-  setNotebook(snapshot.notebook);setCriteria(snapshot.criteria.map(c=>({...c})))
+  setNotebook(snapshot.notebook);setNotebookHtml(snapshot.notebookHtml)
+  setCriteria(snapshot.criteria.map(c=>({...c})))
   setOriginalPath(snapshot.documentPath);setOriginalName(snapshot.documentName)
   setSourceWarning(snapshot.warnings)
   setOfficialCounts(counts);setNqaSummary(summary)
   setOfficialLoaded(option);setSourceId(id);setPreviewMode('original');setStep('previa')
   setLogo(null);setTechnicalImage(null);setTechnicalName('');setShowSpecs(true)
+  const path=data.arquivo_storage_path
+  if(path?.toLowerCase().endsWith('.docx')){
+   setRichImportBusy(true)
+   void (async()=>{
+    try{
+     const file=await authClient.storage.from('it-documentos').download(path)
+     if(file.error||!file.data)throw new Error('Arquivo Word indisponível para conversão.')
+     const imported=await importNarrativeFromDocx(file.data)
+     if(importToken!==richImportGeneration.current)return
+     setNotebookHtml(imported.html)
+     const plain=narrativeTextFromHtml(imported.html)
+     setNotebook(plain)
+     setImportSnapshot(current=>current?.documentPath===path?
+      {...current,notebook:plain,notebookHtml:imported.html}:current)
+     if(imported.warnings.length)setRichImportWarning('Alguns elementos do Word podem exigir conferência no original.')
+    }catch{
+     if(importToken===richImportGeneration.current)
+      setRichImportWarning('Não foi possível importar a formatação. Foi mantida uma transcrição organizada; a IT oficial continua intacta.')
+    }finally{if(importToken===richImportGeneration.current)setRichImportBusy(false)}
+   })()
+  }else setRichImportWarning('Documento sem DOCX disponível: o conteúdo foi organizado a partir da transcrição.')
  }
  async function downloadOriginal(){
   if(!originalPath)return
@@ -180,10 +210,15 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
  const add=()=>setCriteria(old=>[...old,{id:'demo-'+Date.now()+'-'+old.length,kind:'visual',title:'Novo critério',notes:'',unit:'',nominal:'',tolerance:'',measurement:'',answer:''}])
  const pick=(file:File|undefined,kind:'logo'|'image')=>{if(!file||!file.type.startsWith('image/'))return;const url=URL.createObjectURL(file);if(kind==='logo')setLogo(url);else{setTechnicalImage(url);setTechnicalName(file.name)}}
  const reset=()=>{
+  // Do not let a delayed Word conversion overwrite a manual restore.
+  richImportGeneration.current++
+  setRichImportBusy(false)
   const source=importSnapshot
   setHeader(source?{...source.header}:{...exampleHeader})
   setFooter(source?{...source.footer}:{...exampleFooter})
   setNotebook(source?source.notebook:exampleNotebook)
+  setNotebookHtml(source?source.notebookHtml:plainToRichHtml(exampleNotebook))
+  setRichImportWarning('')
   setCriteria(source?source.criteria.map(c=>({...c})):exampleCriteria.map(c=>({...c})))
   setOriginalPath(source?.documentPath||null);setOriginalName(source?.documentName||'')
   setSourceWarning(source?.warnings||null);setShowSpecs(true)
@@ -252,18 +287,22 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
     </div>
    </>}
    {step==='caderno'&&<>
-    <div className="section-title"><h2>Conteúdo textual da IT</h2></div>
-    {officialLoaded&&<p className="it-test-hint">Transcrição auxiliar do Word. As tabelas, os diagramas, os cabeçalhos e a paginação são exibidos em Prévia → Documento oficial; a edição deste texto não modifica o arquivo publicado.</p>}
-    <label className="it-test-caderno-label">{officialLoaded?'Transcrição editável (sem layout de tabelas)':'Cole ou escreva o conteúdo'}
-     <textarea rows={14} value={notebook} onChange={e=>setNotebook(e.target.value)} placeholder="Cole o texto do caderno aqui"/>
-    </label>
+    <div className="section-title"><h2>Conteúdo textual da IT</h2><span className="it-test-hint">Editor visual · Calibri</span></div>
+    <p className="it-test-hint">{officialLoaded?
+     'Edite diretamente títulos, parágrafos, listas, negritos e tabelas importados do Word. A IT oficial permanece intacta.':
+     'Digite e formate o caderno técnico usando os controles abaixo.'}</p>
+    {richImportBusy&&<p className="it-test-source-warning" role="status">Importando a formatação do documento Word…</p>}
+    {richImportWarning&&<p className="it-test-source-warning" role="note">{richImportWarning}</p>}
+    <RichNarrativeEditor value={notebookHtml} readOnly={richImportBusy} onChange={html=>{
+     setNotebookHtml(html);setNotebook(narrativeTextFromHtml(html))
+    }}/>
     <div className="it-test-toolbar">
      <label className="it-test-upload"><ImagePlus size={17}/> Inserir imagem técnica<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>pick(e.target.files?.[0],'image')}/></label>
      {technicalImage&&<button type="button" className="secondary small" onClick={()=>{setTechnicalImage(null);setTechnicalName('')}}>Remover imagem</button>}
      <label className="it-test-checkbox"><input type="checkbox" checked={showSpecs} onChange={e=>setShowSpecs(e.target.checked)}/> Tabela de especificações</label>
     </div>
     {technicalImage&&<div className="it-test-image-preview"><img src={technicalImage} alt="Imagem técnica"/><span>{technicalName}</span></div>}
-    <p className="it-test-hint">{officialLoaded?'Para conferir a formatação original, abra Prévia → Documento oficial. Aqui você está alterando apenas a transcrição textual desta demonstração; nenhuma alteração será gravada.':'Nesta tela experimental é possível colar texto e anexar uma imagem. A importação completa de arquivos Word/PDF com formatação será uma etapa posterior.'}</p>
+    <p className="it-test-hint">{officialLoaded?'As alterações são apenas desta demonstração. Compare com Prévia → Documento oficial antes de aprovar qualquer modelo.':'A formatação feita aqui aparece na prévia da estrutura editável; este editor não salva nem publica a IT.'}</p>
    </>}
    {step==='criterios'&&<>
     <div className="section-title"><h2>Critérios da inspeção{officialLoaded?' · '+criteria.length+' itens':''}</h2><button type="button" className="secondary" onClick={add}><Plus size={16}/> Adicionar critério</button></div>
@@ -339,8 +378,8 @@ export default function ItEditorDemo({officialVersions=[]}:{officialVersions?:Of
       </header>
       <section className="it-structure-section">
        <h3><BookOpen size={18}/> Conteúdo textual</h3>
-       <p className="it-structure-help">Esta área é uma transcrição de apoio; não reproduz a hierarquia de tabelas e páginas do documento oficial.</p>
-       <div className="it-structure-body">{notebook||'Nenhum texto incluído nesta cópia.'}</div>
+       <p className="it-structure-help">Esta prévia reproduz títulos, negritos, listas e tabelas editados no Caderno. A paginação oficial permanece no Word original.</p>
+       <div className="it-structure-body"><RichNarrativeEditor value={notebookHtml} readOnly/></div>
        {technicalImage&&<figure className="it-test-doc-figure"><img src={technicalImage} alt="Figura anexada à cópia"/><figcaption>{technicalName}</figcaption></figure>}
       </section>
       {isIt001Reference&&<section className="it-structure-section">
