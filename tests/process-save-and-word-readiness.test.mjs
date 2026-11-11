@@ -117,8 +117,9 @@ test('backend records before-after revisions and preserves the original completi
  assert.match(api,/retificacao_observacao_interna/)
  assert.match(api,/retificacao_resultado_final/)
  assert.match(api,/concluida_em=completedAt/)
- assert.match(api,/revisao_obrigatoria=true/)
- assert.match(api,/revisado_em=\(DateTimeOffset\?\)null/)
+ assert.match(api,/revisao_obrigatoria=false/)
+ assert.match(api,/AuditCompletedInspectionEdit/)
+ assert.doesNotMatch(api,/revisao_obrigatoria=true/)
 })
 
 test('Word readiness unpacks all six parallel query results, including dimensional configurations',()=>{
