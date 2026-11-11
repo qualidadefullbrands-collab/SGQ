@@ -593,6 +593,7 @@ export default function App() {
   const [aiConclusionBusy,setAiConclusionBusy]=useState(false)
   const [aiConclusionError,setAiConclusionError]=useState('')
   const [wordDownloading,setWordDownloading]=useState(false)
+  const [confirmingProcessReview,setConfirmingProcessReview]=useState(false)
   const [wordCheckBusy,setWordCheckBusy]=useState(false)
   const [kanbanMovingId,setKanbanMovingId]=useState<string|null>(null)
   const kanbanMoveLock=useRef<string|null>(null)
@@ -3165,6 +3166,50 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
     return name
   }
 
+  async function confirmPendingProcessReview(){
+    if(!detail||!canWrite||confirmingProcessReview)return
+    const processId=detail.grupos_inspecao?.processo_id as string|undefined
+    if(!processId){setError('FST principal não identificado.');return}
+    setConfirmingProcessReview(true)
+    setError('')
+    try {
+      const response=await apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/revisoes')
+      if(response.error)throw new Error(response.error.message||'Falha ao consultar revisões.')
+      const revisions=Array.isArray(response.data?.inspections)?response.data.inspections:[]
+      if(!revisions.length){
+        setMessage('Nenhuma revisão pendente neste FST.')
+        await refreshWordStatus()
+        return
+      }
+      if(revisions.some((row:any)=>row.status!=='concluida'||!['aprovado','reprovado'].includes(row.resultado)))
+        throw new Error('Existe inspeção sem resultado final. Revise os dados antes de confirmar.')
+      const labels=revisions.map((row:any)=>String(row.grupos_inspecao?.subprocesso_codigo||row.numero)).join(', ')
+      if(!window.confirm(
+        'Confirma que conferiu as alterações feitas após a conclusão nas entradas '+labels+
+        '? O resultado aprovado/reprovado será preservado. A confirmação ficará no histórico de auditoria.'
+      ))return
+      for(const row of revisions){
+        const updated=await apiPost<any>('/api/inspecoes/'+encodeURIComponent(row.id)+'/concluir',{
+          resultado:row.resultado,observacoes:row.observacoes??null,
+        })
+        if(updated.error)throw new Error('Entrada '+String(row.grupos_inspecao?.subprocesso_codigo||row.numero)+
+          ': '+String(updated.error.message||'Falha ao confirmar revisão.'))
+        if(updated.data?.pendencias?.length)
+          throw new Error('Entrada '+String(row.grupos_inspecao?.subprocesso_codigo||row.numero)+
+            ': '+updated.data.pendencias.join(' | '))
+      }
+      setMessage('Revisão confirmada e auditada. Verificando o laudo conjunto A+B…')
+      setCompletedEditRevision(n=>n+1)
+      await refreshWordStatus()
+      if(selectedInspectionId)await openInspection(selectedInspectionId)
+      void refreshLists()
+    } catch(e:any) {
+      setError(String(e?.message||'Não foi possível confirmar a revisão.'))
+    } finally {
+      setConfirmingProcessReview(false)
+    }
+  }
+
   async function downloadInspectionWord() {
     if(!detail||!selectedInspectionId||wordDownloading)return
     setError('')
@@ -3728,8 +3773,16 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               ?'O laudo ainda possui '+wordStatus.pending.length+' pendência(s)':'Verificando a disponibilidade do Word…'}</strong>
             {wordStatus?.error && <p>{wordStatus.error} A validação falhou; isso não significa que os dados da inspeção estejam incompletos.</p>}
             {!!wordStatus?.pending.length && <ul>
-              {wordStatus.pending.map((reason,index)=><li key={index}>{reason}</li>)}
+              {wordStatus.pending.map((reason,index)=><li key={index}>{reason.replace('revisão obrigatória ainda pendente.','alterações feitas após a conclusão ainda precisam ser confirmadas.')}</li>)}
             </ul>}
+            {canWrite && wordStatus?.pending.some(reason=>reason.includes('revisão obrigatória')) &&
+              <div className="sgq-review-quick-action">
+                <p>Foram registrados ajustes após a conclusão de uma entrada. Confira os dados e confirme a revisão para liberar o Word conjunto, sem alterar o resultado original.</p>
+                <button type="button" className="primary small" disabled={confirmingProcessReview}
+                  onClick={()=>void confirmPendingProcessReview()}>
+                  <CheckCircle2 size={15}/>{confirmingProcessReview?'Validando revisões…':'Confirmar revisão das entradas'}
+                </button>
+              </div>}
             <button className="secondary small" type="button" disabled={wordCheckBusy} onClick={()=>void refreshWordStatus()}>
               <RefreshCw size={14}/>{wordCheckBusy?'Verificando…':'Verificar novamente'}
             </button>
