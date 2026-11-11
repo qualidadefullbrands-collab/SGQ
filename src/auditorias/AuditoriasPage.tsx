@@ -614,7 +614,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
       <section className="audit-page audit-integrated sgq-warehouse-workspace">
         <div className="page-title audit-page-title">
           <div>
-            <span className="audit-contlog-brand">QUALIDADE · ARMAZÉM</span>
+            <span className="audit-contlog-brand">Contlog</span>
             <h1>Inspeções <span>Armazém</span></h1>
           </div>
         </div>
