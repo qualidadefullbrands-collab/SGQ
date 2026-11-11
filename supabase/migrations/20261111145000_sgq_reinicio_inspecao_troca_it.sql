@@ -154,3 +154,6 @@ begin
   'itVersionId',p_it_versao_id,'inspecoesAfetadas',v_count);
 end;
 $func$;
+
+revoke all on function public.sgq_trocar_it_fst(uuid,uuid,boolean) from public,anon;
+grant execute on function public.sgq_trocar_it_fst(uuid,uuid,boolean) to authenticated;
