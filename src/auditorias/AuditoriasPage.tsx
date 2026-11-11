@@ -134,6 +134,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
   const [loadingPage,setLoadingPage]=useState(true)
   const [documentLoading,setDocumentLoading]=useState(false)
   const [templateUploading,setTemplateUploading]=useState<RqCode|null>(null)
+  const [templateDownloading,setTemplateDownloading]=useState<RqCode|null>(null)
   const [savingRow,setSavingRow]=useState('')
   const [notes,setNotes]=useState<Record<string,string>>({})
   const [equipmentType,setEquipmentType]=useState<'extintor'|'hidrante'>('extintor')
@@ -230,6 +231,32 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
     if (!loaded.error && loaded.data) setTemplates((loaded.data.templates ?? []) as TemplateRow[])
   }
 
+
+  async function downloadWarehouseTemplate(def:AuditDefinition) {
+    if(templateDownloading)return
+    const template=templates.find(item=>item.rq_code===def.code&&item.ativo&&item.storage_path)
+    if(!template?.storage_path){setNotice('O DOCX oficial de '+def.displayCode+' não está disponível.');return}
+    setTemplateDownloading(def.code)
+    setNotice('')
+    try {
+      // Bucket privado: usa a sessão Supabase e a política SELECT do usuário.
+      // Entrega o DOCX original, sem recriar ou alterar seu conteúdo.
+      const {data,error}=await supabase.storage.from('auditoria-modelos').download(template.storage_path)
+      if(error||!data)throw new Error(error?.message||'Não foi possível baixar o modelo.')
+      const url=URL.createObjectURL(data)
+      const link=document.createElement('a')
+      link.href=url
+      link.download=template.arquivo_nome||def.displayCode.replace(/\\s+/g,'')+'.docx'
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(()=>URL.revokeObjectURL(url),10000)
+    } catch(error:any) {
+      setNotice('Falha no download de '+def.displayCode+': '+(error?.message||'tente novamente.'))
+    } finally {
+      setTemplateDownloading(null)
+    }
+  }
 
   async function uploadTemplate(def:AuditDefinition,file:File|null) {
     if (!file) return
@@ -651,6 +678,30 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
             })}
           </div>
         </details>}
+
+        <section className="panel section-card audit-download-models" aria-label="Baixar documentos oficiais do armazém">
+          <div className="section-title"><div><h2>Documentos oficiais</h2><small className="audit-section-caption">Baixe os modelos DOCX originais cadastrados no SGQ.</small></div></div>
+          <div className="audit-download-grid">
+            {AUDIT_DEFINITIONS.map(def=>{
+              const template=templates.find(item=>item.rq_code===def.code&&item.ativo&&item.storage_path)
+              return <article className="audit-download-card" key={def.code}>
+                <span className="audit-download-icon"><FileText size={20}/></span>
+                <div className="audit-download-info">
+                  <strong>{def.displayCode}</strong>
+                  <span>{template?.arquivo_nome||def.title}</span>
+                  <small>Versão {template?.rq_version||def.version}</small>
+                </div>
+                <button type="button" className="secondary audit-download-action"
+                  disabled={!template||!!templateDownloading}
+                  onClick={()=>void downloadWarehouseTemplate(def)}
+                  aria-label={'Baixar documento '+def.displayCode}>
+                  {templateDownloading===def.code?<Loader2 className="spin" size={16}/>:<Download size={16}/>}
+                  {templateDownloading===def.code?'Baixando…':template?'Baixar DOCX':'Indisponível'}
+                </button>
+              </article>
+            })}
+          </div>
+        </section>
 
         <section className="panel section-card audit-new-section">
           <div className="section-title"><div><h2>Nova inspeção</h2><small className="audit-section-caption">Selecione o roteiro aplicável ao armazém</small></div></div>
