@@ -2861,3 +2861,22 @@ body:has(.sgq-operational-shell){background:linear-gradient(130deg,#f5f7fb,#f0f4
  .sgq-operational-shell .sgq-topbar-user-actions{gap:3px}
  .sgq-operational-shell .sgq-user-avatar{height:32px;width:32px;font-size:11px}
 }
+
+
+/* Reconciliação por posição: descrições Omie visíveis antes de corrigir qualquer SKU. */
+.sgq-operational-shell .sgq-stock-sku-conflicts{background:#fff;border-color:#d9e5ef;box-shadow:0 4px 18px rgba(25,59,92,.04)}
+.sgq-operational-shell .sgq-sku-conflict-heading b{color:#193e5d}
+.sgq-operational-shell .sgq-sku-conflict-heading>span{color:#275d82;background:#eef6fc;border-color:#d4e8f5}
+.sgq-operational-shell .sgq-stock-sku-verify{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:10px}
+.sgq-operational-shell .sgq-stock-sku-verify-item{display:grid;grid-template-rows:auto minmax(32px,auto) auto;gap:9px;align-content:start;min-width:0;padding:13px;border:1px solid #dbe7f0;border-radius:11px;background:#f8fbfe}
+.sgq-operational-shell .sgq-stock-sku-verify-name{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;min-width:0}
+.sgq-operational-shell .sgq-stock-sku-verify-name strong{font-size:13px;color:#1d4767;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-stock-sku-verify-name span{font-size:11px;font-weight:700;padding:4px 7px;border-radius:999px}
+.sgq-operational-shell .sgq-stock-sku-verify-name .is-verified{background:#e6f5ed;color:#207458}
+.sgq-operational-shell .sgq-stock-sku-verify-name .is-unverified{background:#fff1e4;color:#9a6021}
+.sgq-operational-shell .sgq-stock-sku-verify-item small{font-size:12px;color:#47647b;line-height:1.45;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-stock-sku-verify-item button{justify-self:start;min-height:36px}
+.sgq-operational-shell .sgq-stock-sku-position{background:#fff;border-color:#dce8f2}
+.sgq-operational-shell .sgq-stock-sku-position:focus-within{border-color:#80b9dd;box-shadow:0 0 0 3px rgba(70,154,204,.1)}
+.sgq-operational-shell .sgq-stock-sku-position :is(select,button):focus-visible{outline:2px solid #4193c9;outline-offset:2px}
+@media(max-width:720px){.sgq-operational-shell .sgq-stock-sku-verify{grid-template-columns:1fr}}
