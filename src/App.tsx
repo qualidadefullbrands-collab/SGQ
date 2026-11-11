@@ -768,8 +768,8 @@ export default function App() {
     }
     setWordCheckBusy(true)
     try{
-      const entrada=detail?.grupo_inspecao_id||detail?.grupos_inspecao?.id
-      const response=await apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status'+(entrada?'?entrada='+encodeURIComponent(entrada):''))
+      // Laudo padrão do FST: A e B compartilham um único documento.
+      const response=await apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status')
       setWordStatus(parseWordStatus(response))
     }catch(e:any){
       setWordStatus({ready:false,pending:[],error:'Falha de comunicação ao verificar o Word: '+String(e?.message||'sem resposta')})
@@ -789,8 +789,8 @@ export default function App() {
     if(!processId){setWordStatus(null);return}
     let active=true
     setWordStatus(null)
-    const entrada=detail?.grupo_inspecao_id||detail?.grupos_inspecao?.id
-    void apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status'+(entrada?'?entrada='+encodeURIComponent(entrada):''))
+    // Validar o processo completo, não apenas a entrada aberta na tela.
+    void apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status')
       .then(response=>{if(active)setWordStatus(parseWordStatus(response))})
       .catch((e:any)=>{if(active)setWordStatus({ready:false,pending:[],
         error:'Falha de comunicação com o serviço Word: '+String(e?.message||'sem resposta')})})
@@ -3176,7 +3176,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
     if(!detail.it_versao_id){
       return setError('Esta inspeção não possui IT vinculada. Vincule uma IT para gerar o Word oficial.')
     }
-    const collectionName=askCollectionName()
+    const parentId=detail.grupos_inspecao?.processo_id as string|undefined
+    const consolidated=Boolean(parentId&&detail.grupos_inspecao?.subprocesso_codigo)
+    // Entradas A/B/C legadas são componentes do MESMO FST e geram um laudo único.
+    const collectionName=consolidated?'':askCollectionName()
     if(collectionName===null)return
     setWordDownloading(true)
     try{
@@ -3184,7 +3187,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       const token=session.data.session?.access_token
       if(!token){setError('Sua sessão expirou. Entre novamente no SGQ.');return}
       const suffix=collectionName?'?nomeConjunto='+encodeURIComponent(collectionName):''
-      const url=`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo${suffix}`
+      const url=consolidated
+        ?`${apiUrl}/api/processos/${encodeURIComponent(parentId!)}/laudo`
+        :`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo${suffix}`
       const response=await fetch(url,{
         method:'POST',headers:{Authorization:`Bearer ${token}`},
       })
