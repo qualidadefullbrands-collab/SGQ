@@ -29,8 +29,11 @@ test('editing saves without leaving screen or synchronous detail reload',()=>{
  assert.match(save,/setDetail\(/)
  assert.match(save,/setMessage\(fastPath/)
  assert.doesNotMatch(save,/setTab\(/)
- assert.doesNotMatch(save,/setEditingInspectionData\(null\)/)
- assert.doesNotMatch(save,/await openInspection\(/)
+ const ordinarySave=save.split('if(saved.data?.reiniciada)')[0]
+ assert.doesNotMatch(ordinarySave,/setEditingInspectionData\(null\)/)
+ assert.doesNotMatch(ordinarySave,/await openInspection\(/)
+ assert.match(save,/if\(saved.data\?\.reiniciada\)/)
+ assert.match(save,/await openInspection\(id\)/)
  const edit=segment(app,'async function editInspectionFull','function editProcessFull')
  assert.match(edit,/setEditingInspectionData\(form\)/)
  assert.doesNotMatch(edit,/setTab\('nova'\)/)
