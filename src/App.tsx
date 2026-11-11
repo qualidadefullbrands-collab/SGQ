@@ -2001,10 +2001,11 @@ export default function App() {
 
   function startEditingInspectionData() {
     if (!detail) return
-    if(detail.status==='concluida'){
-      if(!navigator.onLine){setError('Conecte-se para retificar uma inspeção concluída com registro de auditoria.');return}
-      if(!window.confirm('Editar esta inspeção concluída? As alterações ficarão registradas no histórico.'))return
+    if(detail.status==='concluida'&&!navigator.onLine){
+      setError('Conecte-se para editar a inspeção concluída com registro de auditoria.')
+      return
     }
+    setWordStatus(null)
     const process=detail.grupos_inspecao?.processos ?? {}
     const rows=(detail.items ?? []).map((link:any)=>{
       const item=link.processo_itens
@@ -2051,6 +2052,15 @@ export default function App() {
         itens.some((x:any)=>x.unidadesPorConjunto<=0)){
         setError('Confira os valores numéricos antes de salvar.');return
       }
+      const changingIt=!!editingInspectionData.itVersionId &&
+        editingInspectionData.itVersionId!==detail?.it_versao_id
+      if(changingIt){
+        if(!navigator.onLine){
+          setError('Trocar a IT exige conexão para reiniciar a inspeção com segurança.')
+          return
+        }
+        if(!window.confirm('Trocar a IT desta entrada? A inspeção será reiniciada, com verificações, medições e testes zerados. Todas as fotos serão reutilizadas e o histórico anterior será preservado.'))return
+      }
       const editPayload={
         codigo:String(editingInspectionData.codigo??'').trim(),cliente:String(editingInspectionData.cliente??'').trim()||null,
         notaFiscal:String(editingInspectionData.notaFiscal??'').trim()||null,
@@ -2067,6 +2077,7 @@ export default function App() {
       const fastPath=editMetadataBaseline.current===editMetadataFingerprint(editingInspectionData)
         && itens.length>0&&itens.every((item:any)=>!!item.processoItemId)
       if(!navigator.onLine){
+        if(changingIt){setError('A troca de IT exige conexão.');return}
         await queueInspectionUpdate(id,editPayload)
         setMessage('Alterações guardadas no dispositivo. Serão sincronizadas ao voltar a conexão.')
         editLastSavedFingerprint.current=JSON.stringify(editingInspectionData)
@@ -2078,12 +2089,24 @@ export default function App() {
         fastPath?{itens}:editPayload
       )
       if(saved.error){
-        if(connectionFailure(saved.error.message)||!navigator.onLine){
+        if(!changingIt&&(connectionFailure(saved.error.message)||!navigator.onLine)){
           await queueInspectionUpdate(id,editPayload)
           setMessage('Alterações guardadas no dispositivo. Sincronização pendente.')
           editLastSavedFingerprint.current=JSON.stringify(editingInspectionData)
           setEditFeedback('Salvo no dispositivo · aguardando sincronização')
         }else setError(saved.error.message)
+        return
+      }
+      if(saved.data?.reiniciada){
+        setEditingInspectionData(null)
+        setAllowDimensionalRectification(false)
+        setWordStatus(null)
+        setCompletedEditRevision(n=>n+1)
+        await openInspection(id)
+        setActiveStage('verificacoes')
+        setMessage('IT alterada. Inspeção reiniciada; fotos mantidas ('+
+          Number(saved.data.fotosPreservadas??0)+'). Verificações, dimensionais e testes da IT anterior foram arquivados no histórico.')
+        void refreshLists()
         return
       }
       const p=saved.data?.plano
@@ -2142,6 +2165,7 @@ export default function App() {
           }:item.grupos_inspecao.processos
         }:item.grupos_inspecao
       }:item))
+      setWordStatus(null)
       if(!fastPath){
         const pid=detail?.grupos_inspecao?.processo_id
         if(pid)setProcesses(current=>current.map(proc=>proc.id===pid?
@@ -3715,7 +3739,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {canWrite && detail.status==='concluida' && <button className={allowDimensionalRectification?'secondary':'primary'} type="button" onClick={()=>{
                 if(allowDimensionalRectification){setAllowDimensionalRectification(false);return}
                 if(!navigator.onLine){setError('Conecte-se para editar com auditoria.');return}
-                if(window.confirm('Editar inspeção concluída? Será possível corrigir medições, critérios, testes, verificações e resultado, com registro no histórico.'))setAllowDimensionalRectification(true)
+                setWordStatus(null)
+                setAllowDimensionalRectification(true)
               }}><Edit3 size={16}/>{allowDimensionalRectification?'Encerrar edição':'Editar inspeção concluída'}</button>}
 
               {detail.status==='concluida' && <button className="secondary" type="button" disabled={wordDownloading} title={wordStatus?.ready?'Gerar e baixar o laudo de inspeção':'Ver o motivo pelo qual o Word ainda não está disponível'} onClick={()=>void downloadInspectionWord()}><FileDown size={16}/>{wordDownloading?'Gerando laudo…':'Gerar Laudo'}</button>}
@@ -4559,12 +4584,13 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div></div>
               <label>Data da inspeção<input type="date" value={editingInspectionData.dataInspecao ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,dataInspecao:e.target.value})}/></label>
               <label>Nível de inspeção<select value={editingInspectionData.inspectionLevel ?? 'I'} onChange={(e)=>setEditingInspectionData({...editingInspectionData,inspectionLevel:e.target.value})}><option value="I">Nível I</option><option value="II">Nível II</option><option value="III">Nível III</option><option value="S1">S1</option><option value="S2">S2</option><option value="S3">S3</option><option value="S4">S4</option></select></label>
-              <label>IT do FST principal<select value={editingInspectionData.itVersionId ?? ''} disabled={!!detail?.grupos_inspecao?.processos?.it_versao_id} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}><option value="">Selecionar IT</option>{itVersions.map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}</select>
-                <button type="button" className="secondary small" onClick={()=>{
-                  const p=processes.find(p=>p.id===detail?.grupos_inspecao?.processo_id)
-                  if(p)setEditingProcess({...p,nota_fiscal:null})
-                  else setError('FST não localizado para troca de IT.')
-                }}>Trocar IT do FST</button>
+              <label>IT desta inspeção
+                <select value={editingInspectionData.itVersionId ?? ''} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}>
+                  <option value="">Selecionar IT</option>
+                  {itVersions.filter(it=>it.status==='publicada'||it.id===editingInspectionData.itVersionId).map(it=>
+                    <option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}
+                </select>
+                <small>Ao escolher outra IT e salvar, esta inspeção é reiniciada. As fotos e o histórico permanecem.</small>
               </label>
                   <label className="span-2">Observação interna<textarea rows={3} value={editingInspectionData.observacaoInterna ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,observacaoInterna:e.target.value})}/></label>
             </div>
