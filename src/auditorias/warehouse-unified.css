@@ -484,3 +484,24 @@
  .sgq-operational-shell .sgq-warehouse-workspace .audit-checklist-filters label{flex-basis:100%}
  .sgq-operational-shell .sgq-warehouse-workspace .audit-pending-toggle{flex:1}
 }
+
+
+/* SGQ Armazém: orientação rápida, NCs visíveis e estados de salvamento explícitos. */
+.sgq-operational-shell .sgq-warehouse-workspace .audit-contlog-brand{color:#477595;font-size:11px;letter-spacing:.13em;font-weight:800;text-transform:uppercase}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-next-pending{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:43px;padding:9px 13px;border:1px solid #8dc2e2;border-radius:10px;color:#155b87;background:#eaf5fc;font-size:13px;font-weight:750;cursor:pointer}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-next-pending:disabled{opacity:.5;cursor:default}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-next-pending b{font-variant-numeric:tabular-nums;background:#d4eafb;padding:3px 7px;border-radius:7px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-unsaved-notes{display:flex;align-items:center;gap:10px;margin:0 0 13px;padding:11px 14px;border:1px solid #efcd91;border-radius:11px;background:#fff9ee;color:#82561d;font-size:13px;font-weight:700}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-nc-toggle{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:8px 12px;border:1px solid #e8d3cf;border-radius:9px;background:#fffafb;color:#9a4b42;font-weight:750;font-size:13px;cursor:pointer}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-nc-toggle b{font-variant-numeric:tabular-nums;background:#fae7e3;color:#a04e44;border-radius:7px;padding:3px 7px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-nc-toggle.selected{border-color:#d78c81;background:#fff0ed;box-shadow:inset 0 0 0 1px #eec4bb}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-section-progress{display:grid;min-width:145px;gap:5px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-section-progress span{font-size:12px;color:#5c7892;font-weight:700;text-align:right}
+.sgq-operational-shell .sgq-warehouse-workspace progress{display:block;width:100%;height:7px;accent-color:#1584bf;border:0;border-radius:999px;overflow:hidden}
+.sgq-operational-shell .sgq-warehouse-workspace progress::-webkit-progress-bar{background:#e3edf5;border-radius:999px}
+.sgq-operational-shell .sgq-warehouse-workspace progress::-webkit-progress-value{background:#1886bb;border-radius:999px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history-progress{display:grid;gap:6px;max-width:270px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-history-progress small{font-size:12px;color:#52748c;font-weight:650}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-manual-row{scroll-margin-top:145px}
+.sgq-operational-shell .sgq-warehouse-workspace :is(.audit-next-pending,.audit-nc-toggle):focus-visible{outline:3px solid #7cc4ed;outline-offset:2px}
+@media(max-width:720px){.sgq-operational-shell .sgq-warehouse-workspace .audit-next-pending{flex:1 1 100%}.sgq-operational-shell .sgq-warehouse-workspace .audit-nc-toggle{flex:1}.sgq-operational-shell .sgq-warehouse-workspace .audit-section-progress{min-width:100px}}
