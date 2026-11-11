@@ -143,6 +143,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
   const [showChecklist,setShowChecklist]=useState(false)
   const [checklistSearch,setChecklistSearch]=useState('')
   const [onlyPending,setOnlyPending]=useState(false)
+  const [onlyNonconforming,setOnlyNonconforming]=useState(false)
   const [showFinish,setShowFinish]=useState(false)
   const [notice,setNotice]=useState('')
   const [deletionCandidate,setDeletionCandidate]=useState<AuditExecution|null>(null)
@@ -171,8 +172,13 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
   const visibleCriteria=useMemo(()=>relevantCriteria.filter(c=>{
     const query=checklistSearch.trim().toLocaleLowerCase('pt-BR')
     const matches=!query||[c.key,c.label,c.section].some(t=>String(t||'').toLocaleLowerCase('pt-BR').includes(query))
-    return matches&&(!onlyPending||!answerMap.has(answerKey(c.key,currentAuditLocation)))
-  }),[relevantCriteria,answerMap,checklistSearch,onlyPending,currentAuditLocation])
+    const answer=answerMap.get(answerKey(c.key,currentAuditLocation))
+    return matches&&(!onlyPending||!answer)&&(!onlyNonconforming||answer?.resultado==='NC')
+  }),[relevantCriteria,answerMap,checklistSearch,onlyPending,onlyNonconforming,currentAuditLocation])
+  const unsavedNotesCount=useMemo(()=>Object.entries(notes).filter(([key,value])=>{
+    const saved=answerMap.get(key)?.observacao??''
+    return value.trim()!==saved.trim()
+  }).length,[notes,answerMap])
   const uniqueAnswered=useMemo(()=>new Set(answers.map((a)=>a.item_key)).size,[answers])
   const progressTotal=definition?.fixedChecklist ? definition.criteria.length : Math.max(active?.progresso_total ?? 0,uniqueAnswered)
   const progressDone=definition?.fixedChecklist ? uniqueAnswered : Math.max(active?.progresso_concluido ?? 0,uniqueAnswered)
@@ -324,6 +330,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
         setDraft('')
         setChecklistSearch('')
         setOnlyPending(false)
+        setOnlyNonconforming(false)
       }
       setShowChecklist(true)
     } catch (e:any) {
@@ -438,8 +445,30 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
     finally{setLoading(false)}
   }
 
+  function goToNextPending(){
+    if(definition?.code!=='RQ016'&&!currentAuditLocation){
+      setNotice('Informe o local antes de continuar a conferência.')
+      return
+    }
+    const next=relevantCriteria.find(c=>!answerMap.has(answerKey(c.key,currentAuditLocation)))
+    if(!next){setNotice('Nenhuma verificação pendente neste local.');return}
+    setShowChecklist(true)
+    setChecklistSearch('')
+    setOnlyPending(false)
+    setOnlyNonconforming(false)
+    window.setTimeout(()=>document.getElementById('sgq-audit-criterion-'+next.key)
+      ?.scrollIntoView({behavior:'smooth',block:'center'}),40)
+  }
+
   async function requestFinish(nextAnswers=answers) {
     if (!active || !definition) return
+    if(unsavedNotesCount>0){
+      setShowChecklist(true)
+      setOnlyPending(false)
+      setOnlyNonconforming(false)
+      setNotice('Existem '+unsavedNotesCount+' observação(ões) digitada(s) sem salvar. Salve cada uma antes de concluir.')
+      return
+    }
     if(!navigator.onLine){setNotice('Conecte-se e sincronize os registros antes de concluir a inspeção.');return}
     if(userId){
       const pending=(await offlineOperations(userId).catch(()=>[])).some(item=>
@@ -585,7 +614,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
       <section className="audit-page audit-integrated sgq-warehouse-workspace">
         <div className="page-title audit-page-title">
           <div>
-            <span className="audit-contlog-brand">Contlog</span>
+            <span className="audit-contlog-brand">QUALIDADE · ARMAZÉM</span>
             <h1>Inspeções <span>Armazém</span></h1>
           </div>
         </div>
@@ -666,7 +695,8 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
                 <div>
                   <strong>{x.rq_code.replace('RQ','RQ ')} · {x.titulo}</strong>
                   <span>{formatDate(x.data_avaliacao)} · {x.responsavel_nome || 'Responsável não informado'}</span>
-                  {x.progresso_total>0&&<small className="audit-history-progress">{x.progresso_concluido}/{x.progresso_total} itens · {Math.min(100,Math.round(x.progresso_concluido/x.progresso_total*100))}% concluído</small>}
+                  {x.progresso_total>0&&<div className="audit-history-progress"><small>{x.progresso_concluido}/{x.progresso_total} verificados · {Math.min(100,Math.round(x.progresso_concluido/x.progresso_total*100))}%</small>
+                    <progress max={x.progresso_total} value={Math.min(x.progresso_total,x.progresso_concluido)} aria-label={'Progresso da inspeção '+x.rq_code}/></div>}
                 </div>
                 <span className={'audit-status '+x.status}>{statusLabel(x.status)}</span>
               </button>
@@ -684,7 +714,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
   return (
     <section className="audit-page audit-session audit-form-screen sgq-warehouse-workspace">
       <div className="page-title audit-session-header">
-        <button className="audit-back" type="button" title="Voltar" onClick={()=>{setActive(null);setMessages([]);setAnswers([]);setFindings([]);setObjects([]);setNotice('')}}><ArrowLeft size={20}/></button>
+        <button className="audit-back" type="button" title="Voltar" onClick={()=>{if((draft.trim()||photo||unsavedNotesCount>0)&&!window.confirm('Há registros ainda não salvos. Voltar sem salvar?'))return;setActive(null);setMessages([]);setAnswers([]);setFindings([]);setObjects([]);setNotice('')}}><ArrowLeft size={20}/></button>
         <div className="audit-session-title">
           <span>{definition?.displayCode}</span>
           <strong>{definition?.title}</strong>
@@ -717,8 +747,14 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
         <button type="button" className="audit-checklist-button" onClick={()=>setShowChecklist(x=>!x)}>
           <ClipboardCheck size={17}/> {showChecklist?'Ocultar itens':'Mostrar itens'}
         </button>
+        <button type="button" className="audit-next-pending" onClick={goToNextPending} disabled={contextPending===0}>
+          <ChevronRight size={17}/> Próximo pendente <b>{contextPending}</b>
+        </button>
       </div>
 
+      {unsavedNotesCount>0&&<div className="audit-unsaved-notes" role="status">
+        <Save size={17}/> {unsavedNotesCount} observação(ões) não salva(s). Use Salvar em cada item.
+      </div>}
       {definition?.code!=='RQ016'&&answers.some(row=>row.local_ref)&&(
         <div className="audit-saved-locations">
           {Array.from(new Set(answers.map(a=>a.local_ref).filter(Boolean))).map(loc=>
@@ -753,19 +789,22 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
             value={checklistSearch} onChange={e=>setChecklistSearch(e.target.value)}/>
         </label>
         <button type="button" className={'audit-pending-toggle'+(onlyPending?' selected':'')}
-          aria-pressed={onlyPending} onClick={()=>setOnlyPending(v=>!v)}>Somente pendentes <b>{contextPending}</b></button>
-        {(onlyPending||checklistSearch)&&<button type="button" className="audit-clear-filters"
-          onClick={()=>{setOnlyPending(false);setChecklistSearch('')}}>Limpar filtros</button>}
+          aria-pressed={onlyPending} onClick={()=>{setOnlyPending(v=>!v);setOnlyNonconforming(false)}}>Pendentes <b>{contextPending}</b></button>
+        <button type="button" className={'audit-nc-toggle'+(onlyNonconforming?' selected':'')}
+          aria-pressed={onlyNonconforming} onClick={()=>{setOnlyNonconforming(v=>!v);setOnlyPending(false)}}>Não conformes <b>{contextNC}</b></button>
+        {(onlyPending||onlyNonconforming||checklistSearch)&&<button type="button" className="audit-clear-filters"
+          onClick={()=>{setOnlyPending(false);setOnlyNonconforming(false);setChecklistSearch('')}}>Limpar filtros</button>}
       </div>}
       {showChecklist&&visibleCriteria.length===0&&<div className="audit-filter-empty">
-        <CheckCircle2 size={19}/>{contextPending===0?'Todos os itens deste local foram respondidos.':'Nenhum item corresponde ao filtro.'}
+        <CheckCircle2 size={19}/>{onlyNonconforming?'Nenhuma não conformidade neste local.':onlyPending?'Nenhuma verificação pendente neste local.':contextPending===0?'Todos os itens deste local foram respondidos.':'Nenhum item corresponde ao filtro.'}
       </div>}
       {showChecklist&&<div className="audit-manual-sections">
         {Array.from(new Set(visibleCriteria.map(c=>c.section))).map(section=>(
           <section className="panel section-card audit-manual-panel" key={section}>
             <div className="audit-manual-panel-head">
               <h2>{section}</h2>
-              <span>{visibleCriteria.filter(c=>c.section===section).length} de {relevantCriteria.filter(c=>c.section===section).length} itens</span>
+              <div className="audit-section-progress"><span>{relevantCriteria.filter(c=>c.section===section&&answerMap.has(answerKey(c.key,currentAuditLocation))).length} de {relevantCriteria.filter(c=>c.section===section).length} verificados</span>
+                <progress max={relevantCriteria.filter(c=>c.section===section).length} value={relevantCriteria.filter(c=>c.section===section&&answerMap.has(answerKey(c.key,currentAuditLocation))).length}/></div>
             </div>
             <div className="audit-manual-rows">
               {visibleCriteria.filter(c=>c.section===section).map(c=>{
@@ -773,7 +812,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
                 const key=answerKey(c.key,local)
                 const current=answerMap.get(key)
                 const busy=savingRow===key
-                return <div className={'audit-manual-row '+(current?'is-answered':'')+(current?.resultado==='NC'?' has-nc':'')} key={c.key}>
+                return <div className={'audit-manual-row '+(current?'is-answered':'')+(current?.resultado==='NC'?' has-nc':'')} key={c.key} id={'sgq-audit-criterion-'+c.key}>
                   <div className="audit-manual-question"><b>{c.key}</b><span>{c.label}</span></div>
                   <div className="audit-manual-answer" role="group" aria-label={'Resultado de '+c.key}>
                     {(['C','NC','NA'] as const).map(result=>(
@@ -781,7 +820,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
                         aria-label={c.key+' '+result}
                         aria-pressed={current?.resultado===result}
                         className={'audit-result-'+result+(current?.resultado===result?' selected':'')}
-                        disabled={readOnly||!!savingRow||loading}
+                        disabled={readOnly||!!savingRow||loading||(definition?.code!=='RQ016'&&!currentAuditLocation)}
                         onClick={()=>void saveManualAnswer(c,result)}>{result}</button>
                     ))}
                     {busy&&<LoaderCircle size={17} className="spin"/>}
