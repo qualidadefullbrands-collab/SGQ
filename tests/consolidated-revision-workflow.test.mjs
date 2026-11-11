@@ -11,7 +11,7 @@ test('all legacy inspection DOCX requests default to the parent FST A+B',()=>{
  const endpoint=part(api,'app.MapPost("/api/inspecoes/{id}/laudo"','app.MapPost("/api/processos/{id}/laudo"')
  assert.match(endpoint,/var generateCombined=!string\.IsNullOrWhiteSpace\(parentId\)/)
  assert.match(endpoint,/request\.Query\["individual"\]/)
- assert.match(endpoint,/generateCombined\s*\?\s*"\$\{auditDocsUrl\}\/generate-process/)
+ assert.match(endpoint,/generateCombined\s*\?\s*\$"\{auditDocsUrl\}\/generate-process/)
  assert.match(endpoint,/generate-inspection/)
  assert.match(docs,/for group in groups\[1:\]:/)
  assert.match(docs,/append_filled_inspection_form\(doc,filled\.body\)/)
