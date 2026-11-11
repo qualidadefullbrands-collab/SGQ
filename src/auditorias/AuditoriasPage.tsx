@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, ArrowLeft, ArrowUpRight, Boxes, Camera, Check, CheckCircle2, ChevronRight, ClipboardCheck, Download, FileText, Flame, Layers3, Loader2, LoaderCircle, MapPin, Save, Search, Sparkles, Trash2, Upload, X } from 'lucide-react'
-import { apiGet, apiPost, apiPut, supabase } from '../lib/supabase'
+import { apiGet, apiPost, apiPut, supabase, authClient } from '../lib/supabase'
 import {saveOfflineDraft,readOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from '../lib/offline'
 import { AUDIT_DEFINITIONS, getAuditDefinition, type AuditCriterion, type AuditDefinition, type RqCode } from './catalog'
 import './auditorias.css'
@@ -241,7 +241,7 @@ export default function AuditoriasPage({userId='',profileName,canDelete=false,ca
     try {
       // Bucket privado: usa a sessão Supabase e a política SELECT do usuário.
       // Entrega o DOCX original, sem recriar ou alterar seu conteúdo.
-      const {data,error}=await supabase.storage.from('auditoria-modelos').download(template.storage_path)
+      const {data,error}=await authClient.storage.from('auditoria-modelos').download(template.storage_path)
       if(error||!data)throw new Error(error?.message||'Não foi possível baixar o modelo.')
       const url=URL.createObjectURL(data)
       const link=document.createElement('a')
