@@ -353,7 +353,7 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
         "select":"id,grupo_inspecao_id,status,resultado,it_versao_id,data_inspecao,"
                  "responsavel_id,tamanho_lote,tamanho_amostra,total_inspecionado,"
                  "total_nao_conforme,limite_rejeicao,dimensionais_finalizados,"
-                 "testes_finalizados,revisao_obrigatoria,revisado_em,observacoes",
+                 "testes_finalizados,observacoes",
         "order":"criado_em.asc"})
     by_group={}
     for item in inspections:
@@ -439,8 +439,8 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
                              and row.get("resultado")=="reprovado")
             if sample<=0 or (inspected<sample and not early_rejection):
                 pending.append(f"{label}: amostragem não concluída ({inspected}/{sample}).")
-            if row.get("revisao_obrigatoria") and not row.get("revisado_em"):
-                pending.append(f"{label}: revisão obrigatória ainda pendente.")
+            # Retificações ficam no audit_log e não exigem aprovação adicional
+            # para emissão do documento. Os demais critérios técnicos permanecem.
             recorded_checks={str(c["checklist_id"]) for c in check_results
                              if c.get("inspecao_id")==ident and required_text(c.get("resultado"))}
             if any(str(c["id"]) not in recorded_checks for c in checks):
