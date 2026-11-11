@@ -746,7 +746,6 @@ export default function App() {
   const [detail, setDetail] = useState<any>(null)
   type WordReadiness={ready:boolean;pending:string[];error?:string}
   const [wordStatus,setWordStatus]=useState<WordReadiness|null>(null)
-  const [completedEditRevision,setCompletedEditRevision]=useState(0)
   function parseWordStatus(response:any):WordReadiness {
     if(response?.error){
       const message=String(response.error.message||'Falha ao consultar as pendências do laudo.')
@@ -780,22 +779,10 @@ export default function App() {
   function reflectCompletedEdit(){
     if(detail?.status!=='concluida')return
     setDetail((current:any)=>current?{...current,documento_gerado_em:null}:current)
-    setCompletedEditRevision(n=>n+1)
+    setWordStatus(null)
     setMessage('Retificação registrada no histórico. O próximo Word incluirá os dados atualizados.')
   }
   const [allowDimensionalRectification,setAllowDimensionalRectification]=useState(false)
-  useEffect(()=>{
-    const processId=detail?.grupos_inspecao?.processo_id as string|undefined
-    if(!processId){setWordStatus(null);return}
-    let active=true
-    setWordStatus(null)
-    // Validar o processo completo, não apenas a entrada aberta na tela.
-    void apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status')
-      .then(response=>{if(active)setWordStatus(parseWordStatus(response))})
-      .catch((e:any)=>{if(active)setWordStatus({ready:false,pending:[],
-        error:'Falha de comunicação com o serviço Word: '+String(e?.message||'sem resposta')})})
-    return()=>{active=false}
-  },[detail?.grupos_inspecao?.processo_id,detail?.status,inspections,completedEditRevision])
   const [finalObservation, setFinalObservation] = useState('')
   const [internalObservation, setInternalObservation] = useState('')
   const [retentionRows, setRetentionRows] = useState<Record<string,{
@@ -1748,7 +1735,7 @@ export default function App() {
         setError('Selecione uma versão de IT publicada.');return
       }
       if(!window.confirm('Trocar a IT do FST '+editingProcess.codigo+
-        '? A alteração será aplicada a todos os subprocessos, inclusive inspeções iniciadas ou concluídas. Fotos e registros anteriores serão preservados, mas os critérios da nova IT precisarão ser revisados antes de emitir outro laudo.'))return
+        '? Todas as entradas serão reiniciadas para a nova IT. Fotos e histórico permanecem; verificações, medições e testes antigos não serão reutilizados.'))return
     }
     setProcessEditSaving(true);setError('')
     try{
@@ -1790,7 +1777,7 @@ export default function App() {
         {...current,itVersionId:revised.it_versao_id??''}:current)
       setWordStatus(null)
       setEditingProcess(null)
-      setMessage(itChanged?'IT alterada para todo o FST. Revise os critérios da nova IT.':'Processo atualizado.')
+      setMessage(itChanged?'IT alterada. As entradas foram reiniciadas e as fotos preservadas.':'Processo atualizado.')
       void refreshLists()
     }finally{setProcessEditSaving(false)}
   }
@@ -1949,6 +1936,7 @@ export default function App() {
 
   async function openInspection(id: string) {
     setError('')
+    setWordStatus(null)
     if(selectedInspectionId!==id){setActiveStage('dados');setAllowDimensionalRectification(false)}
     setSelectedInspectionId(id)
     const loaded=await apiGet<any>('/api/inspecoes/'+id+'/detalhe')
@@ -2101,7 +2089,6 @@ export default function App() {
         setEditingInspectionData(null)
         setAllowDimensionalRectification(false)
         setWordStatus(null)
-        setCompletedEditRevision(n=>n+1)
         await openInspection(id)
         setActiveStage('verificacoes')
         setMessage('IT alterada. Inspeção reiniciada; fotos mantidas ('+
@@ -2677,13 +2664,8 @@ export default function App() {
           return updated ? {...measurement,conforme:updated.conforme} : measurement
         }) }
     })
-    const processId=detail?.grupos_inspecao?.processo_id
-    if(processId){
-      const status=await apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status')
-      setWordStatus(status.error?
-        {ready:false,pending:[status.error.message||'Falha ao validar laudo.']}:
-        {ready:status.data?.ready===true,pending:status.data?.pending??[]})
-    }
+    // A conferência do Word acontece somente quando o usuário solicita sua geração.
+    setWordStatus(null)
     reflectCompletedEdit()
   }
 
@@ -2746,7 +2728,6 @@ export default function App() {
     const done=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/testes/finalizar`,{})
     if(done.error){setPopupMessage(done.error.message);return}
     setDetail((d:any)=>d?{...d,testes_finalizados:true}:d)
-    if(detail?.status==='concluida')setCompletedEditRevision(n=>n+1)
     setMessage('Testes concluídos.')
   }
 
@@ -2921,7 +2902,6 @@ export default function App() {
       ? 'Resultado revisado com pendências registradas.'
       : retifying?'Resultado retificado e revalidado.':'Inspeção finalizada. A retenção de amostras é opcional.')
     setAllowDimensionalRectification(false)
-    setCompletedEditRevision(n=>n+1)
     void refreshLists()
     await openInspection(selectedInspectionId)
   }
@@ -3192,11 +3172,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   async function downloadInspectionWord() {
     if(!detail||!selectedInspectionId||wordDownloading)return
     setError('')
-    if(!wordStatus?.ready){
-      if(!wordStatus || wordStatus.error)await refreshWordStatus()
-      document.getElementById('sgq-word-pendencias')?.scrollIntoView({behavior:'smooth',block:'center'})
-      return
-    }
+    setWordStatus(null)
     if(!detail.it_versao_id){
       return setError('Esta inspeção não possui IT vinculada. Vincule uma IT para gerar o Word oficial.')
     }
@@ -3225,6 +3201,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             body?.error?.message||body?.message||reason
         }catch{}
         setError(reason)
+        // Apenas uma falha real ao gerar documento consulta pendências técnicas.
+        if(response.status===409)void refreshWordStatus()
         return
       }
       const blob=await response.blob()
@@ -3743,14 +3721,14 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 setAllowDimensionalRectification(true)
               }}><Edit3 size={16}/>{allowDimensionalRectification?'Encerrar edição':'Editar inspeção concluída'}</button>}
 
-              {detail.status==='concluida' && <button className="secondary" type="button" disabled={wordDownloading} title={wordStatus?.ready?'Gerar e baixar o laudo de inspeção':'Ver o motivo pelo qual o Word ainda não está disponível'} onClick={()=>void downloadInspectionWord()}><FileDown size={16}/>{wordDownloading?'Gerando laudo…':'Gerar Laudo'}</button>}
+              {detail.status==='concluida' && <button className="secondary" type="button" disabled={wordDownloading} title="Gerar Word atualizado apenas sob demanda, sem salvá-lo no banco" onClick={()=>void downloadInspectionWord()}><FileDown size={16}/>{wordDownloading?'Gerando laudo…':'Gerar Laudo'}</button>}
               {canDelete && <button className="danger icon-only" title="Excluir inspeção" onClick={()=>deleteInspection({id:detail.id,numero:detail.numero})}><Trash2 size={16}/></button>}
             </div>
           </div>
 
-          {detail.status==='concluida' && !wordStatus?.ready && <div id="sgq-word-pendencias" className="alert" role="status">
+          {detail.status==='concluida' && wordStatus && !wordStatus.ready && <div id="sgq-word-pendencias" className="alert" role="status">
             <strong>{wordStatus?.error?'Falha ao consultar o laudo':wordStatus
-              ?'O laudo ainda possui '+wordStatus.pending.length+' pendência(s)':'Verificando a disponibilidade do Word…'}</strong>
+              ?'O laudo ainda possui '+wordStatus.pending.length+' pendência(s)':'Não foi possível gerar o Word.'}</strong>
             {wordStatus?.error && <p>{wordStatus.error} A validação falhou; isso não significa que os dados da inspeção estejam incompletos.</p>}
             {!!wordStatus?.pending.length && <ul>
               {wordStatus.pending.map((reason,index)=><li key={index}>{reason}</li>)}
