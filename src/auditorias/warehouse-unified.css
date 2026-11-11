@@ -505,3 +505,16 @@
 .sgq-operational-shell .sgq-warehouse-workspace .audit-manual-row{scroll-margin-top:145px}
 .sgq-operational-shell .sgq-warehouse-workspace :is(.audit-next-pending,.audit-nc-toggle):focus-visible{outline:3px solid #7cc4ed;outline-offset:2px}
 @media(max-width:720px){.sgq-operational-shell .sgq-warehouse-workspace .audit-next-pending{flex:1 1 100%}.sgq-operational-shell .sgq-warehouse-workspace .audit-nc-toggle{flex:1}.sgq-operational-shell .sgq-warehouse-workspace .audit-section-progress{min-width:100px}}
+
+/* Download autenticado dos quatro modelos oficiais de auditoria de armazém. */
+.sgq-operational-shell .sgq-warehouse-workspace .audit-download-models{margin-bottom:17px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-download-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-download-card{display:flex;align-items:center;gap:13px;min-width:0;padding:14px;border:1px solid #d9e6ef;border-radius:12px;background:#f9fcff}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-download-icon{display:grid;place-items:center;flex:none;width:42px;height:42px;border-radius:10px;background:#e5f2fa;color:#226991}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-download-info{display:grid;gap:3px;flex:1;min-width:0}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-download-info strong{color:#224862;font-size:13px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-download-info span{font-size:13px;font-weight:650;overflow-wrap:anywhere;color:#273f51;line-height:1.45}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-download-info small{color:#6b8193;font-size:12px}
+.sgq-operational-shell .sgq-warehouse-workspace .audit-download-action{display:inline-flex;align-items:center;justify-content:center;gap:8px;flex:none;min-height:39px;padding:8px 13px;white-space:nowrap}
+@media(max-width:1050px){.sgq-operational-shell .sgq-warehouse-workspace .audit-download-grid{grid-template-columns:1fr}}
+@media(max-width:570px){.sgq-operational-shell .sgq-warehouse-workspace .audit-download-card{flex-wrap:wrap}.sgq-operational-shell .sgq-warehouse-workspace .audit-download-action{width:100%}}
