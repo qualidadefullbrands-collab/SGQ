@@ -84,6 +84,7 @@ type InspectionRow = {
 }
 type StockSkuPosition = {id:string;codigo:string;sku:string;descricao:string;endereco:string|null;processo:string|null;saldo:number}
 type StockSkuConflict = {descricao:string;skus:string[];registros:number;posicoes:StockSkuPosition[]}
+type StockSkuValidation = {valid:boolean;descricao:string;message:string}
 type Sample = {
   id: string
   codigo: string
@@ -806,7 +807,7 @@ export default function App() {
   const [stockSkuConflicts,setStockSkuConflicts]=useState<StockSkuConflict[]>([])
   const [stockSkuSelection,setStockSkuSelection]=useState<Record<string,string>>({})
   const [stockSkuFixing,setStockSkuFixing]=useState<string|null>(null)
-  const [stockSkuChecks,setStockSkuChecks]=useState<Record<string,string>>({})
+  const [stockSkuChecks,setStockSkuChecks]=useState<Record<string,StockSkuValidation>>({})
   const [stockSkuChecking,setStockSkuChecking]=useState<string|null>(null)
   const [pendingPhotos, setPendingPhotos] = useState<Array<{id:string;file:File;url:string;legenda:string;productId:string;isProductId:boolean}>>([])
   const [photoCaptionDrafts,setPhotoCaptionDrafts]=useState<Record<string,string>>({})
@@ -900,6 +901,7 @@ export default function App() {
   })
 
   const canWrite = profile && profile.perfil !== 'consulta'
+  const canCorrectStockSku = !!profile && ['administrador','gestor','inspetor'].includes(profile.perfil)
   const canManageIts = profile && ['administrador', 'gestor'].includes(profile.perfil)
   const canDelete = profile && ['administrador', 'gestor'].includes(profile.perfil)
 
@@ -3040,18 +3042,21 @@ export default function App() {
     setStockSkuChecking(code)
     const result=await apiPost<{found:boolean;sku:string;descricao:string;conflito:string|null}>(
       '/api/estoque/validar-sku',{codigo:code})
-    setStockSkuChecks(old=>({...old,[code]:result.error?
-      result.error.message:result.data?.conflito?
-        'Omie: '+result.data.descricao+' · mesma descrição de '+result.data.conflito:
-        'Validado no Omie: '+(result.data?.descricao||code)}))
+    const valid=!result.error&&result.data?.found===true
+    setStockSkuChecks(old=>({...old,[code]:{
+      valid,descricao:valid?String(result.data?.descricao||''):'',
+      message:valid?'Identificação confirmada no Omie.':result.error?.message||'Código não localizado no Omie.'
+    }}))
     setStockSkuChecking(null)
   }
 
   async function correctStockSample(position:StockSkuPosition) {
-    if(!canWrite||stockSkuFixing)return
+    if(!canCorrectStockSku||stockSkuFixing)return
     const sku=(stockSkuSelection[position.id]||position.sku).trim()
     if(!sku){setError('Selecione o SKU correto para esta posição.');return}
-    if(!window.confirm('Corrigir somente a posição '+position.codigo+' de '+position.sku+' para '+sku+'? O saldo, o histórico de movimentações e os laudos não serão modificados.'))return
+    const onlyDescription=sku.toUpperCase()===position.sku.toUpperCase()
+    const action=onlyDescription?'sincronizar a descrição oficial':'alterar o código para '+sku
+    if(!window.confirm('Posição '+position.codigo+': '+action+'? A alteração será feita apenas nesta posição. Saldo, movimentos anteriores e laudos serão preservados.'))return
     setStockSkuFixing(position.id);setError('')
     try{
       const response=await apiPost<{ok:boolean;alterado:boolean;sku:string;descricao:string;auditoriaPendente?:boolean}>('/api/estoque/corrigir-sku',{
@@ -3402,7 +3407,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
             </div>
             {omieInboxError && <p className="field-status bad">{omieInboxError}</p>}
-            {!omieInbox.length && <p className="section-note">Nenhum pedido recebido nesta caixa de entrada. Consulte os PVs diretamente no Omie ou atualize a integração.</p>}
+            {!omieInbox.length && <p className="section-note">Nenhum PV sincronizado. Busque pelo FST para consultar diretamente o Omie.</p>}
             {omieInbox.length>0 && <div className="checklist compact-checklist">
               {omieInbox.slice(0,20).map(order=><div className="check-row" key={order.id}>
                 <div className="check-copy">
@@ -4307,16 +4312,20 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           {stockMode==='posicoes'&&<>
           {stockSkuConflicts.length>0&&<section className="sgq-stock-sku-conflicts" aria-label="Conferência de identificação de produtos">
             <div className="sgq-sku-conflict-heading">
-              <div><b>Conferência de SKUs</b><small>Escolha o código correto por posição de estoque. Produtos distintos não são unificados.</small></div>
-              <span>{stockSkuConflicts.length} grupo(s) para revisão</span>
+              <div><b>Identificação de produtos</b><small>Confira o produto físico e selecione o SKU correspondente no Omie.</small></div>
+              <span>{stockSkuConflicts.length} identificação(ões) para conferir</span>
             </div>
             {stockSkuConflicts.map(conflict=><article className="sgq-stock-sku-issue" key={conflict.descricao}>
               <header><strong>{conflict.descricao}</strong><small>{conflict.registros} posição(ões) · {conflict.skus.length} SKUs</small></header>
-              <div className="sgq-stock-sku-verify">
-                {conflict.skus.map(code=><div key={code}>
+              <div className="sgq-stock-sku-verify" aria-label="Verificar descrições oficiais no Omie">
+                {conflict.skus.map(code=><div className="sgq-stock-sku-verify-item" key={code}>
+                  <div className="sgq-stock-sku-verify-name"><strong>{code}</strong>
+                    {stockSkuChecks[code]&&<span className={stockSkuChecks[code].valid?'is-verified':'is-unverified'}>{stockSkuChecks[code].valid?'Confirmado':'Não validado'}</span>}
+                  </div>
+                  {stockSkuChecks[code]&&<small role="status">{stockSkuChecks[code].valid?stockSkuChecks[code].descricao:stockSkuChecks[code].message}</small>}
                   <button type="button" className="secondary small" disabled={!!stockSkuChecking} onClick={()=>void checkStockSku(code)}>
-                    {stockSkuChecking===code?'Validando…':'Conferir '+code+' no Omie'}
-                  </button>{stockSkuChecks[code]&&<small role="status">{stockSkuChecks[code]}</small>}
+                    {stockSkuChecking===code?'Consultando…':'Conferir no Omie'}
+                  </button>
                 </div>)}
               </div>
               <div className="sgq-stock-sku-positions">
@@ -4330,12 +4339,12 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                       value={stockSkuSelection[position.id]??position.sku}
                       onChange={e=>setStockSkuSelection(old=>({...old,[position.id]:e.target.value}))}
                       disabled={!canWrite||!!stockSkuFixing}>
-                      {Array.from(new Set([...conflict.skus,position.sku])).map(code=><option key={code} value={code}>{code}</option>)}
+                      {Array.from(new Set([...conflict.skus,position.sku])).map(code=><option key={code} value={code}>{code}{stockSkuChecks[code]?.valid?' · '+stockSkuChecks[code].descricao:''}</option>)}
                     </select>
                   </label>
-                  {canWrite&&<button type="button" className="primary small" disabled={!!stockSkuFixing}
+                  {canCorrectStockSku&&<button type="button" className="primary small" disabled={!!stockSkuFixing}
                     onClick={()=>void correctStockSample(position)}>
-                    {stockSkuFixing===position.id?'Conferindo…':'Confirmar correção'}
+                    {stockSkuFixing===position.id?'Corrigindo…':'Aplicar correção'}
                   </button>}
                 </div>)}
               </div>
