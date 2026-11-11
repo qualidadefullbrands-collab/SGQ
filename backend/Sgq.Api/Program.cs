@@ -3767,9 +3767,12 @@ app.MapPost("/api/amostras/criar", async (CreateSampleRequest input,HttpRequest 
         var sku=(input.Sku??"").Trim();
         var omie=await OmieStockProduct(client,token,sku);
         if(!omie.Found)return Results.Json(Error(omie.Error),statusCode:422);
+        // Descrição semelhante não identifica duplicidade. O código e a descrição
+        // são conferidos no Omie; versões e produtos diferentes podem compartilhar
+        // um título abreviado no SGQ. A reconciliação é feita por posição de estoque.
         var conflict=await StockDuplicateDescription(client,token,sku,omie.Name!);
-        if(conflict!=null)return Results.Json(Error(
-            $"A descrição do Omie também está vinculada ao SKU {conflict}. Resolva o conflito antes de cadastrar."),statusCode:409);
+        if(conflict!=null)app.Logger.LogInformation(
+            "SKU {Sku} comparte descrição com {OtherSku}; ambos requerem identificação individual no estoque",sku,conflict);
         var productRows=await RestAsync(client,token,HttpMethod.Get,"produtos",
             $"select=id&sku=ilike.{Uri.EscapeDataString(sku)}&limit=1");
         var (product,pf)=FirstRow(productRows);
