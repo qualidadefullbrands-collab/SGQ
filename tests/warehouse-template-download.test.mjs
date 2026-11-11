@@ -7,7 +7,7 @@ const css=source('src/auditorias/warehouse-unified.css')
 
 test('warehouse downloads original registered documents through authenticated storage',()=>{
   assert.match(ui,/async function downloadWarehouseTemplate\(def:AuditDefinition\)/)
-  assert.ok(ui.includes("supabase.storage.from('auditoria-modelos').download(template.storage_path)"))
+  assert.ok(ui.includes("authClient.storage.from('auditoria-modelos').download(template.storage_path)"))
   assert.ok(ui.includes("item.rq_code===def.code&&item.ativo&&item.storage_path"))
   assert.ok(ui.includes('link.download=template.arquivo_nome'))
   assert.ok(ui.includes("URL.revokeObjectURL(url)"))
