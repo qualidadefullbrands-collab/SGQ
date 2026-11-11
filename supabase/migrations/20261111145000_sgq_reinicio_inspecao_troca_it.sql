@@ -99,3 +99,58 @@ end;
 $func$;
 revoke all on function public.sgq_reiniciar_inspecao_it(uuid,uuid) from public,anon;
 grant execute on function public.sgq_reiniciar_inspecao_it(uuid,uuid) to authenticated;
+
+-- A troca da IT do FST também reinicia cada entrada, sem carregar critérios
+-- antigos para a nova versão. A transação inteira é revertida em caso de erro.
+create or replace function public.sgq_trocar_it_fst(
+ p_processo_id uuid, p_it_versao_id uuid, p_confirmado boolean default false
+) returns jsonb
+language plpgsql security invoker set search_path = ''
+as $func$
+declare
+ v_antiga uuid;
+ v_codigo text;
+ v_actor uuid:=auth.uid();
+ v_inspecao record;
+ v_count integer:=0;
+begin
+ if v_actor is null or not exists(
+  select 1 from public.profiles
+  where id=v_actor and ativo=true and perfil in('administrador','gestor','inspetor')
+ ) then
+  raise exception 'Sem permissão para trocar a IT do FST.' using errcode='42501';
+ end if;
+ select it_versao_id,codigo into v_antiga,v_codigo from public.processos
+ where id=p_processo_id and excluido_em is null for update;
+ if not found then raise exception 'FST não encontrado.' using errcode='P0002'; end if;
+ if not exists(select 1 from public.it_versoes
+               where id=p_it_versao_id and status='publicada') then
+  raise exception 'Selecione uma versão publicada da IT.' using errcode='22023';
+ end if;
+ if v_antiga is not distinct from p_it_versao_id then
+  return jsonb_build_object('ok',true,'alterada',false,'inspecoesAfetadas',0);
+ end if;
+ if v_antiga is not null and p_confirmado is not true then
+  raise exception 'Confirme o reinício das inspeções com a nova IT.';
+ end if;
+ for v_inspecao in
+  select i.id from public.inspecoes i
+  join public.grupos_inspecao g on g.id=i.grupo_inspecao_id
+  where g.processo_id=p_processo_id and i.excluido_em is null
+  order by i.id for update of i
+ loop
+  perform public.sgq_reiniciar_inspecao_it(v_inspecao.id,p_it_versao_id);
+  v_count:=v_count+1;
+ end loop;
+ update public.processos
+ set it_versao_id=p_it_versao_id,status='em_inspecao',atualizado_em=now()
+ where id=p_processo_id and excluido_em is null;
+ insert into public.audit_log(usuario_id,entidade,entidade_id,acao,dados)
+ values(v_actor,'processos',p_processo_id::text,'troca_it',
+  jsonb_build_object('codigo_fst',v_codigo,'it_anterior',v_antiga,
+   'it_nova',p_it_versao_id,'inspecoes_reiniciadas',v_count,
+   'fotos_preservadas',true,'registrado_em',now()));
+ return jsonb_build_object('ok',true,'alterada',true,
+  'itVersionId',p_it_versao_id,'inspecoesAfetadas',v_count);
+end;
+$func$;
