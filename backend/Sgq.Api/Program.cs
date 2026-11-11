@@ -2556,14 +2556,22 @@ app.MapPost("/api/inspecoes/{id}/concluir", async (string id,FinishInspectionReq
         var testDone=testResults is {ValueKind:JsonValueKind.Array}?testResults.Value.GetArrayLength():0;
         if(testDone<testCount) pending.Add("Testes especiais incompletos.");
 
+        // A conclusão não deve fabricar uma "revisão obrigatória" para dados
+        // incompletos. A revisão posterior é confirmada explicitamente pelo usuário.
+        if(pending.Count>0)
+            return Results.Json(Error("Finalize os itens pendentes antes de concluir ou confirmar a revisão.",
+                string.Join(" | ",pending)),statusCode:409);
+        if(reHit && input.Resultado!="reprovado")
+            return Results.Json(Error("O limite de rejeição foi atingido. Confirme a reprovação antes de concluir."),statusCode:409);
+
         await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
             new {
                 status="concluida",
                 resultado=input.Resultado,
                 observacoes=string.IsNullOrWhiteSpace(input.Observacoes)?null:input.Observacoes.Trim(),
                 justificativa_decisao=reHit?(string.IsNullOrWhiteSpace(input.Observacoes)?null:input.Observacoes.Trim()):null,
-                revisao_obrigatoria=pending.Count>0||reHit,
-                revisado_em=concluded && pending.Count==0 && !reHit ? (DateTimeOffset?)DateTimeOffset.UtcNow : null,
+                revisao_obrigatoria=false,
+                revisado_em=concluded?(DateTimeOffset?)DateTimeOffset.UtcNow:null,
                 concluida_em=completedAt,
                 documento_gerado_em=(DateTimeOffset?)null
             },"return=minimal");
@@ -3215,6 +3223,34 @@ app.MapPost("/api/inspecoes/{id}/fotos/{photoId}/substituir", async(
     catch(Exception e){return Results.Json(Error("Não foi possível substituir a foto.",e.Message),statusCode:500);}
 });
 
+// Inspeções concluídas que tiveram dados retificados e precisam de confirmação.
+ // Consulta somente dados existentes; não libera o laudo nem altera aprovações.
+app.MapGet("/api/processos/{id}/revisoes", async (string id,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try
+    {
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("FST inválido."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var groups=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
+            $"select=id,subprocesso_codigo&processo_id=eq.{Uri.EscapeDataString(id)}");
+        var groupIds=groups is {ValueKind:JsonValueKind.Array}
+            ?groups.Value.EnumerateArray().Select(x=>x.GetProperty("id").GetString())
+                .Where(x=>!string.IsNullOrWhiteSpace(x)).ToArray()
+            :Array.Empty<string>();
+        if(groupIds.Length==0)
+            return Results.Ok(new {data=new {inspections=Array.Empty<object>()},error=(object?)null});
+        var ids=string.Join(",",groupIds);
+        var rows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,numero,status,resultado,observacoes,grupo_inspecao_id,grupos_inspecao(subprocesso_codigo)" +
+            $"&grupo_inspecao_id=in.({ids})&revisao_obrigatoria=is.true&excluido_em=is.null&order=criado_em.asc");
+        return Results.Ok(new {data=new{inspections=rows},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Não foi possível consultar as revisões do FST.",e.Message),statusCode:500);}
+});
+
 // Situação consolidada do Word: consulta os dados efetivamente gravados,
  // sem confiar no status ou nos campos que estão apenas no navegador.
 app.MapGet("/api/processos/{id}/laudo-status", async (string id,HttpRequest request,IHttpClientFactory factory)=>
@@ -3255,6 +3291,19 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
         var collectionName=request.Query["nomeConjunto"].ToString().Trim();
         if(collectionName.Length>100)
             return Results.Json(Error("O nome do conjunto deve ter até 100 caracteres."),statusCode:400);
+        // Compatibilidade com frontends em cache: o download padrão de qualquer
+        // entrada associada ao FST deve usar o Word consolidado A+B.
+        // Saída isolada é uma opção EXPLÍCITA para futuras inspeções independentes.
+        var inspectionRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=grupo_inspecao_id,grupos_inspecao(processo_id)&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+        var (inspection,found)=FirstRow(inspectionRows);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var group=inspection!.Value.GetProperty("grupos_inspecao");
+        var parentId=group.ValueKind==JsonValueKind.Object
+            && group.TryGetProperty("processo_id",out var parent)
+            && parent.ValueKind==JsonValueKind.String?parent.GetString():null;
+        var generateCombined=!string.IsNullOrWhiteSpace(parentId)
+            && !string.Equals(request.Query["individual"],"1",StringComparison.Ordinal);
         // Generate the official template on demand and send it straight to the browser.
         // Supabase Storage is NOT required; do not re-use stale laudo records.
         HttpResponseMessage? res=null;
@@ -3263,8 +3312,10 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
         for(var attempt=0;attempt<delays.Length;attempt++)
         {
             using var msg=new HttpRequestMessage(HttpMethod.Get,
-                $"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}"+
-                (string.IsNullOrWhiteSpace(collectionName)?"":$"?nome_conjunto={Uri.EscapeDataString(collectionName)}"));
+                generateCombined
+                    ? $"{auditDocsUrl}/generate-process/{Uri.EscapeDataString(parentId!)}"
+                    : $"{auditDocsUrl}/generate-inspection/{Uri.EscapeDataString(id)}"+
+                        (string.IsNullOrWhiteSpace(collectionName)?"":$"?nome_conjunto={Uri.EscapeDataString(collectionName)}"));
             msg.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);
             res=await client.SendAsync(msg);
             bytes=await res.Content.ReadAsByteArrayAsync();
