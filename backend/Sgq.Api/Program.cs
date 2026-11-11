@@ -1668,6 +1668,11 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var groupId=ins!.Value.GetProperty("grupo_inspecao_id").GetString()!;
         var wasConcluded=ins.Value.GetProperty("status").GetString()=="concluida";
+        var originalIt=ins.Value.TryGetProperty("it_versao_id",out var oldIt)
+            && oldIt.ValueKind==JsonValueKind.String?oldIt.GetString():null;
+        var requestedIt=input.ItVersionId?.Trim();
+        var itChanged=!string.IsNullOrWhiteSpace(requestedIt)
+            && !string.Equals(originalIt,requestedIt,StringComparison.OrdinalIgnoreCase);
         if(input.DataInspecao.HasValue && input.ChegadaCd.HasValue && input.DataInspecao.Value<input.ChegadaCd.Value)
             return Results.Json(Error("A data da inspeção não pode ser anterior à chegada ao CD."),statusCode:400);
         if(ins.Value.GetProperty("status").GetString()=="cancelada")
@@ -1707,23 +1712,18 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
             ["atualizado_em"]=DateTimeOffset.UtcNow
         };
         if(!string.IsNullOrWhiteSpace(processCode)) processUpdate["codigo"]=processCode;
-        if(!string.IsNullOrWhiteSpace(input.ItVersionId))
+        // A troca de IT é efetivada APÓS o salvamento dos campos operacionais,
+        // via função transacional: arquiva resultados anteriores e reutiliza fotos.
+        // Nunca altere o id da IT antes de reiniciar os registros dependentes.
+        if(!string.IsNullOrWhiteSpace(requestedIt)&&!Guid.TryParse(requestedIt,out _))
+            return Results.Json(Error("Identificador da IT inválido."),statusCode:400);
+        if(itChanged)
         {
-            if(!Guid.TryParse(input.ItVersionId,out _))
-                return Results.Json(Error("Identificador da IT inválido."),statusCode:400);
-            // A IT específica da entrada não altera a IT padrão do processo.
-            if(string.IsNullOrWhiteSpace(parentIt))
-                await RestAsync(client,token,HttpMethod.Patch,"processos",$"id=eq.{Uri.EscapeDataString(processId)}",
-                    new{it_versao_id=input.ItVersionId},"return=minimal");
-            await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
-                new {it_versao_id=input.ItVersionId},"return=minimal");
-            await RestAsync(client,token,HttpMethod.Patch,"grupo_inspecao_its",
-                $"grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}",
-                new {principal=false},"return=minimal");
-            await RestAsync(client,token,HttpMethod.Post,"grupo_inspecao_its",
-                "on_conflict=grupo_inspecao_id,it_versao_id",
-                new {grupo_inspecao_id=groupId,it_versao_id=input.ItVersionId,principal=true},
-                "resolution=merge-duplicates,return=minimal");
+            var version=await RestAsync(client,token,HttpMethod.Get,"it_versoes",
+                $"select=id,status&id=eq.{Uri.EscapeDataString(requestedIt!)}&limit=1");
+            var (chosen,valid)=FirstRow(version);
+            if(!valid||chosen!.Value.GetProperty("status").GetString()!="publicada")
+                return Results.Json(Error("Escolha uma versão publicada da IT."),statusCode:400);
         }
         if(isSubprocess)
         {
@@ -1891,7 +1891,22 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 documento_gerado_em=(DateTimeOffset?)null
             },"return=minimal");
 
-        if(wasConcluded)
+        JsonElement? restart=null;
+        if(itChanged)
+        {
+            restart=await RestAsync(client,token,HttpMethod.Post,"rpc/sgq_reiniciar_inspecao_it","",
+                new{p_inspecao_id=id,p_it_versao_id=requestedIt!});
+            if(restart is not {ValueKind:JsonValueKind.Object}
+                || !restart.Value.TryGetProperty("ok",out var ok)
+                || !ok.GetBoolean())
+                throw new InvalidOperationException("O reinício da inspeção não foi confirmado pelo banco.");
+            // A IT principal é apenas a referência padrão para novas entradas.
+            if(string.IsNullOrWhiteSpace(parentIt))
+                await RestAsync(client,token,HttpMethod.Patch,"processos",
+                    $"id=eq.{Uri.EscapeDataString(processId)}",
+                    new {it_versao_id=requestedIt}, "return=minimal");
+        }
+        if(wasConcluded&&!itChanged)
         {
             try
             {
@@ -1906,12 +1921,12 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
                 app.Logger.LogWarning(logError,"Audit log failed after changing completed inspection {InspectionId}",id);
             }
         }
-        if(wasConcluded)
+        if(wasConcluded&&!itChanged)
             await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
                 $"id=eq.{Uri.EscapeDataString(id)}",
                 new {revisao_obrigatoria=false,
                     documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
-        return Results.Ok(new {data=new {ok=true,plano=new {lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re,caixasRecebidas=totalBoxes,caixasAvaliar=totalInspect}},error=(object?)null});
+        return Results.Ok(new {data=new {ok=true,reiniciada=itChanged,fotosPreservadas=restart?.GetProperty("fotosPreservadas").GetInt32()??0,plano=new {lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re,caixasRecebidas=totalBoxes,caixasAvaliar=totalInspect}},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao atualizar dados da inspeção.",e.Message),statusCode:500);}
