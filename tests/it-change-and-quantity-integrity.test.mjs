@@ -6,8 +6,11 @@ const app=read('src/App.tsx')
 const api=read('backend/Sgq.Api/Program.cs')
 const sql=read('supabase/migrations/20261106_sgq_troca_it_quantidades_exatas.sql')
 
-test('IT can be replaced from the FST editor and the inspection editor directs to it',()=>{
- assert.match(app,/Trocar IT do FST/)
+test('IT can be replaced on an inspection or throughout a FST',()=>{
+ assert.match(app,/IT desta inspeção/)
+ assert.match(app,/Trocar a IT desta entrada/)
+ assert.match(app,/itVersionId:editingInspectionData.itVersionId/)
+ assert.match(api,/rpc\/sgq_reiniciar_inspecao_it/)
  assert.match(app,/IT utilizada no FST/)
  assert.match(app,/itVersions\.filter\(it=>it\.status==='publicada'/)
  assert.match(app,/window\.confirm\('Trocar a IT do FST /)
