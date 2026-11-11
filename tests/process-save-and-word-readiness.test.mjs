@@ -102,7 +102,8 @@ test('completed inspections keep an auditable edit mode for every inspection sta
  assert.match(app,/onBlur=\{\(e\)=>saveDimension\(item\.id,p,seq,e\.target\.value\)\} disabled=\{!canWrite \|\| \(detail\.status==='concluida' && !allowDimensionalRectification\)\}/)
  assert.match(app,/Confirmar aprovação revisada/)
  assert.match(app,/Confirmar reprovação revisada/)
- assert.match(app,/setCompletedEditRevision\(n=>n\+1\)/)
+ assert.match(app,/setWordStatus\(null\)/)
+ assert.match(app,/reflectCompletedEdit\(\)/)
 })
 
 test('backend records before-after revisions and preserves the original completion instant',()=>{
@@ -135,8 +136,9 @@ test('Word errors and actual pending items are visible and retryable without byp
  assert.match(app,/wordStatus\?\.error\?'Falha ao consultar o laudo'/)
  assert.match(app,/wordStatus\.pending\.map\(/)
  assert.match(app,/A validação falhou/)
- assert.match(app,/if\(!wordStatus\?\.ready\)/)
- assert.match(app,/document\.getElementById\('sgq-word-pendencias'\)/)
+ assert.match(app,/if\(response.status===409\)void refreshWordStatus\(\)/)
+ assert.match(app,/wordStatus && !wordStatus.ready/)
+ assert.doesNotMatch(app,/if\(!wordStatus\?\.ready\)/)
 })
 
 test('Word retains photo evidence while allowing numbered captions when empty',()=>{
