@@ -139,15 +139,12 @@ async Task AuditCompletedInspectionEdit(HttpClient client,string token,string id
     await RestAsync(client,token,HttpMethod.Post,"audit_log","",
         new {usuario_id=actor,entidade="inspecoes",entidade_id=id,acao=action,
             dados=new {antes=before,depois=after,registrado_em=DateTimeOffset.UtcNow}},"return=minimal");
-    if(needsReview)
-        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
-            $"id=eq.{Uri.EscapeDataString(id)}",
-            new {documento_gerado_em=(DateTimeOffset?)null,revisao_obrigatoria=true,
-                revisado_em=(DateTimeOffset?)null},"return=minimal");
-    else
-        await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
-            $"id=eq.{Uri.EscapeDataString(id)}",
-            new {documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
+    // O registro no audit_log basta: retificação não abre uma aprovação extra.
+    // Invalida qualquer Word anterior, para a próxima geração refletir os ajustes.
+    await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
+        $"id=eq.{Uri.EscapeDataString(id)}",
+        new {documento_gerado_em=(DateTimeOffset?)null,revisao_obrigatoria=false},
+        "return=minimal");
 }
 
 (JsonElement? row, bool found) FirstRow(JsonElement? element)
@@ -1647,7 +1644,7 @@ app.MapPut("/api/inspecoes/{id}/quantidades", async (string id, EditInspectionDa
         if(wasConcluded)
             await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
                 $"id=eq.{Uri.EscapeDataString(id)}",
-                new {revisao_obrigatoria=true,revisado_em=(DateTimeOffset?)null,
+                new {revisao_obrigatoria=false,
                     documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
         return Results.Ok(new {data=new {ok=true,plano=new {
             lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re,
@@ -1912,7 +1909,7 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         if(wasConcluded)
             await RestAsync(client,token,HttpMethod.Patch,"inspecoes",
                 $"id=eq.{Uri.EscapeDataString(id)}",
-                new {revisao_obrigatoria=true,revisado_em=(DateTimeOffset?)null,
+                new {revisao_obrigatoria=false,
                     documento_gerado_em=(DateTimeOffset?)null},"return=minimal");
         return Results.Ok(new {data=new {ok=true,plano=new {lote=lot,codigo=plan.Code,amostra=plan.Sample,ac=plan.Ac,re=plan.Re,caixasRecebidas=totalBoxes,caixasAvaliar=totalInspect}},error=(object?)null});
     }
@@ -2556,14 +2553,7 @@ app.MapPost("/api/inspecoes/{id}/concluir", async (string id,FinishInspectionReq
         var testDone=testResults is {ValueKind:JsonValueKind.Array}?testResults.Value.GetArrayLength():0;
         if(testDone<testCount) pending.Add("Testes especiais incompletos.");
 
-        // A conclusão não deve fabricar uma "revisão obrigatória" para dados
-        // incompletos. A revisão posterior é confirmada explicitamente pelo usuário.
-        if(pending.Count>0)
-            return Results.Json(Error("Finalize os itens pendentes antes de concluir ou confirmar a revisão.",
-                string.Join(" | ",pending)),statusCode:409);
-        if(reHit && input.Resultado!="reprovado")
-            return Results.Json(Error("O limite de rejeição foi atingido. Confirme a reprovação antes de concluir."),statusCode:409);
-
+        // Pendências técnicas permanecem listadas, sem exigir revisão administrativa extra.
         await RestAsync(client,token,HttpMethod.Patch,"inspecoes",$"id=eq.{Uri.EscapeDataString(id)}",
             new {
                 status="concluida",
@@ -2571,7 +2561,7 @@ app.MapPost("/api/inspecoes/{id}/concluir", async (string id,FinishInspectionReq
                 observacoes=string.IsNullOrWhiteSpace(input.Observacoes)?null:input.Observacoes.Trim(),
                 justificativa_decisao=reHit?(string.IsNullOrWhiteSpace(input.Observacoes)?null:input.Observacoes.Trim()):null,
                 revisao_obrigatoria=false,
-                revisado_em=concluded?(DateTimeOffset?)DateTimeOffset.UtcNow:null,
+                revisado_em=(DateTimeOffset?)null,
                 concluida_em=completedAt,
                 documento_gerado_em=(DateTimeOffset?)null
             },"return=minimal");
@@ -3221,34 +3211,6 @@ app.MapPost("/api/inspecoes/{id}/fotos/{photoId}/substituir", async(
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Não foi possível substituir a foto.",e.Message),statusCode:500);}
-});
-
-// Inspeções concluídas que tiveram dados retificados e precisam de confirmação.
- // Consulta somente dados existentes; não libera o laudo nem altera aprovações.
-app.MapGet("/api/processos/{id}/revisoes", async (string id,HttpRequest request,IHttpClientFactory factory)=>
-{
-    try
-    {
-        if(!Guid.TryParse(id,out _))return Results.Json(Error("FST inválido."),statusCode:400);
-        var token=Token(request);
-        var client=factory.CreateClient("supabase");
-        await CurrentUserId(client,token);
-        var groups=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
-            $"select=id,subprocesso_codigo&processo_id=eq.{Uri.EscapeDataString(id)}");
-        var groupIds=groups is {ValueKind:JsonValueKind.Array}
-            ?groups.Value.EnumerateArray().Select(x=>x.GetProperty("id").GetString())
-                .Where(x=>!string.IsNullOrWhiteSpace(x)).ToArray()
-            :Array.Empty<string>();
-        if(groupIds.Length==0)
-            return Results.Ok(new {data=new {inspections=Array.Empty<object>()},error=(object?)null});
-        var ids=string.Join(",",groupIds);
-        var rows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=id,numero,status,resultado,observacoes,grupo_inspecao_id,grupos_inspecao(subprocesso_codigo)" +
-            $"&grupo_inspecao_id=in.({ids})&revisao_obrigatoria=is.true&excluido_em=is.null&order=criado_em.asc");
-        return Results.Ok(new {data=new{inspections=rows},error=(object?)null});
-    }
-    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
-    catch(Exception e){return Results.Json(Error("Não foi possível consultar as revisões do FST.",e.Message),statusCode:500);}
 });
 
 // Situação consolidada do Word: consulta os dados efetivamente gravados,
