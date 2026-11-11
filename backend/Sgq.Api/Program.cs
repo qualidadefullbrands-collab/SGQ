@@ -3516,9 +3516,11 @@ app.MapPost("/api/inspecoes/{id}/retencao", async (string id,RetentionRequest in
                 return Results.Json(Error("SKU ausente no estoque. Vincule o produto Omie antes de reter."),statusCode:409);
             var omie=await OmieStockProduct(client,token,productSku);
             if(!omie.Found)return Results.Json(Error(omie.Error),statusCode:422);
+            // Nomes compartilhados não provam duplicidade: o Omie confirma o SKU
+            // individualmente. Nunca reatribuir outra posição nem alterar movimentos.
             var conflict=await StockDuplicateDescription(client,token,productSku,omie.Name!);
-            if(conflict!=null)return Results.Json(Error(
-                $"Descrição duplicada nos SKUs {productSku} e {conflict}. Retenção bloqueada até revisão."),statusCode:409);
+            if(conflict!=null)app.Logger.LogInformation(
+                "Retenção SKU {Sku} validado no Omie com descrição compartilhada por {OtherSku}",productSku,conflict);
             var productName=omie.Name;
             var principalPhoto=pf && product!.Value.TryGetProperty("foto_principal_path",out var pp)&&pp.ValueKind==JsonValueKind.String?pp.GetString():null;
             var retentionPhoto=string.IsNullOrWhiteSpace(item.FotoCadastroPath)?principalPhoto:item.FotoCadastroPath;
