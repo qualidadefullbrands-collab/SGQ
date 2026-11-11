@@ -322,7 +322,7 @@ def dimensional_pendencies(label: str, inspection: dict, products: list[dict],
                 f'{missing} medições faltantes.')
     return pending
 
-async def process_word_status(client:httpx.AsyncClient, token:str, process_id:str)->dict:
+async def process_word_status(client:httpx.AsyncClient, token:str, process_id:str, group_id:str|None=None)->dict:
     """Valida integralidade no banco; status concluída isoladamente não libera Word."""
     parents=await table_rows(client,token,"processos",{
         "id":f"eq.{process_id}","select":"id,codigo,cliente,it_versao_id,excluido_em","limit":"1"})
@@ -333,6 +333,10 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
         "processo_id":f"eq.{process_id}",
         "select":"id,codigo,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,nome",
         "order":"subprocesso_codigo.asc,codigo.asc"})
+    if group_id:
+        groups=[group for group in groups if group["id"]==group_id]
+        if not groups:
+            raise HTTPException(status_code=404,detail="Entrada não pertence a este FST.")
     pending=[]
     if not required_text(parent.get("cliente")):
         pending.append("FST principal: cliente não preenchido.")
@@ -349,19 +353,22 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
         "select":"id,grupo_inspecao_id,status,resultado,it_versao_id,data_inspecao,"
                  "responsavel_id,tamanho_lote,tamanho_amostra,total_inspecionado,"
                  "total_nao_conforme,limite_rejeicao,dimensionais_finalizados,"
-                 "testes_finalizados,revisao_obrigatoria,revisado_em,observacoes",
+                 "testes_finalizados,observacoes",
         "order":"criado_em.asc"})
     by_group={}
     for item in inspections:
         by_group.setdefault(item["grupo_inspecao_id"],[]).append(item)
     ids=",".join(row["id"] for row in inspections)
-    version_id=parent.get("it_versao_id")
+    # Cada entrada possui a própria IT. O Word A+B continua consolidado,
+    # mas avalia checklist, dimensionais e testes contra a IT de cada entrada.
+    version_ids=sorted({str(r["it_versao_id"]) for r in inspections if r.get("it_versao_id")})
     checks,dims,tests=[],[],[]
-    if version_id:
+    if version_ids:
+        version_filter="in.("+",".join(version_ids)+")"
         checks,dims,tests=await __import__("asyncio").gather(
-            table_rows(client,token,"it_checklist",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}),
-            table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id,nome"}),
-            table_rows(client,token,"it_testes_especiais",{"it_versao_id":f"eq.{version_id}","ativo":"eq.true","select":"id"}))
+            table_rows(client,token,"it_checklist",{"it_versao_id":version_filter,"ativo":"eq.true","select":"id,it_versao_id"}),
+            table_rows(client,token,"it_parametros_dimensionais",{"it_versao_id":version_filter,"ativo":"eq.true","select":"id,it_versao_id,nome"}),
+            table_rows(client,token,"it_testes_especiais",{"it_versao_id":version_filter,"ativo":"eq.true","select":"id,it_versao_id"}))
     links,photos,check_results,dim_results,test_results,dim_configs=([],[],[],[],[],[])
     if ids:
         links,photos,check_results,dim_results,test_results,dim_configs=await __import__("asyncio").gather(
@@ -418,8 +425,12 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
             completed+=1
             if row.get("resultado") not in ("aprovado","reprovado"):
                 pending.append(f"{label}: resultado da inspeção não definido.")
-            if not version_id or row.get("it_versao_id")!=version_id:
-                pending.append(f"{label}: IT diferente da IT única do FST.")
+            row_version=str(row.get("it_versao_id") or "")
+            if not row_version:
+                pending.append(f"{label}: IT não selecionada para esta entrada.")
+            row_checks=[c for c in checks if str(c.get("it_versao_id"))==row_version]
+            row_dims=[d for d in dims if str(d.get("it_versao_id"))==row_version]
+            row_tests=[t for t in tests if str(t.get("it_versao_id"))==row_version]
             if not row.get("data_inspecao"):
                 pending.append(f"{label}: data da inspeção não preenchida.")
             if not row.get("responsavel_id"):
@@ -432,18 +443,18 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
                              and row.get("resultado")=="reprovado")
             if sample<=0 or (inspected<sample and not early_rejection):
                 pending.append(f"{label}: amostragem não concluída ({inspected}/{sample}).")
-            if row.get("revisao_obrigatoria") and not row.get("revisado_em"):
-                pending.append(f"{label}: revisão obrigatória ainda pendente.")
+            # Retificações ficam no audit_log e não exigem aprovação adicional
+            # para emissão do documento. Os demais critérios técnicos permanecem.
             recorded_checks={str(c["checklist_id"]) for c in check_results
                              if c.get("inspecao_id")==ident and required_text(c.get("resultado"))}
-            if any(str(c["id"]) not in recorded_checks for c in checks):
+            if any(str(c["id"]) not in recorded_checks for c in row_checks):
                 pending.append(f"{label}: verificações obrigatórias incompletas.")
             pending.extend(dimensional_pendencies(
-                label, row, child_links, dims, dim_configs, dim_results))
+                label, row, child_links, row_dims, dim_configs, dim_results))
             recorded_tests={str(t["teste_id"]) for t in test_results if
                             t.get("inspecao_id")==ident and required_text(t.get("resultado"))}
-            if tests and (not row.get("testes_finalizados")
-                          or any(str(t["id"]) not in recorded_tests for t in tests)):
+            if row_tests and (not row.get("testes_finalizados")
+                          or any(str(t["id"]) not in recorded_tests for t in row_tests)):
                 pending.append(f"{label}: testes especiais incompletos.")
             photo_rows=[p for p in photos if p.get("inspecao_id")==ident]
             if not photo_rows:
@@ -459,13 +470,13 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
 
 
 @app.get("/process-report-status/{process_id}")
-async def process_report_status(process_id:str,authorization:str|None=Header(default=None)):
+async def process_report_status(process_id:str,entrada:str|None=None,authorization:str|None=Header(default=None)):
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401,detail="Authorization Bearer obrigatório.")
     token=authorization.split(" ",1)[1].strip()
     async with httpx.AsyncClient(timeout=45.0) as client:
         await verify_user(client,token)
-        return await process_word_status(client,token,process_id)
+        return await process_word_status(client,token,process_id,entrada)
 
 
 @app.get("/generate-inspection/{inspection_id}")
@@ -497,10 +508,10 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
             raise HTTPException(status_code=409,detail="Grupo da inspeção não encontrado.")
         process=group.get("processos") or {}
         if process.get("id") and not inspection.get("excluido_em"):
-            status=await process_word_status(client,token,process["id"])
+            status=await process_word_status(client,token,process["id"],group_id)
             if not status["ready"]:
                 raise HTTPException(status_code=409,detail=
-                    "Laudo bloqueado: conclua e preencha todos os subprocessos. "+
+                    "Laudo da entrada bloqueado: conclua e preencha esta inspeção. "+
                     " | ".join(status["pending"][:12]))
 
         version=inspection.get("it_versoes") or {}
@@ -601,7 +612,7 @@ async def generate_inspection_document(inspection_id:str,nome_conjunto:str|None=
         collection_name=(nome_conjunto or "").strip() if len(distinct_skus)>1 else None
         if collection_name and len(collection_name)>100:
             raise HTTPException(status_code=422,detail="O nome do conjunto deve ter até 100 caracteres.")
-        filename=inspection_file_name(process.get("codigo"),first_product.get("sku"),
+        filename=inspection_file_name(str(process.get("codigo") or "")+("-"+str(group.get("subprocesso_codigo")) if group.get("subprocesso_codigo") else ""),first_product.get("sku"),
                                       first_product.get("nome"),collection_name=collection_name or (
                                           "Componentes" if len(distinct_skus)>1 else None))
         # Download only: document is assembled from the official IT and returned
@@ -661,15 +672,31 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
                 ("Pendentes: "+", ".join(pending)+"." if pending else ""))
         versions={row.get("it_versao_id") for row in inspections if row.get("it_versao_id")}
         parent_version=parent.get("it_versao_id")
-        if (len(versions)>1 or (parent_version and versions!={parent_version})):
-            raise HTTPException(status_code=409,detail="As ITs dos subprocessos não correspondem à IT única do FST.")
+        if not versions or any(not row.get("it_versao_id") for row in inspections):
+            raise HTTPException(status_code=409,detail="Cada entrada precisa possuir uma IT antes do laudo.")
         first=by_group[groups[0]["id"]]
         primary=await generate_inspection_document(first["id"],authorization=authorization)
         if not isinstance(primary,Response) or not getattr(primary,"body",None):
             raise HTTPException(status_code=502,detail="Falha ao montar o documento principal.")
         doc=Document(BytesIO(primary.body))
-        # Cada subprocesso usa a própria cópia preenchida do REGISTRO DE INSPEÇÃO
-        # existente na IT oficial. A introdução normativa aparece apenas uma vez.
+        # Se as entradas usam ITs diferentes, documentar a relação A/B x IT no
+        # Word único, antes das fichas preenchidas. Não inventar equivalência normativa.
+        if len(versions)>1:
+            version_rows=await table_rows(client,token,"it_versoes",{
+                "id":"in.("+",".join(versions)+")",
+                "select":"id,versao,instrucoes_trabalho(codigo)",
+            })
+            catalog={r["id"]:r for r in version_rows}
+            labels=[]
+            for group in groups:
+                child=by_group[group["id"]]
+                version=catalog.get(child.get("it_versao_id"),{})
+                code=(version.get("instrucoes_trabalho") or {}).get("codigo") or "IT não identificada"
+                labels.append(str(group.get("subprocesso_codigo") or group.get("codigo"))+
+                              ": "+code+" · v"+str(version.get("versao") or "?"))
+            p=doc.add_paragraph()
+            p.add_run("ITs utilizadas nas entradas: "+ " | ".join(labels)).bold=True
+        # Cada entrada usa sua própria ficha do REGISTRO DE INSPEÇÃO.
         for group in groups[1:]:
             child=by_group[group["id"]]
             filled=await generate_inspection_document(child["id"],authorization=authorization)
@@ -681,7 +708,7 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
         out=BytesIO()
         doc.save(out)
         version_rows=await table_rows(client,token,"it_versoes",{
-            "id":f"eq.{parent_version}",
+            "id":f"eq.{first.get('it_versao_id')}",
             "select":"id,instrucoes_trabalho(codigo)",
             "limit":"1",
         })
@@ -690,7 +717,8 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
         if not it_code:
             raise HTTPException(status_code=409,detail="Código da IT não encontrado; impossível nomear o laudo.")
         filename=consolidated_report_filename(
-            it_code,parent.get("codigo"),datetime.now(ZoneInfo("America/Sao_Paulo")).date())
+            it_code if len(versions)==1 else "ITMULTIPLAS",
+            parent.get("codigo"),datetime.now(ZoneInfo("America/Sao_Paulo")).date())
         encoded=urllib.parse.quote(filename,safe="")
         return Response(content=out.getvalue(),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
