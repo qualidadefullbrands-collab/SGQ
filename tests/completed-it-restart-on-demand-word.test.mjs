@@ -26,7 +26,7 @@ test('changing IT reopens the same inspection, archives old answers and preserve
  assert.match(api,/reiniciada=itChanged/)
  assert.match(sql,/security definer set search_path = ''/)
  assert.match(sql,/v_user uuid := auth.uid\(\)/)
- assert.match(sql,/perfil in \('administrador','gestor','inspetor'\)/)
+ assert.match(sql,/v_profile not in \('administrador','gestor','inspetor'\)/)
  assert.match(sql,/reinicio_por_troca_it/)
  assert.match(sql,/delete from public.inspecao_checklist_resultados/)
  assert.match(sql,/delete from public.inspecao_dimensionais/)
