@@ -54,7 +54,8 @@ export default function SettingsPage({userId,profile}:{userId:string;profile:{no
  useEffect(()=>{if(admin)void refresh()},[admin])
  function choose(user:User){
   setSelected(user.id);setResetPassword('');setError('');setMessage('')
-  setEdit({nome:user.profile?.nome||'',perfil:(user.profile?.perfil in roles?user.profile!.perfil:'consulta') as Role,ativo:user.profile?.ativo===true})
+  const role=user.profile?.perfil
+  setEdit({nome:user.profile?.nome||'',perfil:(role&&role in roles?role:'consulta') as Role,ativo:user.profile?.ativo===true})
  }
  async function create(e:React.FormEvent){
   e.preventDefault();if(!admin||saving)return
