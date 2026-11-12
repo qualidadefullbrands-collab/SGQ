@@ -1690,6 +1690,12 @@ export default function App() {
     setProcesses((res.data.processes??[]) as ProcessRow[])
     setInspections((res.data.inspections??[]) as InspectionRow[])
     setProcessItemLinks(res.data.itemLinks??[])
+    // Keep the offline snapshot coherent after new entries and their product links are saved.
+    if(userId && profile){
+      void saveOfflineDraft(userId,'app:bootstrap',{
+        profile,processes:res.data.processes??[],inspections:res.data.inspections??[],itemLinks:res.data.itemLinks??[]
+      }).catch(()=>undefined)
+    }
   }
 
   function openOmieSkuReview(suggestion:OmieSkuImport){
