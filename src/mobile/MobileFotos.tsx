@@ -5,7 +5,7 @@ import {readOfflineDraft,saveOfflineDraft,clearOfflineDraft,enqueueOfflineOperat
 import './MobileFotos.css'
 
 type Process={id:string;codigo:string;cliente:string|null}
-type Inspection={id:string;numero:string;status:string;grupos_inspecao?:{processo_id:string;nome:string;subprocesso_codigo?:string|null;nota_fiscal?:string|null}|null}
+type Inspection={id:string;numero:string;status:string;grupos_inspecao?:{processo_id:string;nome:string;subprocesso_codigo?:string|null;nota_fiscal?:string|null}|null;it_versoes?:{instrucoes_trabalho?:{codigo?:string|null;titulo?:string|null}|null}|null}
 type Photo={id:string;legenda:string;storage_path:string;signed_url?:string|null}
 type PhotoContext={inspecao:{id:string;status:string};photos:Photo[]}
 type Pending={id:string;file:File;preview:string;legenda:string;error?:string}
@@ -279,6 +279,7 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
     {childInspections.map(i=><button type="button" className={'sgq-mobile-process '+(i.status==='em_andamento'?'sgq-photo-started':'sgq-photo-not-started')} key={i.id} onClick={()=>selectInspection(i.id)}>
      <strong>{fst(selected?.codigo||'')}{i.grupos_inspecao?.subprocesso_codigo?'-'+i.grupos_inspecao.subprocesso_codigo:''} · {i.grupos_inspecao?.nome||'Inspeção'}</strong>
      <span>{i.status==='em_andamento'?'Iniciada':'Não iniciada'} · NF {i.grupos_inspecao?.nota_fiscal||'não informada'}</span>
+     {i.it_versoes?.instrucoes_trabalho && <span>IT {i.it_versoes.instrucoes_trabalho.codigo||'—'} · {i.it_versoes.instrucoes_trabalho.titulo||'Sem título'}</span>
      <b><Camera size={17}/> Ver fotos</b>
     </button>)}
    </>}
