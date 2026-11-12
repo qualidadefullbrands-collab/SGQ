@@ -36,3 +36,25 @@
 .sgq-inventory-done{display:inline-flex;align-items:center;gap:7px;color:#197a59;font-weight:750;font-size:12px}
 @media(max-width:680px){.sgq-inventory-start,.sgq-inventory-details{padding:12px}.sgq-inventory-kpis strong{font-size:21px}
 .sgq-inventory-create select,.sgq-inventory-create button{width:100%;max-width:none}}
+
+
+/* Conciliação de inventário: indicadores acionáveis e destaque de faltas/sobras. */
+.sgq-operational-shell .sgq-inventory-kpis{grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.sgq-operational-shell .sgq-inventory-kpis>button{display:grid;gap:4px;text-align:left;border:1px solid #d6e6ef;border-radius:11px;background:#fff;padding:13px;color:#284b62;cursor:pointer}
+.sgq-operational-shell .sgq-inventory-kpis>button:hover,.sgq-operational-shell .sgq-inventory-kpis>button.is-selected{background:#edf8fc;border-color:#68aacc}
+.sgq-operational-shell .sgq-inventory-kpis>button strong{font-size:25px;color:#226587}
+.sgq-operational-shell .sgq-inventory-kpis>button small{font-size:11px;color:#52768e}
+.sgq-operational-shell .sgq-inventory-kpis>.sgq-inventory-negative{background:#fff6f4;border-color:#f0d5ce}
+.sgq-operational-shell .sgq-inventory-kpis>.sgq-inventory-positive{background:#f3faf6;border-color:#cae8d6}
+.sgq-operational-shell .sgq-inventory-table td:is(.sgq-inventory-negative,.sgq-inventory-positive){min-width:125px}
+.sgq-operational-shell .sgq-inventory-table td.sgq-inventory-negative strong{color:#b24637}
+.sgq-operational-shell .sgq-inventory-table td.sgq-inventory-positive strong{color:#207d59}
+.sgq-operational-shell .sgq-inventory-table td.sgq-inventory-negative small,.sgq-operational-shell .sgq-inventory-table td.sgq-inventory-positive small{display:block;font-size:11px;font-weight:600}
+.sgq-operational-shell .sgq-inventory-state{display:inline-flex;padding:5px 8px;border-radius:6px;background:#f1f5f9;color:#678092;font-size:11px;font-weight:700}
+.sgq-operational-shell .sgq-inventory-state.sgq-inventory-ok{background:#e5f7ee;color:#24785b}
+.sgq-operational-shell .sgq-inventory-table tr[data-divergent="true"]{background:#fffdf8}
+.sgq-operational-shell .sgq-inventory-empty-state{display:grid;place-items:center;gap:9px;padding:27px 14px;text-align:center;color:#557287}
+.sgq-operational-shell .sgq-inventory-empty-state strong{color:#25516c}
+.sgq-operational-shell .sgq-inventory-empty-state p{font-size:12px;max-width:500px;margin:0}
+@media(max-width:1100px){.sgq-operational-shell .sgq-inventory-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:620px){.sgq-operational-shell .sgq-inventory-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.sgq-operational-shell .sgq-inventory-kpis>*{min-width:0}}
