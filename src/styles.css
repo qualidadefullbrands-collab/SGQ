@@ -2880,3 +2880,51 @@ body:has(.sgq-operational-shell){background:linear-gradient(130deg,#f5f7fb,#f0f4
 .sgq-operational-shell .sgq-stock-sku-position:focus-within{border-color:#80b9dd;box-shadow:0 0 0 3px rgba(70,154,204,.1)}
 .sgq-operational-shell .sgq-stock-sku-position :is(select,button):focus-visible{outline:2px solid #4193c9;outline-offset:2px}
 @media(max-width:720px){.sgq-operational-shell .sgq-stock-sku-verify{grid-template-columns:1fr}}
+
+
+/* 2026-11 SGQ: sizing, readability and consistent operational navigation. */
+.sgq-operational-shell .sgq-process-node-identity .sgq-process-arrival{display:block;font-size:12px;font-weight:700;color:#23758f;line-height:1.35}
+.sgq-operational-shell .sgq-subprocess-products{display:grid;gap:7px;padding-top:4px}
+.sgq-operational-shell .sgq-subprocess-product{display:grid;grid-template-columns:minmax(85px,auto) minmax(0,1fr);gap:10px;align-items:baseline;padding:7px 10px;background:#f5f9fc;border:1px solid #e0eaf1;border-radius:8px;color:#416077}
+.sgq-operational-shell .sgq-subprocess-product>b{font-size:12px;color:#185b83;word-break:break-word}
+.sgq-operational-shell .sgq-subprocess-product>span{font-size:12px;line-height:1.45;color:#39586b;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-subprocess-inspection-number{font-weight:800;color:#245b7c}
+.sgq-operational-shell .stock-drawer-backdrop{padding:clamp(0px,2vw,18px)!important;align-items:center;justify-content:center;overflow-y:auto;overscroll-behavior:contain}
+.sgq-operational-shell .stock-drawer{box-sizing:border-box;width:min(790px,calc(100vw - 30px))!important;max-width:100%!important;height:auto!important;max-height:calc(100dvh - 36px)!important;min-height:0;border-radius:16px!important;border:1px solid #d1e1eb!important;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain}
+.sgq-operational-shell .stock-drawer :is(.stock-detail-section,.stock-drawer-head,.stock-primary-info){min-width:0;box-sizing:border-box}
+.sgq-operational-shell .stock-drawer :is(input,select,textarea,img,table){max-width:100%}
+.sgq-operational-shell .stock-drawer .detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.sgq-operational-shell .equipment-summary-card{min-width:0;display:grid;gap:5px;text-align:left;border:1px solid #d7e4ec;border-radius:12px;background:#fff;padding:15px;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.sgq-operational-shell .equipment-summary-card:hover{border-color:#77b4d9;background:#f7fbff}
+.sgq-operational-shell .equipment-summary-card.is-selected{border-color:#398abe;background:#f0f8fd;box-shadow:0 0 0 2px rgba(60,153,210,.1)}
+.sgq-operational-shell .equipment-summary-card strong{font-size:27px;color:#1a5b81}
+.sgq-operational-shell .equipment-summary-card span{font-size:13px;color:#52758b}
+.sgq-operational-shell .equipment-active-filter{font-size:12px;color:#55778d;font-weight:700;padding:0 3px 9px}
+.sgq-operational-shell .equipment-row-interactive{cursor:pointer}
+.sgq-operational-shell .equipment-row-interactive:focus-visible{outline:3px solid #439dcd;outline-offset:2px}
+.sgq-operational-shell .equipment-row-interactive:hover{background:#f5fbff}
+.sgq-operational-shell .equipment-row-interactive .equipment-actions{font-size:12px;font-weight:800;color:#23779f}
+.sgq-operational-shell .equipment-history-backdrop{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}
+.sgq-operational-shell .equipment-history-backdrop > .equipment-history.panel.section-card{box-sizing:border-box;width:min(950px,calc(100vw - 32px))!important;max-width:100%!important;max-height:calc(100dvh - 32px)!important;min-height:0;margin:auto!important;overflow-y:auto!important;overflow-x:hidden;overscroll-behavior:contain;border-radius:16px!important}
+.sgq-operational-shell .equipment-editor-inline{width:100%;min-width:0}
+.sgq-operational-shell .equipment-editor-inner.sample-detail{width:100%;max-width:100%;border:0;box-shadow:none;margin:0;padding:12px 0 0;background:transparent;overflow:visible}
+.sgq-operational-shell .equipment-editor-inner .form-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.sgq-operational-shell .equipment-history .section-title:first-child{position:sticky;top:0;z-index:4;background:#fff;padding:8px 0 14px;border-bottom:1px solid #e2edf4}
+.sgq-operational-shell .sgq-stock-sku-conflicts{border:1px solid #d5e4ed;border-left:4px solid #2c86b3;border-radius:14px;padding:18px;background:#fff;box-shadow:0 5px 16px rgba(30,67,97,.04)}
+.sgq-operational-shell .sgq-stock-sku-issue{border:1px solid #dbe8f1;border-radius:13px;padding:16px;gap:14px;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-stock-sku-position{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;align-items:center;min-width:0}
+.sgq-operational-shell .sgq-stock-sku-position-meta{overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-stock-sku-position label{width:100%}
+.sgq-operational-shell .sgq-stock-sku-position select{max-width:100%;text-overflow:ellipsis}
+.sgq-operational-shell .sgq-stock-sku-verify-item{border:1px solid #d1e3ed;border-radius:12px;padding:14px;background:#f8fbfe}
+.sgq-operational-shell :is(.sgq-screen-inspecoes,.sgq-screen-estoque,.equipment-page,.audit-workspace){max-width:none;min-width:0}
+@media(max-width:720px){
+ .sgq-operational-shell .sgq-subprocess-product{grid-template-columns:1fr;gap:3px}
+ .sgq-operational-shell .stock-drawer-backdrop{padding:0!important}
+ .sgq-operational-shell .stock-drawer{width:100vw!important;max-height:100dvh!important;height:100dvh!important;border:0!important;border-radius:0!important}
+ .sgq-operational-shell .stock-drawer .detail-grid{grid-template-columns:1fr}
+ .sgq-operational-shell .equipment-history-backdrop{padding:0}
+ .sgq-operational-shell .equipment-history-backdrop > .equipment-history.panel.section-card{width:100vw!important;max-height:100dvh!important;border-radius:0!important;padding:14px!important}
+ .sgq-operational-shell .equipment-editor-inner .form-grid{grid-template-columns:1fr}
+ .sgq-operational-shell .sgq-stock-sku-position{grid-template-columns:1fr}
+}
