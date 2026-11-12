@@ -76,6 +76,7 @@ test('Kanban grouping remains linear for a fixed number of status columns',()=>{
  assert.match(kanban,/new Map\(processes\.map\(/)
  assert.match(kanban,/const visible=useMemo\(/)
  assert.match(kanban,/const base=columns\.map\(/)
- assert.match(kanban,/items:visible\.filter\(i=>i\.status===c\.status\)/)
+ assert.match(kanban,/items:visible\.filter\(i=>i\.status===c\.status/)
+ assert.match(kanban,/completedSearch/)
  assert.doesNotMatch(kanban,/processes\.map\([^)]*inspections\.filter/)
 })
