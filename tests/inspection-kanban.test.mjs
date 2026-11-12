@@ -33,16 +33,16 @@ test('Kanban preserves inspection, process and record-management actions',()=>{
  assert.match(app,/onDeleteInspection=\{id=>\{const item=inspections\.find/)
  assert.match(app,/onDeleteProcess=\{id=>\{const process=processes\.find/)
 })
-test('search covers FST client and invoice, and no processes are hidden without inspection',()=>{
- assert.match(board,/const \[query,setQuery\]=useState\(''\)/)
- assert.match(board,/type="search"/)
+test('processos usam busca global e mantêm filtros por FST, cliente e NF',()=>{
+ assert.match(app,/id="sgq-global-search"/)
+ assert.match(board,/const search=normalized\(externalQuery/)
+ assert.doesNotMatch(board,/className="sgq-kanban-search"/)
  assert.match(board,/normalized\(\[/)
  assert.match(board,/process\?\.codigo/)
  assert.match(board,/process\?\.cliente/)
  assert.match(board,/process\?\.nota_fiscal/)
  assert.match(board,/activeProcessIds/)
  assert.match(board,/Processos sem inspeção/)
- assert.match(board,/Nenhum resultado para/)
 })
 test('Kanban has purposeful tone-based color system and usable responsive layout',()=>{
  for(const tone of ['queued','active','done'])assert.match(css,new RegExp('tone-'+tone))
