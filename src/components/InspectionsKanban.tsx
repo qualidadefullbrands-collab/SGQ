@@ -92,7 +92,7 @@ function InspectionMenu({inspection,process,canDelete,deletingProcessId,onReuseP
 }){
   if(!process&&!canDelete)return null
   return <details className="sgq-kanban-actions">
-    <summary title="Ações" aria-label={'Ações da inspeção '+inspection.numero}><MoreHorizontal size={18}/></summary>
+    <summary title="Ações" aria-label={'Ações da inspeção '+(process?((String(process.codigo).toUpperCase().startsWith('FST')?'':'FST')+process.codigo+(inspection.grupos_inspecao?.subprocesso_codigo?'-'+inspection.grupos_inspecao.subprocesso_codigo:'')):'selecionada')}><MoreHorizontal size={18}/></summary>
     <div className="sgq-kanban-actions-menu">
       {process&&<button type="button" onClick={()=>onReuseProcess(process.id)}><Copy size={15}/> Nova neste processo</button>}
       {process&&<button type="button" onClick={()=>onEditProcess(process.id)}><Edit3 size={15}/> Editar processo</button>}
@@ -280,7 +280,7 @@ export default function InspectionsKanban({
             })}
             {!entry.subprocesses.length&&<div className="sgq-process-empty">
               Nenhum subprocesso cadastrado.
-              <button type="button" onClick={()=>onReuseProcess(process.id)}><Plus size={15}/> Adicionar entrada A</button>
+              <button type="button" onClick={()=>onReuseProcess(process.id)}><Plus size={15}/> Adicionar {formatFst(process.codigo)}-A</button>
             </div>}
           </div>}
         </article>
