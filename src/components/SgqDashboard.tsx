@@ -13,6 +13,8 @@ type Props = {
   inspections: DashboardInspection[]
   processCount: number
   stockCount: number
+  processes?: Array<{id:string;codigo:string;cliente:string|null;chegada_cd?:string|null}>
+  stockPositions?: Array<{id:string;sku:string|null;descricao:string|null;saldo:number;endereco:string|null}>
   searchQuery: string
   onSearchChange: (value: string) => void
   onNewInspection: () => void
@@ -32,10 +34,11 @@ function formatCount(value: number): string {
 }
 
 export default function SgqDashboard({
-  inspections, processCount, stockCount, searchQuery, onSearchChange,
+  inspections, processCount, stockCount, processes=[], stockPositions=[], searchQuery, onSearchChange,
   onNewInspection, onInsights, onProcesses, onStock, onAllInspections, children,
 }: Props) {
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [panelSection,setPanelSection]=useState<'inspecoes'|'processos'|'estoque'>('inspecoes')
   const [showHistory, setShowHistory] = useState(false)
   const [statusFilter, setStatusFilter] = useState<'all' | 'aberta' | 'em_andamento' | 'concluida'>('all')
   const metrics = useMemo(() => {
@@ -98,22 +101,22 @@ export default function SgqDashboard({
     </header>
 
     <div className="sgq-dashboard-kpis" aria-label="Indicadores atuais">
-      <button type="button" className="sgq-kpi-card" onClick={onProcesses} aria-label={formatCount(processCount)+' processos. Ver processos'}>
+      <button type="button" className={'sgq-kpi-card '+(panelSection==='processos'?'is-focused':'')} onClick={()=>setPanelSection('processos')} aria-label={formatCount(processCount)+' processos. Mostrar processos aqui'}>
         <span className="sgq-kpi-icon sgq-kpi-blue"><Layers3 size={29}/></span>
         <span className="sgq-kpi-copy"><strong>{formatCount(processCount)}</strong><span>Processos</span></span>
         <span className="sgq-kpi-hint">Ver todos <ArrowRight size={14}/></span>
       </button>
-      <button type="button" className="sgq-kpi-card is-focused" onClick={() => {setStatusFilter('all');document.getElementById('sgq-dashboard-inspections')?.scrollIntoView({behavior:'smooth',block:'start'})}} aria-label={formatCount(metrics.count)+' inspeções. Ir para o quadro'}>
+      <button type="button" className={'sgq-kpi-card '+(panelSection==='inspecoes'&&statusFilter==='all'?'is-focused':'')} onClick={() => {setPanelSection('inspecoes');setStatusFilter('all')}} aria-label={formatCount(metrics.count)+' inspeções. Ir para o quadro'}>
         <span className="sgq-kpi-icon sgq-kpi-sky"><ClipboardCheck size={29}/></span>
         <span className="sgq-kpi-copy"><strong>{formatCount(metrics.count)}</strong><span>Inspeções</span></span>
         <span className="sgq-kpi-hint">Ver quadro <ArrowRight size={14}/></span>
       </button>
-      <button type="button" className="sgq-kpi-card" onClick={onStock} aria-label={formatCount(stockCount)+' amostras em estoque. Abrir estoque'}>
+      <button type="button" className={'sgq-kpi-card '+(panelSection==='estoque'?'is-focused':'')} onClick={()=>setPanelSection('estoque')} aria-label={formatCount(stockCount)+' posições de estoque. Mostrar estoque aqui'}>
         <span className="sgq-kpi-icon sgq-kpi-slate"><Package size={29}/></span>
         <span className="sgq-kpi-copy"><strong>{formatCount(stockCount)}</strong><span>Estoque</span></span>
         <span className="sgq-kpi-hint">Ver estoque <ArrowRight size={14}/></span>
       </button>
-      <button type="button" className="sgq-kpi-card" onClick={() => {setStatusFilter('concluida');document.getElementById('sgq-dashboard-inspections')?.scrollIntoView({behavior:'smooth',block:'start'})}} aria-label={formatCount(metrics.done)+' inspeções concluídas'}>
+      <button type="button" className={'sgq-kpi-card '+(panelSection==='inspecoes'&&statusFilter==='concluida'?'is-focused':'')} onClick={() => {setPanelSection('inspecoes');setStatusFilter('concluida')}} aria-label={formatCount(metrics.done)+' inspeções concluídas'}>
         <span className="sgq-kpi-icon sgq-kpi-green"><CheckCircle2 size={29}/></span>
         <span className="sgq-kpi-copy"><strong>{formatCount(metrics.done)}</strong><span>Concluídas</span></span>
         <span className="sgq-kpi-hint">Total atual <CheckCircle2 size={14}/></span>
@@ -159,19 +162,19 @@ export default function SgqDashboard({
       </div>
     </section>
 
-    <section id="sgq-dashboard-inspections" className="sgq-dashboard-inspections" aria-label="Quadro de inspeções">
+    <section id="sgq-dashboard-inspections" className="sgq-dashboard-inspections" aria-label="Resumo interativo do SGQ">
       <div className="sgq-dashboard-board-actions">
         <div className="sgq-dashboard-title">
-          <h2>Inspeções</h2><span>{formatCount(metrics.count)}</span>
+          <h2>{panelSection==='processos'?'Processos':panelSection==='estoque'?'Estoque':'Inspeções'}</h2><span>{panelSection==='processos'?formatCount(processCount):panelSection==='estoque'?formatCount(stockCount):formatCount(metrics.count)}</span>
         </div>
         <div className="sgq-dashboard-board-controls">
-          <button className="secondary sgq-dashboard-filter-button" type="button" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(value => !value)}>
+          {panelSection==='inspecoes'&&<button className="secondary sgq-dashboard-filter-button" type="button" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(value => !value)}>
             <Filter size={17}/> Filtrar {statusFilter!=='all'?'· '+showOnly:''}
-          </button>
-          <button className="secondary" type="button" onClick={onAllInspections}>Ver todas <ArrowRight size={17}/></button>
+          </button>}
+          <button className="secondary" type="button" onClick={panelSection==='processos'?onProcesses:panelSection==='estoque'?onStock:onAllInspections}>Abrir tela completa <ArrowRight size={17}/></button>
         </div>
       </div>
-      {filtersOpen && <div className="sgq-dashboard-filter-panel" aria-label="Filtros do painel">
+      {filtersOpen && panelSection==='inspecoes' && <div className="sgq-dashboard-filter-panel" aria-label="Filtros do painel">
         <label>Buscar no quadro
           <input type="search" value={searchQuery} onChange={e=>onSearchChange(e.target.value)} placeholder="FST, cliente, NF ou produto"/>
         </label>
@@ -185,15 +188,31 @@ export default function SgqDashboard({
         </label>
         <button type="button" className="secondary" onClick={()=>{onSearchChange('');setStatusFilter('all')}}><X size={16}/> Limpar</button>
       </div>}
-      <div data-status-filter={statusFilter} className="sgq-dashboard-board">
+      {panelSection==='inspecoes'&&<div data-status-filter={statusFilter} className="sgq-dashboard-board">
         {children}
-      </div>
-      {showHistory && <div className="sgq-dashboard-history">
+      </div>}
+      {panelSection==='processos'&&<div className="sgq-dashboard-inline-grid" aria-label="Prévia de processos">
+        {processes.slice(0,12).map(p=><article className="sgq-dashboard-inline-card" key={p.id}>
+          <b>{String(p.codigo).toUpperCase().startsWith('FST')?p.codigo:'FST'+p.codigo}</b>
+          <span>{p.cliente||'Cliente não informado'}</span>
+          <small>Chegada ao CD: {p.chegada_cd?new Date(p.chegada_cd+'T12:00:00').toLocaleDateString('pt-BR'):'não registrada'}</small>
+        </article>)}
+        {!processes.length&&<p>Não há processos cadastrados.</p>}
+      </div>}
+      {panelSection==='estoque'&&<div className="sgq-dashboard-inline-grid" aria-label="Prévia do estoque">
+        {stockPositions.slice(0,12).map(item=><article className="sgq-dashboard-inline-card" key={item.id}>
+          <b>{item.sku||'SKU não informado'}</b>
+          <span>{item.descricao||'Produto sem descrição'}</span>
+          <small>Saldo: {Number(item.saldo||0).toLocaleString('pt-BR')} · {item.endereco||'Sem endereço'}</small>
+        </article>)}
+        {!stockPositions.length&&<p>Não há amostras no estoque.</p>}
+      </div>}
+      {panelSection==='inspecoes'&&showHistory && <div className="sgq-dashboard-history">
         <p>As inspeções são exibidas nas três colunas conforme o status atual. Para consultar processos sem inspeção, abra <strong>Processos</strong>.</p>
       </div>}
-      <button type="button" className="sgq-dashboard-board-info" onClick={()=>setShowHistory(v=>!v)} aria-expanded={showHistory}>
+      {panelSection==='inspecoes'&&<button type="button" className="sgq-dashboard-board-info" onClick={()=>setShowHistory(v=>!v)} aria-expanded={showHistory}>
         {showHistory?'Ocultar orientações':'Como funciona o quadro?'}
-      </button>
+      </button>}
     </section>
   </section>
 }
