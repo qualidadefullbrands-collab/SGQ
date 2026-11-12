@@ -89,6 +89,8 @@ export default function InventoryPanel({samples,canWrite,canApprove,onRefreshSto
  const items=detail?.itens||[]
  const done=items.filter(i=>i.quantidade_contada!==null).length
  const differences=items.filter(i=>i.quantidade_contada!==null&&Number(i.quantidade_contada)!==Number(i.saldo_sistema))
+ const missing= differences.filter(i=>Number(i.quantidade_contada)<Number(i.saldo_sistema)).length
+ const excess= differences.filter(i=>Number(i.quantidade_contada)>Number(i.saldo_sistema)).length
  const visible=items.filter(i=>(!onlyDifferences||i.quantidade_contada!==null&&Number(i.quantidade_contada)!==Number(i.saldo_sistema)) &&
    [i.sku,i.descricao,i.endereco].join(' ').toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR')))
  return <div className="sgq-inventory">
@@ -121,10 +123,16 @@ export default function InventoryPanel({samples,canWrite,canApprove,onRefreshSto
       </button>
       <div><h2>{detail.inventario.codigo}</h2><small>{detail.inventario.endereco||'Todos os endereços'} · {detail.inventario.status}</small></div>
     </div>
-    <div className="sgq-inventory-kpis">
+    <div className="sgq-inventory-kpis" aria-label="Resumo do inventário">
       <div><span>Itens</span><strong>{items.length}</strong></div>
       <div><span>Contados</span><strong>{done}/{items.length}</strong></div>
-      <div><span>Divergências</span><strong>{differences.length}</strong></div>
+      <button type="button" className={onlyDifferences?'is-selected':''} aria-pressed={onlyDifferences}
+        onClick={()=>setOnlyDifferences(old=>!old)} title="Filtrar posições com divergência">
+        <span>Divergências</span><strong>{differences.length}</strong>
+        <small>{onlyDifferences?'Exibindo divergências':'Clique para filtrar'}</small>
+      </button>
+      <div className="sgq-inventory-negative"><span>Faltas</span><strong>{missing}</strong></div>
+      <div className="sgq-inventory-positive"><span>Sobras</span><strong>{excess}</strong></div>
     </div>
     <div className="sgq-inventory-toolbar">
       <label><Search size={16}/><input aria-label="Buscar inventário" placeholder="Buscar SKU ou endereço"
@@ -152,13 +160,20 @@ export default function InventoryPanel({samples,canWrite,canApprove,onRefreshSto
             item.quantidade_contada===null?'—':fmt(Number(item.quantidade_contada))}
             {savingId===item.amostra_id&&<small>Salvando…</small>}
           </td>
-          <td className={difference===null?'':difference===0?'sgq-inventory-ok':'sgq-inventory-variance'}>
-            {difference===null?'—':(difference>0?'+':'')+fmt(difference)}
+          <td className={difference===null?'sgq-inventory-pending':difference===0?'sgq-inventory-ok':difference<0?'sgq-inventory-negative':'sgq-inventory-positive'}>
+            {difference===null?<span className="sgq-inventory-state">Aguardando contagem</span>:
+              difference===0?<span className="sgq-inventory-state sgq-inventory-ok">Conferido</span>:
+              <><strong>{(difference>0?'+':'')+fmt(difference)}</strong><small>{difference<0?'Falta no estoque':'Sobra no estoque'}</small></>}
           </td>
         </tr>
       })}</tbody>
     </table></div>
-    {!visible.length&&<p>Nenhum item para os filtros selecionados.</p>}
+    {!visible.length&&<div className="sgq-inventory-empty-state">
+      <CheckCircle2 size={22}/>
+      <strong>{onlyDifferences&&differences.length===0?'Nenhuma divergência identificada':'Nenhum item para esses filtros'}</strong>
+      <p>{onlyDifferences&&differences.length===0?'As posições já contadas estão conciliadas com o saldo do sistema.':'Experimente limpar a busca ou desativar o filtro de divergências.'}</p>
+      {(onlyDifferences||query)&&<button type="button" className="secondary small" onClick={()=>{setOnlyDifferences(false);setQuery('')}}>Limpar filtros</button>}
+    </div>}
   </section>}
  </div>
 }
