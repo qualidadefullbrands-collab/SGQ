@@ -3374,7 +3374,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           processCount={processes.length}
           stockCount={samples.length}
           processes={processes}
-          stockPositions={samples}
+          stockPositions={samples.map(item=>({id:item.id,sku:item.sku||null,descricao:item.descricao||null,saldo:Number(item.saldo),endereco:item.endereco||null}))}
           searchQuery={dashboardSearch}
           onSearchChange={setDashboardSearch}
           onNewInspection={()=>{resetNewInspection();setTab('nova')}}
