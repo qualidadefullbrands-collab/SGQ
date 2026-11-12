@@ -28,6 +28,7 @@ type Inspection={
     chegada_cd?:string|null
     processos?:{codigo:string;cliente:string|null;nota_fiscal?:string|null}|null
   }|null
+  it_versoes?:{versao?:string|null;instrucoes_trabalho?:{codigo?:string|null;titulo?:string|null}|null}|null
 }
 type Props={
   inspections:Inspection[]
@@ -39,6 +40,8 @@ type Props={
   onMove?:(id:string,target:'aberta'|'em_andamento')=>void
   mode?:'page'|'panel'
   initialView?:'processos'|'kanban'
+  initialArchiveOnly?:boolean
+  onRefreshProducts?:()=>void
   externalQuery?:string
   focusProcessId?:string|null
   onViewAll?:()=>void
@@ -104,13 +107,15 @@ function InspectionMenu({inspection,process,canDelete,deletingProcessId,onReuseP
 
 export default function InspectionsKanban({
   inspections,processes,canDelete,deletingProcessId,canMove=false,movingInspectionId=null,onMove,
-  mode='page',initialView='processos',externalQuery,focusProcessId=null,onViewAll,onOpen,onCreate,onReuseProcess,onEditProcess,
+  mode='page',initialView='processos',initialArchiveOnly=false,onRefreshProducts,externalQuery,focusProcessId=null,onViewAll,onOpen,onCreate,onReuseProcess,onEditProcess,
   onDeleteProcess,onDeleteInspection,formatFst,itemLinks=[]
 }:Props){
   const [query]=useState('')
   const [view,setView]=useState<'processos'|'kanban'>(initialView)
   const [expandedProcessId,setExpandedProcessId]=useState<string|null>(null)
   const [shownByLane,setShownByLane]=useState<Record<string,number>>({})
+  const [archiveOnly,setArchiveOnly]=useState(initialArchiveOnly)
+  const [completedSearch,setCompletedSearch]=useState('')
   const [draggingId,setDraggingId]=useState<string|null>(null)
   const [overLane,setOverLane]=useState<string|null>(null)
   const pageSize=mode==='panel'?8:24
@@ -146,10 +151,10 @@ export default function InspectionsKanban({
     })
   },[inspections,processById,search])
   const columnsToShow=useMemo(()=>{
-    const base=columns.map(c=>({...c,items:visible.filter(i=>i.status===c.status)}))
+    const base=columns.map(c=>({...c,items:visible.filter(i=>i.status===c.status && (c.status!=='concluida'||!completedSearch||normalized([i.numero,i.grupos_inspecao?.nome,i.grupos_inspecao?.subprocesso_codigo,processById.get(i.grupos_inspecao?.processo_id||'')?.codigo,processById.get(i.grupos_inspecao?.processo_id||'')?.cliente,i.it_versoes?.instrucoes_trabalho?.titulo].join(' ')).includes(normalized(completedSearch))))}))
     const others=visible.filter(i=>!columns.some(c=>c.status===i.status))
     return others.length?[...base,{status:'other',label:'Outras',tone:'other',items:others}]:base
-  },[visible])
+  },[visible,completedSearch,processById])
   const processTree=useMemo(()=>{
     const active=inspections.filter(item=>item.status!=='cancelada')
     return processes.map(process=>{
@@ -186,6 +191,7 @@ export default function InspectionsKanban({
   const emptyProcesses=processes.filter(p=>!activeProcessIds.has(p.id)&&
     (!search||normalized([p.codigo,p.cliente,p.nota_fiscal].join(' ')).includes(search)))
   const totalMatches=visible.length+emptyProcesses.length
+  const completedCount=visible.filter(item=>item.status==='concluida').length
   const canMoveCard=(item:Inspection)=>Boolean(canMove&&onMove&&!movingInspectionId&&
     (item.status==='aberta'||item.status==='em_andamento'))
   const moveCard=(id:string,target:'aberta'|'em_andamento')=>{
@@ -209,6 +215,11 @@ export default function InspectionsKanban({
       </div>}
     </header>
 
+    {mode==='page'&&view==='kanban'&&<div className="sgq-kanban-archive-controls">
+      <div><strong>{archiveOnly?'Histórico de inspeções concluídas':'Quadro operacional'}</strong><span>{completedCount.toLocaleString('pt-BR')} concluída(s) no histórico</span></div>
+      {archiveOnly&&<input type="search" aria-label="Buscar no histórico" placeholder="Buscar FST, cliente, IT ou inspeção" value={completedSearch} onChange={e=>{setCompletedSearch(e.target.value);setShownByLane({})}}/>}
+      <button type="button" className="secondary small" onClick={()=>{setArchiveOnly(value=>!value);setCompletedSearch('');setShownByLane({})}}>{archiveOnly?'Voltar ao quadro':'Ver histórico de concluídas'}</button>
+    </div>}
     {mode==='page'&&view==='processos'&&<section className="sgq-process-tree" aria-label="Processos e subprocessos">
       {processTree.map((entry,index)=>{
         const process=entry.process
@@ -258,7 +269,7 @@ export default function InspectionsKanban({
                     <div className="sgq-subprocess-products">
                       {(linkedItemsByGroup.get(sub.key)||[]).length
                         ?(linkedItemsByGroup.get(sub.key)||[]).map((product,i)=><span key={product.sku+'-'+i} className="sgq-subprocess-product"><b>{product.sku||'SKU não informado'}</b><span>{product.descricao||'Descrição não informada'}</span></span>)
-                        :<span>Produtos ainda não vinculados à entrada.</span>}
+                        :<span className="sgq-product-unavailable">Produtos indisponíveis nesta consulta. {onRefreshProducts&&<button className="secondary small" type="button" onClick={onRefreshProducts}>Atualizar produtos</button>}</span>}
                     </div>
                   </div>
                   <span className="sgq-subprocess-invoice">{sub.invoice?'NF '+sub.invoice:'NF não informada'}</span>
@@ -268,6 +279,7 @@ export default function InspectionsKanban({
                 </div>
                 {sub.items.map(item=><div className="sgq-subprocess-inspection" key={item.id}>
                   <span className="sgq-subprocess-inspection-number">{processLabel}{sub.letter?'-'+sub.letter:''}</span>
+                  {item.it_versoes?.instrucoes_trabalho&&<span title="Instrução técnica">{item.it_versoes.instrucoes_trabalho.codigo} · {item.it_versoes.instrucoes_trabalho.titulo}</span>}
                   <span>{item.status==='concluida'?
                     (item.resultado==='aprovado'?'Aprovado':item.resultado==='reprovado'?'Reprovado':'Concluído'):
                     item.status==='em_andamento'?'Inspeção em andamento':'Inspeção aberta'}</span>
@@ -289,8 +301,8 @@ export default function InspectionsKanban({
         {search?'Nenhum processo encontrado para “'+query+'”.':'Nenhum processo ativo cadastrado.'}
       </div>}
     </section>}
-    {(mode==='panel'||view==='kanban')&&<div className="sgq-kanban-board" aria-label="Quadro Kanban de inspeções">
-      {columnsToShow.map(column=><section id={'sgq-kanban-lane-'+column.status} className={'sgq-kanban-lane tone-'+column.tone}
+    {(mode==='panel'||view==='kanban')&&<div className={'sgq-kanban-board '+(mode==='page'?(archiveOnly?'is-archive-only':'is-operational-only'):'')} aria-label="Quadro Kanban de inspeções">
+      {columnsToShow.filter(column=>mode==='panel'||(archiveOnly?column.status==='concluida':column.status!=='concluida')).map(column=><section id={'sgq-kanban-lane-'+column.status} className={'sgq-kanban-lane tone-'+column.tone}
         key={column.status} aria-label={column.label}
         data-drop-active={overLane===column.status}
         onDragOver={e=>{
@@ -358,6 +370,7 @@ export default function InspectionsKanban({
               </div>
               <h3 title={client||'Cliente não informado'}>{client||'Cliente não informado'}</h3>
               {group?.nome&&<p className="sgq-kanban-group" title={group.nome}>{group.nome}</p>}
+              {item.it_versoes?.instrucoes_trabalho&&<p className="sgq-kanban-group sgq-kanban-it" title={item.it_versoes.instrucoes_trabalho.titulo||''}>{item.it_versoes.instrucoes_trabalho.codigo} · {item.it_versoes.instrucoes_trabalho.titulo||'Sem título'}</p>}
               {group?.subprocesso_codigo&&<p className="sgq-kanban-group">{group.nota_fiscal?'NF '+group.nota_fiscal:'NF não informada'}</p>}
               {(active||done)&&target>0&&<div className="sgq-kanban-progress">
                 <div className="sgq-kanban-progress-label"><span>Amostra</span><strong>{formatQuantity(inspected)} / {formatQuantity(target)}</strong></div>

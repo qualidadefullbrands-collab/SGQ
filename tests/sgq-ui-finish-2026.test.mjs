@@ -20,14 +20,17 @@ test('existing subprocess identities use FST-A/B and show CD arrival next to FST
  assert.match(processesCss,/sgq-subprocess-product\{\s*display:flex;flex-direction:column/)
  assert.doesNotMatch(processes,/> Editar FST</)
  assert.doesNotMatch(processes,/> Adicionar entrada A</)
- assert.doesNotMatch(processes,/<input[^>]*type="search"/)
+ assert.match(processes,/aria-label="Buscar no histórico"/)
 })
 
-test('dashboard keeps Kanban, processes and stock visible together',()=>{
+test('dashboard previews remain available, while KPI cards navigate to their dedicated screens',()=>{
  assert.match(dashboard,/<section id="sgq-dashboard-inspections"/)
  assert.match(dashboard,/<section id="sgq-dashboard-process-preview"/)
  assert.match(dashboard,/<section id="sgq-dashboard-stock-preview"/)
- assert.match(dashboard,/scrollIntoView\(\{behavior:'smooth'/)
+ assert.match(dashboard,/onProcesses\(\)/)
+ assert.match(dashboard,/onStock\(\)/)
+ assert.match(dashboard,/onCompletedInspections\(\)/)
+ assert.doesNotMatch(dashboard,/scrollIntoView/)
  assert.doesNotMatch(dashboard,/\{panelSection==='processos'&&<div/)
  assert.doesNotMatch(dashboard,/\{panelSection==='estoque'&&<div/)
 })

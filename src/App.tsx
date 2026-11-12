@@ -18,6 +18,7 @@ const ItEditorDemo=lazy(()=>import('./its/ItEditorDemo'))
 const MobileFotos=lazy(()=>import('./mobile/MobileFotos'))
 const InsightsPage=lazy(()=>import('./insights/InsightsPage'))
 const SettingsPage=lazy(()=>import('./config/SettingsPage'))
+const InspectionModelsPage=lazy(()=>import('./its/InspectionModelsPage'))
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
 type ItVersion = {
@@ -593,9 +594,10 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [tab, setTab] = useState<'painel' | 'insights' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile' | 'quadro' | 'configuracoes'>(()=>window.matchMedia('(max-width: 768px)').matches || new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'painel')
+  const [tab, setTab] = useState<'painel' | 'insights' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile' | 'quadro' | 'modelos' | 'configuracoes'>(()=>window.matchMedia('(max-width: 768px)').matches || new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'painel')
   const [itDemoOpen,setItDemoOpen]=useState(false)
   const [dashboardSearch,setDashboardSearch]=useState('')
+  const [boardArchiveOnly,setBoardArchiveOnly]=useState(false)
   const [popupMessage,setPopupMessage]=useState('')
   const [aiConclusionBusy,setAiConclusionBusy]=useState(false)
   const [aiConclusionError,setAiConclusionError]=useState('')
@@ -1688,6 +1690,12 @@ export default function App() {
     setProcesses((res.data.processes??[]) as ProcessRow[])
     setInspections((res.data.inspections??[]) as InspectionRow[])
     setProcessItemLinks(res.data.itemLinks??[])
+    // Keep the offline snapshot coherent after new entries and their product links are saved.
+    if(userId && profile){
+      void saveOfflineDraft(userId,'app:bootstrap',{
+        profile,processes:res.data.processes??[],inspections:res.data.inspections??[],itemLinks:res.data.itemLinks??[]
+      }).catch(()=>undefined)
+    }
   }
 
   function openOmieSkuReview(suggestion:OmieSkuImport){
@@ -3398,12 +3406,13 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <div className="sgq-side-caption">OPERAÇÃO</div>
         <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={19}/> Painel</button>
         <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
-        <button className={tab==='quadro'?'selected':''} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Inspeções</button>
+        <button className={tab==='quadro'?'selected':''} onClick={()=>{setBoardArchiveOnly(false);setTab('quadro')}}><CheckCircle2 size={19}/> Inspeções</button>
         <button className={tab==='estoque'?'selected':''} onClick={()=>setTab('estoque')}><Boxes size={19}/> Estoque</button>
         <button onClick={()=>setTab('fotos-mobile')}><Camera size={19}/> Modo Fotos</button>
         <button className={tab==='auditorias'?'selected':''} onClick={()=>{setTab('auditorias');setError('')}}><Warehouse size={19}/> Inspeções Armazém</button>
         <div className="sgq-side-caption">QUALIDADE</div>
         <button className={tab==='its'?'selected':''} onClick={()=>setTab('its')}><FileText size={19}/> Instruções técnicas</button>
+        <button className={tab==='modelos'?'selected':''} onClick={()=>setTab('modelos')}><ClipboardCheck size={19}/> Modelos de inspeção</button>
         <button className={tab==='equipamentos'?'selected':''} onClick={()=>{setTab('equipamentos');void refreshEquipments()}}><Wrench size={19}/> Equipamentos</button>
         <div className="sgq-side-caption">ADMINISTRAÇÃO</div>
         <button className={tab==='configuracoes'?'selected':''} onClick={()=>{setError('');setTab('configuracoes')}}><Settings2 size={19}/> Configurações</button>
@@ -3417,7 +3426,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <strong>{({
             painel:'Painel',insights:'Insights',inspecoes:'Processos',quadro:'Inspeções',nova:'Nova inspeção',
             execucao:'Execução da inspeção',estoque:'Estoque',
-            auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos',configuracoes:'Configurações',
+            auditorias:'Inspeções Armazém',its:'Instruções técnicas',modelos:'Modelos de inspeção',equipamentos:'Equipamentos',configuracoes:'Configurações',
           } as Record<typeof tab,string>)[tab]}</strong>
         </div>
         <label className="sgq-topbar-search" htmlFor="sgq-global-search">
@@ -3470,6 +3479,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <SettingsPage userId={userId||''} profile={{nome:profile.nome||'Usuário',perfil:profile.perfil}}/>
       </Suspense>}
 
+      {tab==='modelos' && <Suspense fallback={<div className="center-screen">Carregando modelos de inspeção…</div>}>
+        <InspectionModelsPage canManage={!!canManageIts} />
+      </Suspense>}
+
       {tab==='auditorias' && (
         <section className="workspace audit-workspace" aria-label="Inspeções Armazém">
           <Suspense fallback={<div className="audit-center">Carregando inspeções do armazém…</div>}>
@@ -3491,7 +3504,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           onInsights={()=>setTab('insights')}
           onProcesses={()=>{setFocusedProcessId(null);setTab('inspecoes')}}
           onStock={()=>setTab('estoque')}
-          onAllInspections={()=>setTab('quadro')}
+          onAllInspections={()=>{setBoardArchiveOnly(false);setTab('quadro')}}
+          onCompletedInspections={()=>{setBoardArchiveOnly(true);setTab('quadro')}}
         >
           <InspectionsKanban
             mode="panel"
@@ -3499,13 +3513,14 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             inspections={inspections}
             processes={processes}
             itemLinks={processItemLinks}
+            onRefreshProducts={()=>void refreshLists()}
             canDelete={!!canDelete}
             canMove={!!canWrite}
             movingInspectionId={kanbanMovingId}
             onMove={(id,target)=>void moveInspectionOnBoard(id,target)}
             deletingProcessId={deletingProcessId}
             formatFst={formatFst}
-            onViewAll={()=>setTab('quadro')}
+            onViewAll={()=>{setBoardArchiveOnly(false);setTab('quadro')}}
             onOpen={id=>void openInspection(id)}
             onCreate={()=>{resetNewInspection();setTab('nova')}}
             onReuseProcess={id=>{const p=processes.find(x=>x.id===id);if(p)reuseProcess(p)}}
@@ -3554,6 +3569,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         inspections={inspections}
         processes={processes}
         itemLinks={processItemLinks}
+        onRefreshProducts={()=>void refreshLists()}
         canDelete={!!canDelete}
         deletingProcessId={deletingProcessId}
         canMove={!!canWrite}
@@ -3568,10 +3584,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         onDeleteInspection={id=>{const item=inspections.find(i=>i.id===id);if(item)void deleteInspection(item)}}
       /> </>}
 
-      {tab==='quadro' && <InspectionsKanban key="quadro" initialView="kanban"
+      {tab==='quadro' && <InspectionsKanban key={"quadro-"+String(boardArchiveOnly)} initialView="kanban" initialArchiveOnly={boardArchiveOnly}
         inspections={inspections}
         processes={processes}
         itemLinks={processItemLinks}
+        onRefreshProducts={()=>void refreshLists()}
         canDelete={!!canDelete}
         deletingProcessId={deletingProcessId}
         canMove={!!canWrite}
@@ -3890,7 +3907,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <div><small>Nota fiscal</small><strong>{detail.grupos_inspecao?.nota_fiscal || '—'}</strong></div>
               <div><small>Origem / transporte</small><strong>{detail.grupos_inspecao?.origem || '—'} · {detail.grupos_inspecao?.transporte || '—'}</strong></div>
               <div><small>Chegada no CD</small><strong>{formatDateBR(detail.grupos_inspecao?.chegada_cd)}</strong></div>
-              <div><small>IT / versão</small><strong>{detail.it_versoes?.instrucoes_trabalho?.codigo || 'Não selecionada'} · {detail.it_versoes?.versao || '—'}</strong></div>
+              <div><small>IT / versão</small><strong>{detail.it_versoes?.instrucoes_trabalho ? `${detail.it_versoes.instrucoes_trabalho.codigo} · ${detail.it_versoes.instrucoes_trabalho.titulo} · v${detail.it_versoes.versao||'—'}` : 'Não selecionada'}</strong></div>
               <div><small>Nível da inspeção</small><strong>{detail.nivel_inspecao || '—'}</strong></div>
               <div><small>Data da inspeção</small><strong>{formatDateBR(detail.data_inspecao)}</strong></div>
               <div><small>Itens cadastrados</small><strong>{detail.items?.length || 0}</strong></div>
@@ -4688,7 +4705,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <select value={editingInspectionData.itVersionId ?? ''} onChange={e=>setEditingInspectionData({...editingInspectionData,itVersionId:e.target.value})}>
                   <option value="">Selecionar IT</option>
                   {itVersions.filter(it=>it.status==='publicada'||it.id===editingInspectionData.itVersionId).map(it=>
-                    <option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · v{it.versao}</option>)}
+                    <option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo || 'IT'} · {it.instrucoes_trabalho?.titulo || 'Sem título'} · v{it.versao}</option>)}
                 </select>
                 <small>Ao escolher outra IT e salvar, esta inspeção é reiniciada. As fotos e o histórico permanecem.</small>
               </label>

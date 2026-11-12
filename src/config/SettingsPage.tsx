@@ -108,7 +108,6 @@ export default function SettingsPage({userId,profile}:{userId:string;profile:{no
   <div className="sgq-settings-main">
    <section className="panel section-card sgq-settings-password">
     <div className="section-title"><h2><KeyRound size={19}/> Minha senha</h2></div>
-    <p>Usuário: <strong>{profile.nome}</strong>. A senha é atualizada pelo serviço de autenticação, sem ser armazenada no SGQ.</p>
     <form onSubmit={changeMyPassword} className="sgq-settings-form">
      <label>Nova senha<input type="password" autoComplete="new-password" required minLength={12} value={myPassword} onChange={e=>setMyPassword(e.target.value)} placeholder="Mínimo de 12 caracteres"/></label>
      <label>Confirmar nova senha<input type="password" autoComplete="new-password" required value={myConfirm} onChange={e=>setMyConfirm(e.target.value)}/></label>
@@ -154,7 +153,6 @@ export default function SettingsPage({userId,profile}:{userId:string;profile:{no
      </section>}
     <section className="panel section-card sgq-settings-permissions">
      <div className="section-title"><h2><ShieldCheck size={19}/> Permissões por perfil</h2></div>
-     <p>As flags abaixo refletem as regras efetivamente autorizadas pelo backend. Selecione um perfil no cadastro ou na edição; não há concessões visuais independentes das regras do banco.</p>
      <strong>Prévia: {roles[previewRole]}</strong>
      <div className="sgq-settings-flags">{flags.map(f=><label key={f.id}>
       <input type="checkbox" disabled readOnly checked={f.allowed.includes(previewRole)}/><span>{f.label}</span>
