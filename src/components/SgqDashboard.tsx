@@ -170,7 +170,7 @@ export default function SgqDashboard({
         <div className="sgq-dashboard-board-controls">
           <button className="secondary sgq-dashboard-filter-button" type="button" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(value => !value)}>
             <Filter size={17}/> Filtrar {statusFilter!=='all'?'· '+showOnly:''}
-          </button>}
+          </button>
           <button className="secondary" type="button" onClick={onAllInspections}>Abrir tela completa <ArrowRight size={17}/></button>
         </div>
       </div>
@@ -190,7 +190,7 @@ export default function SgqDashboard({
       </div>}
       <div data-status-filter={statusFilter} className="sgq-dashboard-board">
         {children}
-      </div>}
+      </div>
       <section id="sgq-dashboard-process-preview" className="sgq-dashboard-preview-section" aria-label="Prévia de processos">
         <div className="sgq-dashboard-preview-heading"><h2>Processos <span>{formatCount(processCount)}</span></h2><button type="button" className="secondary" onClick={onProcesses}>Abrir processos <ArrowRight size={16}/></button></div>
         <div className="sgq-dashboard-inline-grid">
@@ -218,7 +218,7 @@ export default function SgqDashboard({
       </div>}
       <button type="button" className="sgq-dashboard-board-info" onClick={()=>setShowHistory(v=>!v)} aria-expanded={showHistory}>
         {showHistory?'Ocultar orientações':'Como funciona o quadro?'}
-      </button>}
+      </button>
     </section>
   </section>
 }
