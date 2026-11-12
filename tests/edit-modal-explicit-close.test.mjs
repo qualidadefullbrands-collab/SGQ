@@ -46,14 +46,11 @@ test('IT review, stock form and pending popup preserve their contents on backdro
   assert.match(pending,/onClick=\{\(\)=>setPendingModal\(\[\]\)\}>×<\/button>/)
 })
 
-test('equipment editor and maintenance forms do not dismiss by backdrop or Escape',()=>{
-  const history=between(equipment,'{selected&&<div className="modal-backdrop equipment-history-backdrop"','{editing&&')
-  assert.match(history,/<div className="modal-backdrop equipment-history-backdrop" role="presentation">/)
-  assert.doesNotMatch(history,/equipment-history-backdrop"[^>]*onClick/)
-  assert.match(history,/aria-label="Fechar histórico do equipamento"[^>]*>×<\/button>/)
-  const editor=between(equipment,'{editing&&<div className="modal-backdrop"')
-  assert.match(editor,/\{editing&&<div className="modal-backdrop"><form/)
-  assert.doesNotMatch(editor,/<div className="modal-backdrop"[^>]*onClick/)
-  assert.match(editor,/onClick=\{\(\)=>setEditing\(null\)\}>×<\/button>/)
+test('equipamentos usam popup único sem fechar acidentalmente ao clicar no backdrop',()=>{
+  assert.match(equipment,/selected&&<div className="modal-backdrop equipment-history-backdrop" role="presentation">/)
+  assert.doesNotMatch(equipment,/equipment-history-backdrop"[^>]*onClick/)
+  assert.match(equipment,/aria-label="Fechar equipamento"/)
+  assert.match(equipment,/editing&&selected&&<div className="equipment-editor-inline"/)
+  assert.match(equipment,/editing&&!selected&&<div className="modal-backdrop"/)
   assert.doesNotMatch(equipment,/onEscape=|event\.key==='Escape'&&.*setSelected/)
 })
