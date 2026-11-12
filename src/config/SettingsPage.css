@@ -1,0 +1,48 @@
+.sgq-operational-shell .sgq-settings-page{min-width:0;max-width:none;padding:clamp(18px,2.5vw,30px)}
+.sgq-operational-shell .sgq-settings-header{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:22px;color:#1a527a}
+.sgq-operational-shell .sgq-settings-header h1{font-size:clamp(25px,2.7vw,36px);margin:4px 0 7px;color:#183b56}
+.sgq-operational-shell .sgq-settings-header p{font-size:14px;margin:0;color:#5e778d}
+.sgq-operational-shell .sgq-settings-main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:17px}
+.sgq-operational-shell .sgq-settings-main>.panel{min-width:0;background:#fff;border:1px solid #dbe6ef;border-radius:14px;padding:21px;box-shadow:0 4px 16px rgba(18,58,94,.035)}
+.sgq-operational-shell .sgq-settings-main :is(.section-title,h2){color:#1c4665}
+.sgq-operational-shell .sgq-settings-main .section-title h2{display:flex;align-items:center;gap:9px;font-size:18px}
+.sgq-operational-shell .sgq-settings-main p{color:#61798d;font-size:13px;line-height:1.6}
+.sgq-operational-shell .sgq-settings-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;align-items:end}
+.sgq-operational-shell .sgq-settings-form label,.sgq-operational-shell .sgq-settings-reset label{min-width:0;display:grid;gap:7px;color:#42617b;font-size:12px;font-weight:700}
+.sgq-operational-shell .sgq-settings-form :is(input,select),.sgq-operational-shell .sgq-settings-reset input{box-sizing:border-box;width:100%;min-width:0;min-height:42px;padding:9px 11px;border:1px solid #d1e1ed;border-radius:9px;background:#fff;color:#29465b;font-family:inherit;font-size:13px}
+.sgq-operational-shell .sgq-settings-form>button{grid-column:1/-1;justify-self:start;display:inline-flex;align-items:center;gap:8px}
+.sgq-operational-shell .sgq-settings-users{grid-row:span 2}
+.sgq-operational-shell .sgq-settings-user-list{display:grid;gap:8px;max-height:435px;overflow:auto}
+.sgq-operational-shell .sgq-settings-user-list button{display:grid;gap:4px;text-align:left;background:#f9fbfd;border:1px solid #deebf2;padding:12px;border-radius:10px;cursor:pointer}
+.sgq-operational-shell .sgq-settings-user-list button.selected{background:#eef7fe;border-color:#64a9d5}
+.sgq-operational-shell .sgq-settings-user-list strong{font-size:13px;color:#1e455f}
+.sgq-operational-shell .sgq-settings-user-list small{font-size:12px;color:#5d7990;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-settings-user-list span{font-size:11px;color:#26708a;font-weight:750}
+.sgq-operational-shell .sgq-settings-active{display:flex!important;align-items:center;gap:9px;align-self:center}
+.sgq-operational-shell .sgq-settings-active input{min-height:unset;width:18px;height:18px}
+.sgq-operational-shell .sgq-settings-reset{margin-top:20px;padding-top:15px;border-top:1px solid #e4edf4;display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+.sgq-operational-shell .sgq-settings-reset label{flex:1;min-width:150px}
+.sgq-operational-shell .sgq-settings-reset button{display:flex;gap:8px;align-items:center;min-height:42px}
+.sgq-operational-shell .sgq-settings-permissions{grid-column:1/-1}
+.sgq-operational-shell .sgq-settings-flags{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}
+.sgq-operational-shell .sgq-settings-flags label{display:flex;align-items:center;gap:10px;min-width:0;font-size:13px;color:#2e536f;background:#f7fafc;border:1px solid #e1ebf2;border-radius:9px;padding:11px;line-height:1.35}
+.sgq-operational-shell .sgq-settings-flags input{flex:none;width:17px;height:17px;accent-color:#147fb1;opacity:1}
+.sgq-operational-shell .stock-document-panel{margin:15px 0;border:1px solid #d4e5ef;border-radius:13px;background:#f9fcfe;padding:17px;min-width:0}
+.sgq-operational-shell .stock-document-panel h3{font-size:15px;color:#1d5477;margin:0 0 7px}
+.sgq-operational-shell .stock-document-panel>p{font-size:12px;color:#5b7990;margin:0 0 13px;line-height:1.45}
+.sgq-operational-shell .stock-document-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:end}
+.sgq-operational-shell .stock-document-form label{display:grid;gap:6px;font-size:12px;font-weight:750;color:#385c76;min-width:0}
+.sgq-operational-shell .stock-document-form label.span-2{grid-column:1/-1}
+.sgq-operational-shell .stock-document-form :is(input,select,textarea){box-sizing:border-box;width:100%;min-width:0;max-width:100%;padding:9px 11px;border:1px solid #cee0ec;border-radius:9px;font:inherit;font-size:13px;background:#fff;color:#244a63}
+.sgq-operational-shell .stock-document-form>button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:41px}
+.sgq-operational-shell .stock-document-form .field-status{grid-column:1/-1}
+.sgq-operational-shell .stock-document-list{display:grid;gap:8px;margin-bottom:14px}
+.sgq-operational-shell .stock-document-list>div{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #dce9f1;background:#fff;padding:11px;border-radius:9px}
+.sgq-operational-shell .stock-document-list>div>div{display:grid;gap:4px;min-width:0}
+.sgq-operational-shell .stock-document-list strong{font-size:12px;color:#1b526f;overflow-wrap:anywhere}
+.sgq-operational-shell .stock-document-list small,.sgq-operational-shell .stock-document-list span{font-size:11px;color:#678195;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-ai-context-label{display:grid;gap:7px;margin:11px 0;font-size:12px;color:#486a84;font-weight:750}
+.sgq-operational-shell .sgq-ai-context-label textarea{width:100%;max-width:100%;box-sizing:border-box;min-height:70px;border-radius:10px;border:1px solid #cfdfeb;padding:10px 12px;font:inherit;font-size:13px}
+.sgq-operational-shell .sgq-ai-context-label small{font-size:11px;color:#6d8294;font-weight:400}
+@media(max-width:910px){.sgq-operational-shell .sgq-settings-main{grid-template-columns:1fr}.sgq-operational-shell .sgq-settings-users{grid-row:auto}.sgq-operational-shell .sgq-settings-permissions{grid-column:auto}}
+@media(max-width:620px){.sgq-operational-shell .sgq-settings-form,.sgq-operational-shell .sgq-settings-flags,.sgq-operational-shell .stock-document-form{grid-template-columns:1fr}.sgq-operational-shell .sgq-settings-form>button,.sgq-operational-shell .stock-document-form label.span-2{grid-column:auto}.sgq-operational-shell .stock-document-list>div{flex-direction:column;align-items:stretch}.sgq-operational-shell .stock-document-list button{justify-content:center}.sgq-operational-shell .sgq-settings-main>.panel{padding:14px}}
