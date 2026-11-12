@@ -30,9 +30,10 @@ const copy=(value:Draft):Draft=>({...value,checklist:value.checklist.map(item=>(
 const getError=(error:unknown)=>error instanceof Error?error.message:String(error||'Erro inesperado')
 
 export default function InspectionModelsPage({canManage}:{canManage:boolean}){
+ const initialDraft=useMemo(()=>blank(),[])
  const [models,setModels]=useState<Model[]>([])
- const [draft,setDraft]=useState<Draft>(()=>blank())
- const [baseline,setBaseline]=useState<Draft>(()=>blank())
+ const [draft,setDraft]=useState<Draft>(()=>copy(initialDraft))
+ const [baseline,setBaseline]=useState<Draft>(()=>copy(initialDraft))
  const [search,setSearch]=useState('')
  const [loading,setLoading]=useState(false)
  const [saving,setSaving]=useState(false)
