@@ -140,3 +140,29 @@
 .sgq-operational-shell .sgq-kpi-card:focus-visible{outline:3px solid #3a96d0;outline-offset:2px}
 @media(min-width:1000px){.sgq-operational-shell .sgq-dashboard-kpis{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:700px){.sgq-operational-shell .sgq-dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.sgq-operational-shell .sgq-kpi-card{min-height:85px;padding:12px}.sgq-operational-shell .sgq-kpi-icon{width:42px;height:42px;border-radius:11px}.sgq-operational-shell .sgq-kpi-copy strong{font-size:25px}.sgq-operational-shell .sgq-kpi-hint{display:none}.sgq-operational-shell .sgq-dashboard-board-actions{align-items:flex-start}.sgq-operational-shell .sgq-dashboard-board-controls{flex-wrap:wrap;justify-content:flex-end}}
+
+
+/* Indicadores mostram todos os recortes na mesma página, sem substituir cards. */
+.sgq-operational-shell .sgq-dashboard-preview-section{
+  scroll-margin-top:85px;min-width:0;display:grid;gap:14px;background:#fff;
+  border:1px solid #dde7f0;border-radius:15px;padding:clamp(14px,2.2vw,21px);
+  box-shadow:0 3px 12px rgba(31,65,102,.035)
+}
+.sgq-operational-shell .sgq-dashboard-preview-heading{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap
+}
+.sgq-operational-shell .sgq-dashboard-preview-heading h2{
+  display:flex;gap:9px;align-items:baseline;margin:0;color:#204764;font-size:18px
+}
+.sgq-operational-shell .sgq-dashboard-preview-heading h2 span{font-size:12px;color:#6f8798}
+.sgq-operational-shell .sgq-dashboard-preview-heading button{
+  display:inline-flex;gap:8px;align-items:center;justify-content:center
+}
+.sgq-operational-shell .sgq-dashboard-inline-card{min-height:88px}
+.sgq-operational-shell .sgq-dashboard{display:grid;gap:18px}
+.sgq-operational-shell .sgq-dashboard-inspections{scroll-margin-top:85px}
+@media(max-width:600px){
+ .sgq-operational-shell .sgq-dashboard-preview-section{padding:13px}
+ .sgq-operational-shell .sgq-dashboard-preview-heading{align-items:stretch}
+ .sgq-operational-shell .sgq-dashboard-preview-heading button{width:100%}
+}
