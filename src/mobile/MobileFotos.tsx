@@ -81,7 +81,7 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
   const map=new Map<string,Inspection[]>()
   for(const i of inspections){
    const id=i.grupos_inspecao?.processo_id
-   if(i.status==='cancelada'||!id||!valid.has(id))continue
+   if(i.status==='cancelada'||i.status==='concluida'||!id||!valid.has(id))continue
    const list=map.get(id)||[];list.push(i);map.set(id,list)
   }
   return {active:processes.filter(p=>map.has(p.id)),linked:map}
@@ -278,7 +278,7 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
    {processId&&!inspectionId&&<><p className="sgq-mobile-description">{fst(selected?.codigo||'')} · {selected?.cliente||'Cliente não informado'}</p>
     {childInspections.map(i=><button type="button" className={'sgq-mobile-process '+(i.status==='em_andamento'?'sgq-photo-started':'sgq-photo-not-started')} key={i.id} onClick={()=>selectInspection(i.id)}>
      <strong>{fst(selected?.codigo||'')}{i.grupos_inspecao?.subprocesso_codigo?'-'+i.grupos_inspecao.subprocesso_codigo:''} · {i.grupos_inspecao?.nome||'Inspeção'}</strong>
-     <span>{i.status==='concluida'?'Concluída':i.status==='em_andamento'?'Iniciada':'Não iniciada'} · NF {i.grupos_inspecao?.nota_fiscal||'não informada'}</span>
+     <span>{i.status==='em_andamento'?'Iniciada':'Não iniciada'} · NF {i.grupos_inspecao?.nota_fiscal||'não informada'}</span>
      <b><Camera size={17}/> Ver fotos</b>
     </button>)}
    </>}
