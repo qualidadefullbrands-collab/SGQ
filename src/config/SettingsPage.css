@@ -46,3 +46,17 @@
 .sgq-operational-shell .sgq-ai-context-label small{font-size:11px;color:#6d8294;font-weight:400}
 @media(max-width:910px){.sgq-operational-shell .sgq-settings-main{grid-template-columns:1fr}.sgq-operational-shell .sgq-settings-users{grid-row:auto}.sgq-operational-shell .sgq-settings-permissions{grid-column:auto}}
 @media(max-width:620px){.sgq-operational-shell .sgq-settings-form,.sgq-operational-shell .sgq-settings-flags,.sgq-operational-shell .stock-document-form{grid-template-columns:1fr}.sgq-operational-shell .sgq-settings-form>button,.sgq-operational-shell .stock-document-form label.span-2{grid-column:auto}.sgq-operational-shell .stock-document-list>div{flex-direction:column;align-items:stretch}.sgq-operational-shell .stock-document-list button{justify-content:center}.sgq-operational-shell .sgq-settings-main>.panel{padding:14px}}
+
+
+/* Conferência do documento preenchido antes de associá-lo a uma amostra. */
+.sgq-operational-shell .stock-document-preview{
+  grid-column:1/-1;display:grid;gap:6px;min-width:0;
+  padding:13px;border:1px solid #d1e3ef;border-radius:10px;background:#f7fbfd
+}
+.sgq-operational-shell .stock-document-preview strong{color:#235975;font-size:13px}
+.sgq-operational-shell .stock-document-preview p{
+  color:#37576b;max-height:150px;overflow:auto;overflow-wrap:anywhere;
+  padding:10px;border:1px solid #e2eaf0;border-radius:8px;margin:0;
+  background:#fff;font-size:12px;line-height:1.6;white-space:pre-wrap
+}
+.sgq-operational-shell .stock-document-preview small{color:#638196;font-size:11px}
