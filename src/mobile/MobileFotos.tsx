@@ -277,8 +277,8 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
    </>}
    {processId&&!inspectionId&&<><p className="sgq-mobile-description">{fst(selected?.codigo||'')} · {selected?.cliente||'Cliente não informado'}</p>
     {childInspections.map(i=><button type="button" className={'sgq-mobile-process '+(i.status==='em_andamento'?'sgq-photo-started':'sgq-photo-not-started')} key={i.id} onClick={()=>selectInspection(i.id)}>
-     <strong>{i.grupos_inspecao?.subprocesso_codigo?'Subprocesso '+i.grupos_inspecao.subprocesso_codigo+' · ':''}{i.grupos_inspecao?.nome||'Inspeção'}</strong>
-     <span>{i.numero||'Inspeção'} · {i.status==='concluida'?'Concluída':i.status==='em_andamento'?'Iniciada':'Não iniciada'} · NF {i.grupos_inspecao?.nota_fiscal||'não informada'}</span>
+     <strong>{fst(selected?.codigo||'')}{i.grupos_inspecao?.subprocesso_codigo?'-'+i.grupos_inspecao.subprocesso_codigo:''} · {i.grupos_inspecao?.nome||'Inspeção'}</strong>
+     <span>{i.status==='concluida'?'Concluída':i.status==='em_andamento'?'Iniciada':'Não iniciada'} · NF {i.grupos_inspecao?.nota_fiscal||'não informada'}</span>
      <b><Camera size={17}/> Ver fotos</b>
     </button>)}
    </>}
