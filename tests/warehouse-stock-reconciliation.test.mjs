@@ -20,7 +20,7 @@ test('SKU reconciliation targets one active stock position with role, optimistic
   assert.doesNotMatch(endpoint,/HttpMethod.Patch,"amostra_movimentacoes"/)
   assert.match(app,/stockSkuSelection\[position.id\]/)
   assert.match(app,/correctStockSample\(position\)/)
-  assert.match(app,/window.confirm\('Posição '/)
+  assert.match(app,/window.confirm\('SKU '/)
   assert.match(app,/onlyDescription\?'sincronizar a descrição oficial'/)
 })
 
