@@ -819,6 +819,8 @@ export default function App() {
   const [selectedSampleReport, setSelectedSampleReport] = useState<{numero:string;url:string|null}|null>(null)
   const [stockDocuments,setStockDocuments]=useState<Array<{id:string;arquivo_nome:string;storage_path:string;resultado:string;observacao:string|null;data_inspecao:string|null;criado_em:string}>>([])
   const [stockDocumentFile,setStockDocumentFile]=useState<File|null>(null)
+  const [stockDocumentPreview,setStockDocumentPreview]=useState('')
+  const [stockDocumentPreviewBusy,setStockDocumentPreviewBusy]=useState(false)
   const [stockDocumentResult,setStockDocumentResult]=useState('nao_classificado')
   const [stockDocumentObservation,setStockDocumentObservation]=useState('')
   const [stockDocumentDate,setStockDocumentDate]=useState('')
@@ -1138,6 +1140,28 @@ export default function App() {
       })
     return()=>{current=false}
   },[selectedSample?.id,selectedSample?.inspecao_id])
+
+  useEffect(()=>{
+    if(!stockDocumentFile){setStockDocumentPreview('');setStockDocumentPreviewBusy(false);return}
+    if(!/\.docx$/i.test(stockDocumentFile.name)){
+      setStockDocumentPreview('Somente arquivos DOCX podem ser registrados.')
+      return
+    }
+    let active=true
+    setStockDocumentPreviewBusy(true)
+    void (async()=>{
+      try{
+        const mammoth=(await import('mammoth/mammoth.browser')).default
+        const result=await mammoth.extractRawText({arrayBuffer:await stockDocumentFile.arrayBuffer()})
+        const extracted=result.value.replace(/\s+/g,' ').trim()
+        if(active)setStockDocumentPreview(extracted.slice(0,1600)||
+          'Documento sem texto extraível. Confirme manualmente o resultado e a identidade do produto.')
+      }catch{
+        if(active)setStockDocumentPreview('Prévia indisponível. Confira manualmente o arquivo Word antes de vincular.')
+      }finally{if(active)setStockDocumentPreviewBusy(false)}
+    })()
+    return()=>{active=false}
+  },[stockDocumentFile])
 
   async function uploadStockDocument(){
     if(!selectedSample||selectedSample.inspecao_id||!stockDocumentFile||!canWrite||stockDocumentBusy)return
@@ -4561,6 +4585,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                       <label>Documento preenchido (.docx)
                         <input type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={e=>setStockDocumentFile(e.target.files?.[0]??null)}/>
                       </label>
+                      {(stockDocumentFile||stockDocumentPreviewBusy)&&<div className="stock-document-preview">
+                        <strong>{stockDocumentPreviewBusy?'Lendo documento…':'Prévia do conteúdo recebido'}</strong>
+                        <p>{stockDocumentPreviewBusy?'Extraindo texto do DOCX para conferência.':stockDocumentPreview}</p>
+                        <small>Confirme que os dados pertencem ao SKU {selectedSample.sku||'selecionado'} e registre o resultado exatamente como consta no Word.</small>
+                      </div>}
                       <label>Data da inspeção (se conhecida)<input type="date" value={stockDocumentDate} onChange={e=>setStockDocumentDate(e.target.value)}/></label>
                       <label>Resultado registrado no documento<select value={stockDocumentResult} onChange={e=>setStockDocumentResult(e.target.value)}>
                         <option value="nao_classificado">Não classificado / a verificar</option>
