@@ -621,14 +621,17 @@ app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory f
             $"select=nome,perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
         var processesTask=RestAsync(client,token,HttpMethod.Get,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id&excluido_em=is.null&order=criado_em.desc");
+        var itemLinksTask=RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+            "select=grupo_inspecao_id,processo_itens(id,codigo_cliente,produtos(sku,nome))&limit=10000");
         var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
             "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,concluida_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
-        await Task.WhenAll(profileTask,processesTask,inspectionsTask);
+        await Task.WhenAll(profileTask,processesTask,inspectionsTask,itemLinksTask);
         var (profile,found)=FirstRow(profileTask.Result);
         if(!found)return Results.Json(Error("Usuário sem perfil autorizado no SGQ."),statusCode:403);
         return Results.Ok(new {data=new {
             profile,processes=processesTask.Result,
-            inspections=OperationalInspections(processesTask.Result,inspectionsTask.Result)
+            inspections=OperationalInspections(processesTask.Result,inspectionsTask.Result),
+            itemLinks=itemLinksTask.Result
         },error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -643,6 +646,8 @@ app.MapGet("/api/app/insights",async(HttpRequest request,IHttpClientFactory fact
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         await CurrentUserId(client,token);
+        var itemLinksTask=RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+            "select=grupo_inspecao_id,processo_itens(id,codigo_cliente,produtos(sku,nome))&limit=10000");
         var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
             "select=id,numero,status,resultado,criado_em,iniciada_em,concluida_em,total_inspecionado,total_nao_conforme,tamanho_amostra,grupo_inspecao_id,grupos_inspecao(id,processo_id,processos(id,codigo,cliente,excluido_em))&excluido_em=is.null&order=criado_em.desc&limit=1000");
         var linksTask=RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
@@ -698,9 +703,9 @@ app.MapGet("/api/app/listas", async (HttpRequest request,IHttpClientFactory fact
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id&excluido_em=is.null&order=criado_em.desc");
         var inspections=RestAsync(client,token,HttpMethod.Get,"inspecoes",
             "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,concluida_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
-        await Task.WhenAll(processes,inspections);
+        await Task.WhenAll(processes,inspections,itemLinksTask);
         return Results.Ok(new{data=new{processes=processes.Result,
-            inspections=OperationalInspections(processes.Result,inspections.Result)},error=(object?)null});
+            inspections=OperationalInspections(processes.Result,inspections.Result),itemLinks=itemLinksTask.Result},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao atualizar as listas.",e.Message),statusCode:500);}
