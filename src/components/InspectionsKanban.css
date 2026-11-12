@@ -157,3 +157,21 @@
 .sgq-operational-shell .sgq-kanban-process-group-title{display:flex;justify-content:space-between;align-items:center;gap:7px;flex-wrap:wrap;padding:4px 3px 2px;color:#698294;font-size:11px}
 .sgq-operational-shell .sgq-kanban-process-group-title strong{color:#2c5b79;font-size:13px;font-weight:850}
 .sgq-operational-shell .sgq-kanban-process-group>.sgq-kanban-independent-inspection{background:#fff;margin:0}
+
+
+/* Identidade do processo: FST e chegada no CD na mesma linha. */
+.sgq-operational-shell .sgq-process-node-identity .sgq-process-identity-head{
+  display:flex;align-items:center;gap:9px 16px;flex-wrap:wrap;min-width:0
+}
+.sgq-operational-shell .sgq-process-node-identity .sgq-process-identity-head strong{white-space:nowrap}
+.sgq-operational-shell .sgq-process-node-identity .sgq-process-arrival{
+  display:inline-flex;font-size:12px;color:#286987;font-weight:700;line-height:1.3;
+  background:#eff7fc;border-radius:7px;padding:4px 8px
+}
+.sgq-operational-shell .sgq-subprocess-products{display:grid;gap:8px;min-width:0}
+.sgq-operational-shell .sgq-subprocess-products .sgq-subprocess-product{
+  display:flex;flex-direction:column;align-items:flex-start;gap:3px;
+  min-width:0;padding:9px 11px;border-radius:9px
+}
+.sgq-operational-shell .sgq-subprocess-product>b{display:block;font-size:12px;letter-spacing:.01em}
+.sgq-operational-shell .sgq-subprocess-product>span{display:block;width:100%;font-size:12px;line-height:1.45}
