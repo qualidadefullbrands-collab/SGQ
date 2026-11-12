@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, Boxes, Camera, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Edit3, RefreshCw, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, BarChart3, CloudOff, CloudUpload, X } from 'lucide-react'
+import { Bell, Boxes, Camera, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Edit3, RefreshCw, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, BarChart3, Settings2, CloudOff, CloudUpload, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/supabase'
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from './lib/offline'
@@ -8,6 +8,7 @@ import InventoryPanel from './stock/InventoryPanel'
 import InspectionsKanban from './components/InspectionsKanban'
 import SgqDashboard from './components/SgqDashboard'
 import './SgqOperationsTheme.css'
+import './config/SettingsPage.css'
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
 const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
@@ -16,6 +17,7 @@ const RECOVERY_REDIRECT_URL = 'https://app-sgq.onrender.com/?auth=recovery'
 const ItEditorDemo=lazy(()=>import('./its/ItEditorDemo'))
 const MobileFotos=lazy(()=>import('./mobile/MobileFotos'))
 const InsightsPage=lazy(()=>import('./insights/InsightsPage'))
+const SettingsPage=lazy(()=>import('./config/SettingsPage'))
 
 type Profile = { nome: string | null; perfil: 'administrador' | 'inspetor' | 'gestor' | 'consulta' }
 type ItVersion = {
@@ -586,7 +588,7 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [tab, setTab] = useState<'painel' | 'insights' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile' | 'quadro'>(()=>window.matchMedia('(max-width: 768px)').matches || new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'painel')
+  const [tab, setTab] = useState<'painel' | 'insights' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile' | 'quadro' | 'configuracoes'>(()=>window.matchMedia('(max-width: 768px)').matches || new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'painel')
   const [itDemoOpen,setItDemoOpen]=useState(false)
   const [dashboardSearch,setDashboardSearch]=useState('')
   const [popupMessage,setPopupMessage]=useState('')
@@ -3374,6 +3376,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <div className="sgq-side-caption">QUALIDADE</div>
         <button className={tab==='its'?'selected':''} onClick={()=>setTab('its')}><FileText size={19}/> Instruções técnicas</button>
         <button className={tab==='equipamentos'?'selected':''} onClick={()=>{setTab('equipamentos');void refreshEquipments()}}><Wrench size={19}/> Equipamentos</button>
+        <div className="sgq-side-caption">ADMINISTRAÇÃO</div>
+        <button className={tab==='configuracoes'?'selected':''} onClick={()=>{setError('');setTab('configuracoes')}}><Settings2 size={19}/> Configurações</button>
         <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button type="button" onClick={()=>void supabase.auth.signOut()}><LogOut size={14}/> Sair</button></div>
       </aside>
       <header className="topbar" aria-label="Cabeçalho do SGQ">
@@ -3384,7 +3388,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <strong>{({
             painel:'Painel',insights:'Insights',inspecoes:'Processos',quadro:'Inspeções',nova:'Nova inspeção',
             execucao:'Execução da inspeção',estoque:'Estoque',
-            auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos',
+            auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos',configuracoes:'Configurações',
           } as Record<typeof tab,string>)[tab]}</strong>
         </div>
         <label className="sgq-topbar-search" htmlFor="sgq-global-search">
@@ -3431,6 +3435,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
       {tab==='insights' && <Suspense fallback={<div className="center-screen">Carregando Insights…</div>}>
         <InsightsPage onBack={()=>setTab('painel')} onOpenInspection={id=>void openInspection(id)}/>
+      </Suspense>}
+
+      {tab==='configuracoes' && <Suspense fallback={<div className="center-screen">Carregando configurações…</div>}>
+        <SettingsPage userId={userId||''} profile={{nome:profile.nome||'Usuário',perfil:profile.perfil}}/>
       </Suspense>}
 
       {tab==='auditorias' && (
