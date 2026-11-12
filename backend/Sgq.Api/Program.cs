@@ -646,8 +646,6 @@ app.MapGet("/api/app/insights",async(HttpRequest request,IHttpClientFactory fact
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         await CurrentUserId(client,token);
-        var itemLinksTask=RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
-            "select=grupo_inspecao_id,processo_itens(id,codigo_cliente,produtos(sku,nome))&limit=10000");
         var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
             "select=id,numero,status,resultado,criado_em,iniciada_em,concluida_em,total_inspecionado,total_nao_conforme,tamanho_amostra,grupo_inspecao_id,grupos_inspecao(id,processo_id,processos(id,codigo,cliente,excluido_em))&excluido_em=is.null&order=criado_em.desc&limit=1000");
         var linksTask=RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
@@ -701,6 +699,8 @@ app.MapGet("/api/app/listas", async (HttpRequest request,IHttpClientFactory fact
         await CurrentUserId(client,token);
         var processes=RestAsync(client,token,HttpMethod.Get,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id&excluido_em=is.null&order=criado_em.desc");
+        var itemLinksTask=RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+            "select=grupo_inspecao_id,processo_itens(id,codigo_cliente,produtos(sku,nome))&limit=10000");
         var inspections=RestAsync(client,token,HttpMethod.Get,"inspecoes",
             "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,concluida_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
         await Task.WhenAll(processes,inspections,itemLinksTask);
