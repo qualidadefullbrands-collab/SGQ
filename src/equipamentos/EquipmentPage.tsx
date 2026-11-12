@@ -127,7 +127,7 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
         onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();setSelected(e.id);setEditing(null);setSection('historico')}}}>
         <div><b>{e.codigo} · {e.nome}</b><span>{[String(e.dados_origem?.tipo_controle||'Controle de rotina'),e.localizacao,e.patrimonio].filter(Boolean).join(' · ')}</span></div>
         <div><span className={'equipment-status '+(operationalStatus==='ativo'?'valid':'inactive')}>{operationalStatus==='calibracao_pendente'?'Calibração pendente':operationalStatus==='ativo'?'Ativo':operationalStatus.replaceAll('_',' ')}</span>{e.requer_calibracao&&<small>Próxima calibração: {fmt(e.proxima_calibracao)}</small>}</div>
-        <div className="equipment-actions"><span>Abrir detalhes ›</span></div>
+        <div className="equipment-actions" aria-hidden="true"><span>›</span></div>
       </article>})}
     </div>
     {selected&&<div className="modal-backdrop equipment-history-backdrop" role="presentation">
