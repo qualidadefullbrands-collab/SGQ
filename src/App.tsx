@@ -283,6 +283,11 @@ function inspectionBoxTotal(detail:any,kind:'received'|'evaluate'):number|null {
   const persisted=Number(detail?.[field])
   return persisted>0?persisted:null
 }
+function stockProcessLabel(value:string|null|undefined){
+  const code=String(value||'').trim()
+  // Identificadores técnicos legados ficam no banco para auditoria, não na UI.
+  return !code||/^(?:LEG-EST-|INS-20\d{2}-)/i.test(code)?'—':code
+}
 function inspectionDisplay(row:{grupos_inspecao?:{subprocesso_codigo?:string|null;processos?:{codigo?:string|null;cliente?:string|null}|null}|null}) {
   const p=row.grupos_inspecao?.processos
   const sub=row.grupos_inspecao?.subprocesso_codigo
@@ -3199,7 +3204,7 @@ export default function App() {
     })
     if (created.error || !created.data?.id) return setError(created.error?.message ?? 'Falha ao criar amostra.')
 
-    setMessage(`${created.data.codigo} criada e endereçada.`)
+    setMessage('Amostra cadastrada e endereçada com sucesso.')
     setSampleForm({ groupId: '', sku: '', descricao: '', lote: '', quantidade: '', endereco: '', unidade: 'conjunto' })
     await loadStock()
   }
@@ -4518,7 +4523,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     <em>{s.descricao || 'Descrição não informada'}</em>
                     {s.observacao && <small>{s.observacao}</small>}
                   </span>
-                  <span><b className="stock-mobile-label">Processo</b>{s.processo_referencia || '—'}</span>
+                  <span><b className="stock-mobile-label">Processo</b>{stockProcessLabel(s.processo_referencia)}</span>
                   <span><b className="stock-mobile-label">Cliente</b>{s.cliente_referencia || '—'}</span>
                   <span><b className="stock-mobile-label">NF</b>{s.nota_fiscal_referencia || '—'}</span>
                   <span><b className="stock-mobile-label">Endereço</b><i className="location-badge">{s.endereco || '—'}</i></span>
@@ -4544,7 +4549,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <div>
                     <span className="eyebrow">{selectedSample.sku || 'ESTOQUE'}</span>
                     <h2>{selectedSample.descricao || 'Amostra'}</h2>
-                    <p>{selectedSample.processo_referencia || 'Sem processo vinculado'}</p>
+                    <p>{stockProcessLabel(selectedSample.processo_referencia)==='—'?'Sem processo vinculado':stockProcessLabel(selectedSample.processo_referencia)}</p>
                   </div>
                   <button className="close" onClick={()=>setSelectedSample(null)}>×</button>
                 </div>
@@ -4564,7 +4569,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <div className="stock-detail-section">
                   <h3>Rastreabilidade</h3>
                   <div className="detail-grid stock-detail-grid">
-                    <div><small>Processo</small><strong>{selectedSample.processo_referencia || '—'}</strong></div>
+                    <div><small>Processo</small><strong>{stockProcessLabel(selectedSample.processo_referencia)}</strong></div>
                     <div><small>Cliente</small><strong>{selectedSample.cliente_referencia || '—'}</strong></div>
                     <div><small>Nota fiscal</small><strong>{selectedSample.nota_fiscal_referencia || '—'}</strong></div>
                     <div><small>Chegada</small><strong>{selectedSample.data_chegada_referencia || '—'}</strong></div>
