@@ -110,7 +110,8 @@ function significantObservation(ctx:Record<string,unknown>):boolean{
  const arrays=[ctx.checklist,ctx.dimensionais,ctx.testes];
  return arrays.some(v=>Array.isArray(v)&&v.some(x=>
   typeof x?.observacao==="string"&&x.observacao.trim()!=="")) ||
-   (typeof ctx.textoAtual==="string"&&ctx.textoAtual.trim().length>0);
+   (typeof ctx.textoAtual==="string"&&ctx.textoAtual.trim().length>0) ||
+   (typeof ctx.contextoAdicional==="string"&&ctx.contextoAdicional.trim().length>0);
 }
 function shortenComplement(raw:string,baseline:string):string{
  let text=raw.replace(/[*#]/g,"").replace(/\s+/g," ").trim();
@@ -144,6 +145,7 @@ Deno.serve(async(req:Request)=>{
    "Se não existir achado técnico adicional, responda exatamente SEM_COMPLEMENTO.",
    "Nunca repita tamanho da amostra, número de NC ou conclusão sobre aprovação.",
    "Nunca afirme 'aprovado' ou 'reprovado' sem o resultado formal da inspeção.",
+   "Contexto adicional é observação fornecida pelo inspetor e não substitui medição, desenho técnico nem comprovação; não invente evidências.",
    "Não invente fatos, medições, causas, riscos, produto ou cliente.",
    "Sem listas, saudação, siglas inventadas, recomendações genéricas ou justificativas.",
    "Dados de origem, para identificar apenas o complemento relevante:",
