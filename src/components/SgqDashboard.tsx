@@ -22,6 +22,7 @@ type Props = {
   onProcesses: () => void
   onStock: () => void
   onAllInspections: () => void
+  onCompletedInspections: () => void
   children: ReactNode
 }
 
@@ -35,7 +36,7 @@ function formatCount(value: number): string {
 
 export default function SgqDashboard({
   inspections, processCount, stockCount, processes=[], stockPositions=[], searchQuery, onSearchChange,
-  onNewInspection, onInsights, onProcesses, onStock, onAllInspections, children,
+  onNewInspection, onInsights, onProcesses, onStock, onAllInspections, onCompletedInspections, children,
 }: Props) {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [panelSection,setPanelSection]=useState<'inspecoes'|'processos'|'estoque'>('inspecoes')
@@ -101,22 +102,22 @@ export default function SgqDashboard({
     </header>
 
     <div className="sgq-dashboard-kpis" aria-label="Indicadores atuais">
-      <button type="button" className={'sgq-kpi-card '+(panelSection==='processos'?'is-focused':'')} onClick={()=>{setPanelSection('processos');document.getElementById('sgq-dashboard-process-preview')?.scrollIntoView({behavior:'smooth',block:'nearest'})}} aria-label={formatCount(processCount)+' processos. Mostrar processos aqui'}>
+      <button type="button" className={'sgq-kpi-card '+(panelSection==='processos'?'is-focused':'')} onClick={()=>{setPanelSection('processos');onProcesses()}} aria-label={formatCount(processCount)+' processos. Mostrar processos aqui'}>
         <span className="sgq-kpi-icon sgq-kpi-blue"><Layers3 size={29}/></span>
         <span className="sgq-kpi-copy"><strong>{formatCount(processCount)}</strong><span>Processos</span></span>
         <span className="sgq-kpi-hint">Ver todos <ArrowRight size={14}/></span>
       </button>
-      <button type="button" className={'sgq-kpi-card '+(panelSection==='inspecoes'&&statusFilter==='all'?'is-focused':'')} onClick={() => {setPanelSection('inspecoes');setStatusFilter('all');document.getElementById('sgq-dashboard-inspections')?.scrollIntoView({behavior:'smooth',block:'nearest'})}} aria-label={formatCount(metrics.count)+' inspeções. Ir para o quadro'}>
+      <button type="button" className={'sgq-kpi-card '+(panelSection==='inspecoes'&&statusFilter==='all'?'is-focused':'')} onClick={() => {setPanelSection('inspecoes');onAllInspections()}} aria-label={formatCount(metrics.count)+' inspeções. Ir para o quadro'}>
         <span className="sgq-kpi-icon sgq-kpi-sky"><ClipboardCheck size={29}/></span>
         <span className="sgq-kpi-copy"><strong>{formatCount(metrics.count)}</strong><span>Inspeções</span></span>
         <span className="sgq-kpi-hint">Ver quadro <ArrowRight size={14}/></span>
       </button>
-      <button type="button" className={'sgq-kpi-card '+(panelSection==='estoque'?'is-focused':'')} onClick={()=>{setPanelSection('estoque');document.getElementById('sgq-dashboard-stock-preview')?.scrollIntoView({behavior:'smooth',block:'nearest'})}} aria-label={formatCount(stockCount)+' posições de estoque. Mostrar estoque aqui'}>
+      <button type="button" className={'sgq-kpi-card '+(panelSection==='estoque'?'is-focused':'')} onClick={()=>{setPanelSection('estoque');onStock()}} aria-label={formatCount(stockCount)+' posições de estoque. Mostrar estoque aqui'}>
         <span className="sgq-kpi-icon sgq-kpi-slate"><Package size={29}/></span>
         <span className="sgq-kpi-copy"><strong>{formatCount(stockCount)}</strong><span>Estoque</span></span>
         <span className="sgq-kpi-hint">Ver estoque <ArrowRight size={14}/></span>
       </button>
-      <button type="button" className={'sgq-kpi-card '+(panelSection==='inspecoes'&&statusFilter==='concluida'?'is-focused':'')} onClick={() => {setPanelSection('inspecoes');setStatusFilter('concluida');document.getElementById('sgq-dashboard-inspections')?.scrollIntoView({behavior:'smooth',block:'nearest'})}} aria-label={formatCount(metrics.done)+' inspeções concluídas'}>
+      <button type="button" className={'sgq-kpi-card '+(panelSection==='inspecoes'&&statusFilter==='concluida'?'is-focused':'')} onClick={() => {setPanelSection('inspecoes');onCompletedInspections()}} aria-label={formatCount(metrics.done)+' inspeções concluídas'}>
         <span className="sgq-kpi-icon sgq-kpi-green"><CheckCircle2 size={29}/></span>
         <span className="sgq-kpi-copy"><strong>{formatCount(metrics.done)}</strong><span>Concluídas</span></span>
         <span className="sgq-kpi-hint">Total atual <CheckCircle2 size={14}/></span>
