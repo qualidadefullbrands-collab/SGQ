@@ -1,5 +1,5 @@
 import {useMemo,useState} from 'react'
-import {ArrowRightLeft,CheckCircle2,ChevronRight,Copy,Edit3,MoreHorizontal,Play,Plus,Trash2} from 'lucide-react'
+import {ArrowRightLeft,CheckCircle2,ChevronRight,ClipboardCheck,Copy,Edit3,MoreHorizontal,Play,Plus,Trash2} from 'lucide-react'
 import './InspectionsKanban.css'
 
 type Process={
