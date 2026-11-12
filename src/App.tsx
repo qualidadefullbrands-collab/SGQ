@@ -592,6 +592,8 @@ export default function App() {
   const [popupMessage,setPopupMessage]=useState('')
   const [aiConclusionBusy,setAiConclusionBusy]=useState(false)
   const [aiConclusionError,setAiConclusionError]=useState('')
+  const [aiConclusionExtraContext,setAiConclusionExtraContext]=useState('')
+  const [aiItExtraContext,setAiItExtraContext]=useState('')
   const [wordDownloading,setWordDownloading]=useState(false)
   const [wordCheckBusy,setWordCheckBusy]=useState(false)
   const [kanbanMovingId,setKanbanMovingId]=useState<string|null>(null)
@@ -2192,7 +2194,7 @@ export default function App() {
     lastItSuggested.current=fingerprint
     setItSuggestBusy(true)
     try{
-      const {data,error}=await authClient.functions.invoke('sgq-it-sugerir',{body:{products,its}})
+      const {data,error}=await authClient.functions.invoke('sgq-it-sugerir',{body:{products,its,contextoAdicional:aiItExtraContext.trim().slice(0,1600)}})
       if(error||!data){setItSuggestionNote('Não foi possível sugerir uma IT. Selecione manualmente.');return}
       const chosen=its.find(x=>x.id===data.id)
       if(chosen&&!manualItSelection.current){
@@ -2758,6 +2760,7 @@ export default function App() {
         dimensionais:(detail.dimResults??[]).map((r:any)=>({conforme:r.conforme,valor:r.valor_medido})),
         testes:(detail.testResults??[]).map((r:any)=>({resultado:r.resultado})),
         textoAtual:finalObservation,
+        contextoAdicional:aiConclusionExtraContext.trim().slice(0,1600),
       }
       const {data,error:aiError}=await authClient.functions.invoke('sgq-conclusao',{body:context})
       let response:any=data
@@ -3065,7 +3068,7 @@ export default function App() {
     if(!sku){setError('Selecione o SKU correto para esta posição.');return}
     const onlyDescription=sku.toUpperCase()===position.sku.toUpperCase()
     const action=onlyDescription?'sincronizar a descrição oficial':'alterar o código para '+sku
-    if(!window.confirm('Posição '+position.codigo+': '+action+'? A alteração será feita apenas nesta posição. Saldo, movimentos anteriores e laudos serão preservados.'))return
+    if(!window.confirm('SKU '+position.sku+' · '+(position.processo||'Sem FST')+' · '+(position.endereco||'Sem endereço')+': '+action+'? Somente esta posição será alterada. Saldo, movimentos e laudos permanecem.'))return
     setStockSkuFixing(position.id);setError('')
     try{
       const response=await apiPost<{ok:boolean;alterado:boolean;sku:string;descricao:string;auditoriaPendente?:boolean}>('/api/estoque/corrigir-sku',{
@@ -3215,7 +3218,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       const disposition=response.headers.get('content-disposition')||''
       const encoded=disposition.match(/filename\*=UTF-8''([^;]+)/i)
       const simple=disposition.match(/filename="?([^";]+)"?/i)
-      const candidate=encoded?.[1]||simple?.[1]||`${detail.numero}.docx`
+      const candidate=encoded?.[1]||simple?.[1]||`${formatFst(detail.grupos_inspecao?.processos?.codigo)}${detail.grupos_inspecao?.subprocesso_codigo?'-'+detail.grupos_inspecao.subprocesso_codigo:''}.docx`
       let filename=candidate
       try{filename=decodeURIComponent(candidate)}catch{}
       const href=URL.createObjectURL(blob)
@@ -3679,6 +3682,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
             <section className="panel section-card inspection-it-choice">
               <div className="section-title"><h2>IT aplicável</h2><button className="secondary small" type="button" disabled={itSuggestBusy} onClick={()=>void suggestApplicableIt(true)}><Sparkles size={16}/>{itSuggestBusy?'Analisando…':'Sugerir com IA'}</button></div>
+              <label className="sgq-ai-context-label">Contexto adicional para a IA (opcional)
+                <textarea value={aiItExtraContext} onChange={e=>setAiItExtraContext(e.target.value)} rows={2} maxLength={1600} placeholder="Ex.: especificação do produto, finalidade, condição de recebimento ou requisito adicional."/>
+              </label>
               <label>IT desta entrada
                 <select value={inspection.itVersionId} onChange={e=>{
                   manualItSelection.current=true
@@ -4146,6 +4152,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <label>Observação / conclusão</label>
                 <button type="button" className="secondary small" onClick={()=>void suggestAIConclusion()} disabled={aiConclusionBusy}><Sparkles size={16}/>{aiConclusionBusy?'Gerando…':'Gerar sugestão com IA'}</button>
               </div>
+              <label className="sgq-ai-context-label">Contexto complementar para a sugestão (opcional)
+                <textarea value={aiConclusionExtraContext} onChange={e=>setAiConclusionExtraContext(e.target.value)} rows={3} maxLength={1600} placeholder="Ex.: ressalvas dimensionais, condições da embalagem, referência do desenho técnico e impacto observado."/>
+                <small>As informações serão utilizadas como contexto informado pelo inspetor; confira a conclusão antes de salvar.</small>
+              </label>
               {aiConclusionError&&<p className="sgq-ai-conclusion-error" role="alert">{aiConclusionError}</p>}
               <textarea value={finalObservation} onChange={(e)=>setFinalObservation(e.target.value)} rows={5} placeholder="Registre a conclusão da inspeção."/>
               <div className="result-actions">
@@ -4349,11 +4359,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <div className="sgq-stock-sku-positions">
                 {(conflict.posicoes||[]).map(position=><div className="sgq-stock-sku-position" key={position.id}>
                   <div className="sgq-stock-sku-position-meta">
-                    <b>{position.codigo}</b><span>Atual: {position.sku}</span>
+                    <b>SKU atual: {position.sku}</b><span>Processo: {position.processo||'não informado'}</span>
                     <small>{position.processo||'FST não informado'} · {position.endereco||'Sem endereço'} · {Number(position.saldo).toLocaleString('pt-BR')} un.</small>
                   </div>
                   <label>SKU correto
-                    <select aria-label={'SKU correto da posição '+position.codigo}
+                    <select aria-label={'SKU correto para '+position.sku+' de '+(position.processo||'FST não informado')}
                       value={stockSkuSelection[position.id]??position.sku}
                       onChange={e=>setStockSkuSelection(old=>({...old,[position.id]:e.target.value}))}
                       disabled={!canWrite||!!stockSkuFixing}>
@@ -4457,7 +4467,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     <div><small>Nota fiscal</small><strong>{selectedSample.nota_fiscal_referencia || '—'}</strong></div>
                     <div><small>Chegada</small><strong>{selectedSample.data_chegada_referencia || '—'}</strong></div>
                     <div><small>Lote</small><strong>{selectedSample.lote || '—'}</strong></div>
-                    <div><small>Registro</small><strong>{selectedSample.codigo}</strong></div>
                   </div>
                   {selectedSample.observacao && <div className="stock-detail-note"><b>Observação</b><span>{selectedSample.observacao}</span></div>}
                   <div className="stock-inspection-status">
