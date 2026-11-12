@@ -39,7 +39,7 @@ test('reference dashboard provides responsive cards, chart, navigation and real 
  assert.match(css,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/)
  assert.match(css,/@media\(max-width:620px\)/)
  assert.match(css,/data-status-filter="concluida"/)
- assert.match(board,/externalQuery \?\? query/)
+ assert.match(board,/externalQuery \?\? \(mode==='page'\?'':query\)/)
  assert.match(board,/mode==='panel'\s*\?column\.items/)
 })
 
