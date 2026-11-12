@@ -628,6 +628,7 @@ export default function App() {
   const [counts, setCounts] = useState({ processos: 0, inspecoes: 0, amostras: 0, laudos: 0 })
   const [processes, setProcesses] = useState<ProcessRow[]>([])
   const [inspections, setInspections] = useState<InspectionRow[]>([])
+  const [processItemLinks,setProcessItemLinks]=useState<Array<{grupo_inspecao_id:string;processo_itens?:{codigo_cliente?:string|null;produtos?:{sku?:string|null;nome?:string|null}|null}|null}>>([])
   const [omieInbox,setOmieInbox]=useState<OmieInboxOrder[]>([])
   const [omieInboxSeen,setOmieInboxSeen]=useState<Set<string>>(new Set())
   const [omieInboxError,setOmieInboxError]=useState('')
@@ -1034,6 +1035,7 @@ export default function App() {
       setProfile(null)
       setProcesses([])
       setInspections([])
+      setProcessItemLinks([])
       setSamples([])
       setItVersions([])
       setGroups([])
@@ -1182,6 +1184,7 @@ export default function App() {
             setProfile(offline.profile)
             setProcesses(offline.processes||[])
             setInspections(offline.inspections||[])
+            setProcessItemLinks(offline.itemLinks||[])
             return
           }
         }
@@ -1195,10 +1198,11 @@ export default function App() {
         return
       }
       setProfile(data.profile as Profile)
-      void saveOfflineDraft(userId||'','app:bootstrap',{profile:data.profile,processes:data.processes,inspections:data.inspections})
+      void saveOfflineDraft(userId||'','app:bootstrap',{profile:data.profile,processes:data.processes,inspections:data.inspections,itemLinks:data.itemLinks})
         .catch(()=>undefined)
       setProcesses((data.processes ?? []) as ProcessRow[])
       setInspections((data.inspections ?? []) as InspectionRow[])
+      setProcessItemLinks(data.itemLinks??[])
       setCounts(old=>({
         ...old,processos:(data.processes??[]).length,inspecoes:(data.inspections??[]).length
       }))
@@ -1580,6 +1584,7 @@ export default function App() {
        refreshId!==listRefreshSequence.current)return
     setProcesses((res.data.processes??[]) as ProcessRow[])
     setInspections((res.data.inspections??[]) as InspectionRow[])
+    setProcessItemLinks(res.data.itemLinks??[])
   }
 
   function openOmieSkuReview(suggestion:OmieSkuImport){
@@ -3381,6 +3386,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             externalQuery={dashboardSearch}
             inspections={inspections}
             processes={processes}
+            itemLinks={processItemLinks}
             canDelete={!!canDelete}
             canMove={!!canWrite}
             movingInspectionId={kanbanMovingId}
@@ -3435,6 +3441,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         focusProcessId={focusedProcessId}
         inspections={inspections}
         processes={processes}
+        itemLinks={processItemLinks}
         canDelete={!!canDelete}
         deletingProcessId={deletingProcessId}
         canMove={!!canWrite}
@@ -3452,6 +3459,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       {tab==='quadro' && <InspectionsKanban key="quadro" initialView="kanban"
         inspections={inspections}
         processes={processes}
+        itemLinks={processItemLinks}
         canDelete={!!canDelete}
         deletingProcessId={deletingProcessId}
         canMove={!!canWrite}
