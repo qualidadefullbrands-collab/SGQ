@@ -223,8 +223,10 @@ export default function InspectionsKanban({
               aria-controls={'sgq-process-children-'+process.id}>
               <ChevronRight size={18} className={expanded?'is-expanded':''}/>
               <span className="sgq-process-node-identity">
-                <strong>{processLabel}</strong>
-                {(()=>{const arrivals=entry.subprocesses.filter(x=>x.arrival).map(x=>x.letter+': '+formatArrival(x.arrival));const arrival=process.chegada_cd?formatArrival(process.chegada_cd):[...new Set(arrivals)].join(' · ');return <small className="sgq-process-arrival">Chegada ao CD: {arrival||'não registrada'}</small>})()}
+                <span className="sgq-process-identity-head">
+                  <strong>{processLabel}</strong>
+                  {(()=>{const arrivals=entry.subprocesses.filter(x=>x.arrival).map(x=>x.letter+': '+formatArrival(x.arrival));const arrival=process.chegada_cd?formatArrival(process.chegada_cd):[...new Set(arrivals)].join(' · ');return <small className="sgq-process-arrival">Chegada ao CD: {arrival||'não registrada'}</small>})()}
+                </span>
                 <span>{process.cliente||'Cliente não informado'}</span>
               </span>
             </button>
@@ -256,7 +258,7 @@ export default function InspectionsKanban({
                     <div className="sgq-subprocess-products">
                       {(linkedItemsByGroup.get(sub.key)||[]).length
                         ?(linkedItemsByGroup.get(sub.key)||[]).map((product,i)=><span key={product.sku+'-'+i} className="sgq-subprocess-product"><b>{product.sku||'SKU não informado'}</b><span>{product.descricao||'Descrição não informada'}</span></span>)
-                        :<span>{sub.name}</span>}
+                        :<span>Produtos ainda não vinculados à entrada.</span>}
                     </div>
                   </div>
                   <span className="sgq-subprocess-invoice">{sub.invoice?'NF '+sub.invoice:'NF não informada'}</span>
