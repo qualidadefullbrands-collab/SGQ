@@ -3373,6 +3373,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           inspections={inspections}
           processCount={processes.length}
           stockCount={samples.length}
+          processes={processes}
+          stockPositions={samples}
           searchQuery={dashboardSearch}
           onSearchChange={setDashboardSearch}
           onNewInspection={()=>{resetNewInspection();setTab('nova')}}
