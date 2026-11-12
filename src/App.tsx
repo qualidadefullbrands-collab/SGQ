@@ -815,6 +815,13 @@ export default function App() {
   const [selectedSamplePhotoUrl, setSelectedSamplePhotoUrl] = useState('')
   const [selectedSampleProductPhotoUrl, setSelectedSampleProductPhotoUrl] = useState('')
   const [selectedSampleReport, setSelectedSampleReport] = useState<{numero:string;url:string|null}|null>(null)
+  const [stockDocuments,setStockDocuments]=useState<Array<{id:string;arquivo_nome:string;storage_path:string;resultado:string;observacao:string|null;data_inspecao:string|null;criado_em:string}>>([])
+  const [stockDocumentFile,setStockDocumentFile]=useState<File|null>(null)
+  const [stockDocumentResult,setStockDocumentResult]=useState('nao_classificado')
+  const [stockDocumentObservation,setStockDocumentObservation]=useState('')
+  const [stockDocumentDate,setStockDocumentDate]=useState('')
+  const [stockDocumentBusy,setStockDocumentBusy]=useState(false)
+  const [stockDocumentError,setStockDocumentError]=useState('')
 
   const [inspection, setInspection] = useState({
     processoId: '',
@@ -1108,6 +1115,69 @@ export default function App() {
     return ()=>{active=false}
   }, [selectedSample])
 
+
+
+  useEffect(()=>{
+    setStockDocuments([])
+    setStockDocumentFile(null)
+    setStockDocumentResult('nao_classificado')
+    setStockDocumentObservation('')
+    setStockDocumentDate('')
+    setStockDocumentError('')
+    if(!selectedSample?.id||selectedSample.inspecao_id)return
+    let current=true
+    void authClient.from('sgq_estoque_inspecoes_documentais')
+      .select('id,arquivo_nome,storage_path,resultado,observacao,data_inspecao,criado_em')
+      .eq('amostra_id',selectedSample.id).order('criado_em',{ascending:false})
+      .then(({data,error})=>{
+        if(!current)return
+        if(error)setStockDocumentError('Não foi possível carregar os documentos: '+error.message)
+        else setStockDocuments(data||[])
+      })
+    return()=>{current=false}
+  },[selectedSample?.id,selectedSample?.inspecao_id])
+
+  async function uploadStockDocument(){
+    if(!selectedSample||selectedSample.inspecao_id||!stockDocumentFile||!canWrite||stockDocumentBusy)return
+    const file=stockDocumentFile
+    if(!/\.docx$/i.test(file.name)||file.size<10||file.size>15*1024*1024){
+      setStockDocumentError('Selecione um DOCX válido com no máximo 15 MB.');return
+    }
+    setStockDocumentBusy(true);setStockDocumentError('')
+    try{
+      const signature=new Uint8Array(await file.slice(0,4).arrayBuffer())
+      if(signature[0]!==0x50||signature[1]!==0x4b){
+        throw new Error('O arquivo não parece ser um documento Word DOCX válido.')
+      }
+      const {data:{user},error:userError}=await authClient.auth.getUser()
+      if(userError||!user)throw new Error('Sua sessão expirou. Entre novamente.')
+      const path=user.id+'/'+selectedSample.id+'/'+crypto.randomUUID()+'.docx'
+      const {error:uploadError}=await authClient.storage.from('sgq-estoque-word')
+        .upload(path,file,{contentType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',upsert:false})
+      if(uploadError)throw new Error('Falha ao enviar Word: '+uploadError.message)
+      const {data,error:insertError}=await authClient.from('sgq_estoque_inspecoes_documentais').insert({
+        amostra_id:selectedSample.id,arquivo_nome:file.name.slice(0,200),storage_path:path,
+        resultado:stockDocumentResult,observacao:stockDocumentObservation.trim()||null,
+        data_inspecao:stockDocumentDate||null,criado_por:user.id
+      }).select('id,arquivo_nome,storage_path,resultado,observacao,data_inspecao,criado_em').single()
+      if(insertError||!data)throw new Error('Word enviado, mas o vínculo documental falhou. Contate o administrador: '+(insertError?.message||'sem resposta'))
+      setStockDocuments(rows=>[data,...rows])
+      setStockDocumentFile(null);setStockDocumentObservation('');setStockDocumentDate('')
+      setStockDocumentResult('nao_classificado')
+      setMessage('Inspeção documental vinculada à posição de estoque. O cadastro técnico permanece sem inspeção formal.')
+    }catch(e:any){setStockDocumentError(String(e?.message||'Não foi possível registrar o documento.'))}
+    finally{setStockDocumentBusy(false)}
+  }
+
+  async function downloadStockDocument(item:{storage_path:string;arquivo_nome:string}){
+    setStockDocumentError('')
+    const {data,error}=await authClient.storage.from('sgq-estoque-word').download(item.storage_path)
+    if(error||!data){setStockDocumentError('Não foi possível abrir o Word: '+(error?.message||'arquivo ausente'));return}
+    const url=URL.createObjectURL(data)
+    const a=document.createElement('a')
+    a.href=url;a.download=item.arquivo_nome;document.body.appendChild(a);a.click();a.remove()
+    window.setTimeout(()=>URL.revokeObjectURL(url),15000)
+  }
 
   async function loadCatalogs(){
     if(catalogsRequest.current)return catalogsRequest.current
@@ -4469,6 +4539,32 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                     <div><small>Lote</small><strong>{selectedSample.lote || '—'}</strong></div>
                   </div>
                   {selectedSample.observacao && <div className="stock-detail-note"><b>Observação</b><span>{selectedSample.observacao}</span></div>}
+                  {!selectedSample.inspecao_id&&<div className="stock-document-panel">
+                    <h3>Inspeção documental avulsa</h3>
+                    <p>Associe a inspeção preenchida em DOCX à posição de estoque. Não cria uma inspeção aprovada automaticamente.</p>
+                    {!!stockDocuments.length&&<div className="stock-document-list">{stockDocuments.map(item=><div key={item.id}>
+                      <div><strong>{item.arquivo_nome}</strong>
+                        <small>{item.data_inspecao?formatDateBR(item.data_inspecao):new Date(item.criado_em).toLocaleDateString('pt-BR')} · {item.resultado==='nao_classificado'?'Resultado não classificado':item.resultado.replaceAll('_',' ')}</small>
+                        {item.observacao&&<span>{item.observacao}</span>}
+                      </div>
+                      <button type="button" className="secondary small" onClick={()=>void downloadStockDocument(item)}><FileDown size={15}/> Baixar Word</button>
+                    </div>)}</div>}
+                    {canWrite&&<div className="stock-document-form">
+                      <label>Documento preenchido (.docx)
+                        <input type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={e=>setStockDocumentFile(e.target.files?.[0]??null)}/>
+                      </label>
+                      <label>Data da inspeção (se conhecida)<input type="date" value={stockDocumentDate} onChange={e=>setStockDocumentDate(e.target.value)}/></label>
+                      <label>Resultado registrado no documento<select value={stockDocumentResult} onChange={e=>setStockDocumentResult(e.target.value)}>
+                        <option value="nao_classificado">Não classificado / a verificar</option>
+                        <option value="aprovado">Aprovado</option><option value="reprovado">Reprovado</option>
+                        <option value="com_ressalvas">Com ressalvas</option>
+                      </select></label>
+                      <label className="span-2">Observações (opcional)<textarea rows={2} maxLength={1800} value={stockDocumentObservation} onChange={e=>setStockDocumentObservation(e.target.value)} placeholder="Referência, lote, ressalvas ou responsável pela inspeção"/></label>
+                      {stockDocumentError&&<p className="field-status bad" role="alert">{stockDocumentError}</p>}
+                      <button type="button" className="primary" disabled={!stockDocumentFile||stockDocumentBusy} onClick={()=>void uploadStockDocument()}><Upload size={16}/>{stockDocumentBusy?'Salvando…':'Vincular Word à amostra'}</button>
+                    </div>}
+                    {!canWrite&&stockDocumentError&&<p role="alert">{stockDocumentError}</p>}
+                  </div>}
                   <div className="stock-inspection-status">
                     <b>Inspeção de origem</b>
                     {selectedSample.inspecao_id ? (()=>{const related=inspections.find(i=>i.id===selectedSample.inspecao_id);return related
