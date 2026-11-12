@@ -31,13 +31,20 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
   const [eventDraft,setEventDraft]=useState<EventDraft>(newEvent())
   const [saving,setSaving]=useState(false)
   const [search,setSearch]=useState('')
+  const [equipmentFilter,setEquipmentFilter]=useState<'todos'|'ativos'|'vencidos'|'vencendo'>('todos')
   const [notice,setNotice]=useState('')
   useEffect(()=>{if(!notice)return;const timer=window.setTimeout(()=>setNotice(''),3500);return()=>window.clearTimeout(timer)},[notice])
   const [failure,setFailure]=useState('')
   const today=localDate()
   const thirty=localDate(new Date(Date.now()+30*86400000))
   const alerts=useMemo(()=>equipments.filter(e=>e.estado==='ativo'&&e.requer_calibracao&&(!e.proxima_calibracao||e.proxima_calibracao<=thirty)),[equipments,thirty])
-  const shown=useMemo(()=>equipments.filter(e=>[e.nome,e.codigo,e.fabricante,e.localizacao,e.numero_serie].some(s=>String(s||'').toLowerCase().includes(search.toLowerCase()))),[equipments,search])
+  const shown=useMemo(()=>equipments.filter(e=>{
+    const matches=[e.nome,e.codigo,e.fabricante,e.localizacao,e.numero_serie].some(s=>String(s||'').toLowerCase().includes(search.toLowerCase()))
+    const status=equipmentOperationalStatus(e,today)
+    const due=e.estado==='ativo'&&!!e.requer_calibracao&&(!e.proxima_calibracao||e.proxima_calibracao<today)
+    const soon=e.estado==='ativo'&&!!e.requer_calibracao&&!!e.proxima_calibracao&&e.proxima_calibracao>=today&&e.proxima_calibracao<=thirty
+    return matches&&(equipmentFilter==='todos'||equipmentFilter==='ativos'&&status==='ativo'||equipmentFilter==='vencidos'&&due||equipmentFilter==='vencendo'&&soon)
+  }),[equipments,search,equipmentFilter,today,thirty])
   useEffect(()=>{
     if(!selected){setEvents([]);setEventsError('');return}
     let valid=true
@@ -96,37 +103,50 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
       <div className="row-actions"><button className="secondary" type="button" disabled={busy} onClick={()=>void refresh()}><RefreshCw size={16}/> Atualizar</button>{canManage&&<button className="primary" type="button" onClick={()=>setEditing(blank())}><Plus size={17}/> Cadastrar equipamento</button>}</div></div>
     {notice&&<div className="alert success" role="status">{notice}</div>}
     {failure&&<div className="alert error" role="alert">{failure}</div>}
-    <div className="equipment-summary">
-      <div><strong>{equipments.length}</strong><span>Equipamentos cadastrados</span></div>
-      <div><strong>{equipments.filter(e=>equipmentOperationalStatus(e,today)==='ativo').length}</strong><span>Ativos</span></div>
-      <div><strong>{alerts.filter(e=>!e.proxima_calibracao||e.proxima_calibracao<today).length}</strong><span>Calibração pendente/vencida</span></div>
-      <div><strong>{alerts.filter(e=>e.proxima_calibracao&&e.proxima_calibracao>=today).length}</strong><span>Vencem em até 30 dias</span></div>
+    <div className="equipment-summary" aria-label="Filtrar equipamentos pelos indicadores">
+      {([
+        ['todos',equipments.length,'Equipamentos cadastrados'],
+        ['ativos',equipments.filter(e=>equipmentOperationalStatus(e,today)==='ativo').length,'Ativos'],
+        ['vencidos',alerts.filter(e=>!e.proxima_calibracao||e.proxima_calibracao<today).length,'Calibração pendente/vencida'],
+        ['vencendo',alerts.filter(e=>e.proxima_calibracao&&e.proxima_calibracao>=today).length,'Vencem em até 30 dias'],
+      ] as const).map(([filter,count,label])=><button type="button" key={filter}
+        className={'equipment-summary-card '+(equipmentFilter===filter?'is-selected':'')}
+        aria-pressed={equipmentFilter===filter} onClick={()=>setEquipmentFilter(filter)}>
+        <strong>{count}</strong><span>{label}</span>
+      </button>)}
     </div>
     <div className="equipment-toolbar"><SlidersHorizontal size={17}/><input aria-label="Buscar equipamentos" placeholder="Buscar por código, nome, local ou número de série" value={search} onChange={e=>setSearch(e.target.value)}/></div>
     {!equipments.length&&<div className="panel section-card"><h2>Cadastro preparado</h2><p>A base está vazia. Cadastre instrumentos manualmente ou importe os registros da planilha quando ela estiver acessível. Nenhum equipamento foi inventado.</p></div>}
+    <div className="equipment-active-filter">{equipmentFilter==='todos'?'Todos os equipamentos':equipmentFilter==='ativos'?'Equipamentos ativos':equipmentFilter==='vencidos'?'Calibração pendente ou vencida':'Vencimento nos próximos 30 dias'} · {shown.length} resultado(s)</div>
     <div className="equipment-list">
       {shown.map(e=>{
         const operationalStatus=equipmentOperationalStatus(e,today)
-        return <article key={e.id} className={'equipment-row '+(selected===e.id?'selected':'')}>
+        return <article key={e.id} className={'equipment-row equipment-row-interactive '+(selected===e.id?'selected':'')}
+        role="button" tabIndex={0} aria-label={'Abrir equipamento '+e.codigo+' · '+e.nome}
+        onClick={()=>{setSelected(e.id);setEditing(null);setSection('historico')}}
+        onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();setSelected(e.id);setEditing(null);setSection('historico')}}}>
         <div><b>{e.codigo} · {e.nome}</b><span>{[String(e.dados_origem?.tipo_controle||'Controle de rotina'),e.localizacao,e.patrimonio].filter(Boolean).join(' · ')}</span></div>
         <div><span className={'equipment-status '+(operationalStatus==='ativo'?'valid':'inactive')}>{operationalStatus==='calibracao_pendente'?'Calibração pendente':operationalStatus==='ativo'?'Ativo':operationalStatus.replaceAll('_',' ')}</span>{e.requer_calibracao&&<small>Próxima calibração: {fmt(e.proxima_calibracao)}</small>}</div>
-        <div className="equipment-actions"><button className="secondary small" type="button" onClick={()=>{setSelected(selected===e.id?'':e.id);setSection('historico')}}><ClipboardCheck size={15}/> Histórico</button>{canManage&&<button className="secondary small" type="button" onClick={()=>setEditing({...e})}><Wrench size={15}/> Editar</button>}</div>
+        <div className="equipment-actions"><span>Abrir detalhes ›</span></div>
       </article>})}
     </div>
     {selected&&<div className="modal-backdrop equipment-history-backdrop" role="presentation">
       <section className="sample-detail panel section-card equipment-history" role="dialog" aria-modal="true" aria-labelledby="equipment-history-title" onClick={e=>e.stopPropagation()}>
-      <div className="section-title"><h2 id="equipment-history-title">Histórico do equipamento</h2><button className="secondary small" onClick={()=>{if(!saving)setSelected('')}} type="button" aria-label="Fechar histórico do equipamento" title="Fechar histórico do equipamento" disabled={saving}>×</button></div>
-      {section==='historico' && <div className="equipment-events">{eventsLoading?<p>Carregando histórico…</p>:eventsError?<p role="alert">{eventsError}</p>:events.length?events.map(e=><div key={e.id}><b>{e.tipo.replaceAll('_',' ')}</b><span>{fmt(e.data_evento)} · {e.resultado}{e.proximo_vencimento?' · Próximo: '+fmt(e.proximo_vencimento):''}</span>{e.observacoes&&<small>{e.observacoes}</small>}{e.documento_url&&<a href={e.documento_url} target="_blank" rel="noreferrer">Certificado / evidência</a>}</div>):<p>Nenhum evento cadastrado.</p>}</div>}
-      <div className="equipment-section-tabs">
+      <div className="section-title"><div><h2 id="equipment-history-title">{editing?'Editar cadastro':'Detalhes do equipamento'}</h2>
+        <small>{equipments.find(e=>e.id===selected)?.codigo} · {equipments.find(e=>e.id===selected)?.nome}</small></div>
+        <div className="row-actions">{canManage&&!editing&&<button className="secondary small" type="button" onClick={()=>{const current=equipments.find(e=>e.id===selected);if(current)setEditing({...current})}}><Wrench size={15}/> Editar cadastro</button>}
+        <button className="secondary small" onClick={()=>{if(!saving){setSelected('');setEditing(null)}}} type="button" aria-label="Fechar equipamento" title="Fechar equipamento" disabled={saving}>×</button></div></div>
+      {!editing&&section==='historico' && <div className="equipment-events">{eventsLoading?<p>Carregando histórico…</p>:eventsError?<p role="alert">{eventsError}</p>:events.length?events.map(e=><div key={e.id}><b>{e.tipo.replaceAll('_',' ')}</b><span>{fmt(e.data_evento)} · {e.resultado}{e.proximo_vencimento?' · Próximo: '+fmt(e.proximo_vencimento):''}</span>{e.observacoes&&<small>{e.observacoes}</small>}{e.documento_url&&<a href={e.documento_url} target="_blank" rel="noreferrer">Certificado / evidência</a>}</div>):<p>Nenhum evento cadastrado.</p>}</div>}
+      {!editing&&<div className="equipment-section-tabs">
         {([['historico','Histórico'],['rotina','Verificação de rotina'],['manutencao','Manutenção'],['calibracao','Calibração']] as const).map(([k,label])=><button className={section===k?'active':''} type="button" key={k} onClick={()=>{
           setSection(k)
           if(k!=='historico')setEventDraft(old=>({...old,tipo:k==='rotina'?'verificacao':k==='calibracao'?'calibracao':'manutencao_preventiva'}))
         }}>{label}</button>)}
-      </div>
-      {section==='rotina' && <div className="routine-checklist"><h3>Checklist de verificação de rotina</h3>
+      </div>}
+      {!editing&&section==='rotina' && <div className="routine-checklist"><h3>Checklist de verificação de rotina</h3>
         {['Identificação legível e íntegra','Condições físicas e conservação','Funcionamento verificado','Limpeza e armazenamento adequados'].map(label=><label key={label}><input type="checkbox" checked={routineChecks.includes(label)} onChange={e=>setRoutineChecks(old=>e.target.checked?[...old,label]:old.filter(v=>v!==label))}/>{label}</label>)}
       </div>}
-      {canManage&&section!=='historico'&&<form onSubmit={saveEvent} className="equipment-event-form">
+      {!editing&&canManage&&section!=='historico'&&<form onSubmit={saveEvent} className="equipment-event-form">
         <h3>{section==='rotina'?'Registrar verificação de rotina':section==='calibracao'?'Registrar calibração':'Registrar manutenção'}</h3>
         {section==='manutencao'&&<label>Tipo de manutenção<select value={eventDraft.tipo} onChange={e=>setEventDraft({...eventDraft,tipo:e.target.value})}><option value="manutencao_preventiva">Preventiva</option><option value="manutencao_corretiva">Corretiva</option></select></label>}
         <label>Data<input required type="date" value={eventDraft.data_evento} onChange={e=>setEventDraft({...eventDraft,data_evento:e.target.value})}/></label>
@@ -137,9 +157,35 @@ export default function EquipmentPage({canManage,equipments,setEquipments,busy,r
         <label className="span-2">Observações<textarea rows={2} value={eventDraft.observacoes} onChange={e=>setEventDraft({...eventDraft,observacoes:e.target.value})}/></label>
         <button className="primary" disabled={saving} type="submit"><Save size={16}/> Registrar evento</button>
       </form>}
+    {editing&&selected&&<div className="equipment-editor-inline"><form className={'sample-detail equipment-editor '+(selected?'equipment-editor-inner':'inspection-edit-modal')} onClick={e=>e.stopPropagation()} onSubmit={saveEquipment}>
+      <button className="close" type="button" onClick={()=>setEditing(null)}>×</button>
+      <h2>{editing.id?'Editar equipamento':'Cadastrar equipamento'}</h2>
+      <div className="form-grid">
+        {field('Código','codigo')}{field('Nome do equipamento','nome')}
+        <label>Finalidade para uso nas inspeções<select value={editing.tipo||'instrumento'} onChange={e=>setEditing({...editing,tipo:e.target.value})}><option value="instrumento">Medição metrológica</option><option value="dimensional">Medição dimensional</option><option value="teste">Ensaio ou teste funcional</option><option value="apoio">Apoio ou conservação (não medir)</option></select></label>
+        {!!editing.dados_origem?.tipo_controle && <div className="span-2 equipment-source"><b>Controle previsto na L 017</b><span>{String(editing.dados_origem.tipo_controle)}</span><small>Criticidade {String(editing.dados_origem.criticidade||'—')} · classificação original preservada</small></div>}
+        {field('Fabricante','fabricante')}{field('Modelo','modelo')}{field('Número de série','numero_serie')}{field('Patrimônio','patrimonio')}
+        {field('Setor','setor')}{field('Localização','localizacao')}{field('Responsável','responsavel')}
+        {field('Unidade','unidade')}{field('Faixa de medição','faixa_medicao')}{field('Resolução','resolucao')}{field('Tolerância','tolerancia')}
+        <label>Estado<select value={editing.estado||'ativo'} onChange={e=>setEditing({...editing,estado:e.target.value as Equipment['estado']})}><option value="ativo">Ativo</option><option value="em_manutencao">Em manutenção</option><option value="interditado">Interditado</option><option value="inativo">Inativo</option></select></label>
+        <label className="check-option span-2"><input type="checkbox" checked={editing.requer_calibracao===false} onChange={e=>setEditing({...editing,requer_calibracao:!e.target.checked})}/> Não precisa de calibração</label>
+        {field('Última calibração','ultima_calibracao',{type:'date'})}
+        {field('Próxima calibração','proxima_calibracao',{type:'date'})}
+        {field('Próxima verificação','proxima_verificacao',{type:'date'})}
+        {field('Próxima manutenção','proxima_manutencao',{type:'date'})}
+        {field('Laboratório de calibração','laboratorio_calibracao')}
+        {field('Certificado (URL ou número)','certificado_calibracao')}
+        <label>Periodicidade da calibração (meses)<input type="number" min="1" value={editing.periodicidade_calibracao_meses??''} onChange={e=>setEditing({...editing,periodicidade_calibracao_meses:e.target.value?Number(e.target.value):null})}/></label>
+        <div className="span-2 equipment-applications"><b>Aplicações permitidas</b><small>Selecione somente as grandezas que o instrumento pode medir.</small>
+          <div>{uses.map(use=><label className="check-option" key={use}><input type="checkbox" checked={(editing.aplicacoes||[]).includes(use)} onChange={e=>setEditing({...editing,aplicacoes:e.target.checked?[...(editing.aplicacoes||[]),use]:(editing.aplicacoes||[]).filter(u=>u!==use)})}/>{use}</label>)}</div>
+        </div>
+        <label className="span-2">Observações<textarea value={editing.observacoes||''} onChange={e=>setEditing({...editing,observacoes:e.target.value})}/></label>
+      </div>
+      <button type="submit" className="primary wide" disabled={saving||!editing.nome?.trim()||!editing.codigo?.trim()}><CheckCircle2 size={16}/>{saving?'Salvando…':'Salvar equipamento'}</button>
+    </form></div>}
       </section>
     </div>}
-    {editing&&<div className="modal-backdrop"><form className="sample-detail inspection-edit-modal equipment-editor" onClick={e=>e.stopPropagation()} onSubmit={saveEquipment}>
+    {editing&&!selected&&<div className="modal-backdrop"><form className={'sample-detail equipment-editor '+(selected?'equipment-editor-inner':'inspection-edit-modal')} onClick={e=>e.stopPropagation()} onSubmit={saveEquipment}>
       <button className="close" type="button" onClick={()=>setEditing(null)}>×</button>
       <h2>{editing.id?'Editar equipamento':'Cadastrar equipamento'}</h2>
       <div className="form-grid">
