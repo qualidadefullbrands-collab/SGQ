@@ -12,6 +12,31 @@ const productEndpoint='https://app.omie.com.br/api/v1/geral/produtos/'
 
 type Photo={id:string;item_id:string;codigo_omie:string;storage_path:string;criado_por:string;status:string;omie_url:string|null}
 type Item={id:string;codigo_omie:string;inventario_id:string;criado_por:string}
+
+type ImageUrl={url_imagem:string}
+const imageIdentity=(url:string)=>clean(url).split('?')[0]
+const imagesOf=(product:{imagens?:unknown}):ImageUrl[]=>Array.isArray(product.imagens)
+ ?product.imagens.map((entry:unknown)=>({url_imagem:clean((entry as {url_imagem?:string})?.url_imagem)}))
+  .filter((entry:ImageUrl)=>/^https:\/\//i.test(entry.url_imagem))
+ :[]
+// Omie imports external URLs into its own CDN: a successful write returns a
+// different URL in ConsultarProduto. Never compare the final URL to the source.
+function newlyImportedImage(before:ImageUrl[],after:ImageUrl[]):string|null{
+ if(after.length<=before.length)return null
+ const previous=new Set(before.map(img=>imageIdentity(img.url_imagem)))
+ if(!before.every(img=>after.some(next=>imageIdentity(next.url_imagem)===imageIdentity(img.url_imagem))))return null
+ const added=after.filter(img=>!previous.has(imageIdentity(img.url_imagem)))
+ return added.length===1?added[0].url_imagem:null
+}
+function matchesOmieUpdateTime(product:{info?:{dAlt?:string;hAlt?:string}},isoDate:string){
+ const date=clean(product.info?.dAlt),clock=clean(product.info?.hAlt)
+ const m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(date)
+ if(!m||!/^\d{2}:\d{2}:\d{2}$/.test(clock))return false
+ // Omie's update history is in the Brazilian app's local timezone.
+ const updated=Date.parse(m[3]+'-'+m[2]+'-'+m[1]+'T'+clock+'-03:00')
+ const attempted=Date.parse(isoDate)
+ return Number.isFinite(updated)&&Number.isFinite(attempted)&&Math.abs(updated-attempted)<120000
+}
 const msg=(e:unknown)=>{
  const value=e instanceof Error?e.message:clean(e)
  return (/^(Omie:|Foto:|Produto:|O limite|Cadastro)/.test(value)?value:'Erro de sincronização. Foto preservada no SGQ.').slice(0,380)
@@ -35,16 +60,16 @@ async function omie(call:string,param:Record<string,unknown>,key:string,secret:s
   return body
  }finally{clearTimeout(timer)}
 }
-async function storeResult(photo:Photo,userId:string,url:string,previous:{url_imagem:string}[]){
+async function storeResult(photo:Photo,userId:string,omieUrl:string,previous:ImageUrl[],sourceUrl:string){
  const {error}=await admin.from('sgq_inventario_cego_imagens').update({
-  status:'sincronizada',omie_url:url,erro:null,sincronizada_em:new Date().toISOString(),atualizado_em:new Date().toISOString()
+  status:'sincronizada',omie_url:omieUrl,erro:null,sincronizada_em:new Date().toISOString(),atualizado_em:new Date().toISOString()
  }).eq('id',photo.id).eq('status','enviando')
  if(error)throw new Error('Omie: imagem publicada, mas a confirmação local falhou. Confira antes de repetir.')
  await admin.from('sgq_inventario_cego_foto_logs').insert({
   item_id:photo.item_id,executado_por:userId,status:'sincronizada',
-  url_publicada:url,imagens_anteriores:previous,detalhe:'Foto '+photo.id+' publicada imediatamente no SKU '+photo.codigo_omie
+  url_publicada:sourceUrl,imagens_anteriores:previous,detalhe:'Foto '+photo.id+' confirmada no catálogo Omie (CDN) para o SKU '+photo.codigo_omie
  })
- return json({ok:true,sku:photo.codigo_omie,photoId:photo.id,url})
+ return json({ok:true,sku:photo.codigo_omie,photoId:photo.id,url:omieUrl})
 }
 
 Deno.serve(async(req:Request)=>{
@@ -118,12 +143,28 @@ Deno.serve(async(req:Request)=>{
   if(!Number.isSafeInteger(id)||id<=0)throw new Error('Produto: ID do Omie indisponível.')
   if(!Array.isArray(product.imagens))
    throw new Error('Produto: lista de imagens não foi retornada pelo Omie.')
-  originals=product.imagens.map((entry:unknown)=>({url_imagem:clean((entry as {url_imagem?:string})?.url_imagem)}))
-   .filter((entry:{url_imagem:string})=>/^https:\/\//i.test(entry.url_imagem))
-
-  // Idempotency: retry after a network failure must not add the same image twice.
-  if(originals.some(img=>img.url_imagem===publicUrl))
-   return await storeResult(photo,user.id,publicUrl,originals)
+  originals=imagesOf(product)
+  // A previous attempt may have succeeded in Omie but failed only because the
+  // old verifier compared the source URL to Omie's rehosted CDN URL.
+  // Reconcile its audited pre-write snapshot BEFORE calling AlterarProduto
+  // again, so retry cannot duplicate a picture or replace earlier images.
+  const {data:failures}=await admin.from('sgq_inventario_cego_foto_logs')
+   .select('imagens_anteriores,url_publicada,criado_em')
+   .eq('item_id',photo.item_id).eq('status','erro')
+   .order('criado_em',{ascending:false}).limit(10)
+  for(const log of failures||[]){
+   if(clean(log.url_publicada)!==publicUrl||!Array.isArray(log.imagens_anteriores))continue
+   const beforeImages=(log.imagens_anteriores as ImageUrl[])
+    .filter(img=>/^https:\/\//i.test(clean(img.url_imagem)))
+   const converted=newlyImportedImage(beforeImages,originals)
+   if(converted&&matchesOmieUpdateTime(product,log.criado_em))
+    return await storeResult(photo,user.id,converted,beforeImages,publicUrl)
+  }
+  // The Omie catalogue may contain the original public image URL for certain
+  // products; this direct match remains a safe idempotent fast path.
+  const previouslyPublished=originals.find(img=>imageIdentity(img.url_imagem)===imageIdentity(publicUrl))
+  if(previouslyPublished)
+   return await storeResult(photo,user.id,previouslyPublished.url_imagem,originals,publicUrl)
 
   // Each count contributes exactly one image. Never delete another Omie image
   // silently. At the six-image limit, preserve this evidence privately in SGQ
@@ -140,11 +181,17 @@ Deno.serve(async(req:Request)=>{
   if(clean(product.codigo_produto_integracao))
    change.codigo_produto_integracao=product.codigo_produto_integracao
   await omie('AlterarProduto',change,key,secretValue)
-  const after=await omie('ConsultarProduto',{codigo_produto:id},key,secretValue)
-  const confirmed=Array.isArray(after.imagens)&&after.imagens.some((img:{url_imagem?:string})=>
-   clean(img?.url_imagem)===publicUrl)
-  if(!confirmed)throw new Error('Omie: foto enviada, mas ainda não confirmada no produto. Confira antes de repetir.')
-  return await storeResult(photo,user.id,publicUrl,originals)
+  let confirmedUrl:string|null=null
+  for(const delay of [0,900,1800]){
+   if(delay)await new Promise(resolve=>setTimeout(resolve,delay))
+   const after=await omie('ConsultarProduto',{codigo_produto:id},key,secretValue)
+   const verifiedImages=imagesOf(after)
+   confirmedUrl=newlyImportedImage(originals,verifiedImages)
+   if(confirmedUrl)break
+  }
+  if(!confirmedUrl)
+   throw new Error('Omie: a atualização foi solicitada, mas a nova foto ainda não aparece na galeria do SKU. A imagem foi preservada no SGQ. Não repita a contagem.')
+  return await storeResult(photo,user.id,confirmedUrl,originals,publicUrl)
  }catch(e){
   const reason=msg(e)
   await admin.from('sgq_inventario_cego_imagens').update({
