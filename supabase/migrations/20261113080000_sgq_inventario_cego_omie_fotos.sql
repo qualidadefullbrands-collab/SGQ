@@ -21,6 +21,7 @@ create table if not exists public.sgq_inventario_cego_itens (
  quantidade_contada numeric(18,3) not null check(quantidade_contada >= 0),
  observacao text not null default '',
  foto_storage_path text,
+ foto_sgq_path text,
  foto_para_omie boolean not null default false,
  foto_status text not null default 'pendente' check(foto_status in ('pendente','enviando','sincronizada','erro')),
  foto_omie_url text,
@@ -59,7 +60,7 @@ revoke all on public.sgq_inventarios_cegos,public.sgq_inventario_cego_itens,publ
 grant select,insert on public.sgq_inventarios_cegos to authenticated;
 grant update(status,fechado_por,fechado_em) on public.sgq_inventarios_cegos to authenticated;
 grant select,insert on public.sgq_inventario_cego_itens to authenticated;
-grant update(quantidade_contada,observacao,foto_storage_path,foto_para_omie,atualizado_em)
+grant update(quantidade_contada,observacao,foto_storage_path,foto_sgq_path,foto_para_omie,atualizado_em)
  on public.sgq_inventario_cego_itens to authenticated;
 grant select on public.sgq_inventario_cego_foto_logs to authenticated;
 
