@@ -46,7 +46,7 @@ test('one image per SKU count, immediately transmitted to Omie',()=>{
  assert.match(remote,/AlterarProduto/)
  assert.match(remote,/item\.codigo_omie/)
  assert.match(remote,/already_synced:true/)
- assert.match(remote,/originals\.some/)
+ assert.match(remote,/const previouslyPublished=originals\.find/)
  assert.match(remote,/sgq_inventario_cego_foto_logs/)
 })
 test('returning to a process shows already counted items and photo retry',()=>{
