@@ -34,7 +34,14 @@ create table if not exists public.sgq_inventario_cego_itens (
  atualizado_em timestamptz not null default now(),
  unique(inventario_id,codigo_omie,endereco),
  constraint sgq_foto_para_omie_com_evidencia
- check(not foto_para_omie or foto_storage_path is not null)
+ check(not foto_para_omie or foto_storage_path is not null),
+ constraint sgq_foto_storage_path_pertence_ao_item check(
+  foto_storage_path is null or (
+   split_part(foto_storage_path,'/',1)=criado_por::text and
+   split_part(foto_storage_path,'/',2)=inventario_id::text and
+   split_part(foto_storage_path,'/',3)=id::text
+  )
+ )
 );
 create index if not exists sgq_inventario_cego_itens_sessao_idx
  on public.sgq_inventario_cego_itens(inventario_id,criado_em desc);
