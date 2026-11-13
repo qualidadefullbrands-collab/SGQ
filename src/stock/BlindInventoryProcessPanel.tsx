@@ -20,11 +20,11 @@ const describe=(e:unknown)=>e instanceof Error?e.message:trim(e)||'Erro desconhe
 const formats=['application/pdf','image/jpeg','image/png','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document']
 const limit=15*1024*1024
 
-export default function BlindInventoryProcessPanel({sku,omieDescription,inventoryId,canWrite,onChange}:{
- sku:string;omieDescription:string;inventoryId:string;canWrite:boolean
+export default function BlindInventoryProcessPanel({sku,omieDescription,inventoryId,canWrite,initialProcessCode='',onChange}:{
+ sku:string;omieDescription:string;inventoryId:string;canWrite:boolean;initialProcessCode?:string
  onChange:(value:VerifiedBlindContext|null)=>void
 }){
- const [code,setCode]=useState('')
+ const [code,setCode]=useState(initialProcessCode)
  const [process,setProcess]=useState<ProcessRow|null>(null)
  const [client,setClient]=useState('')
  const [confirmed,setConfirmed]=useState(false)
@@ -47,15 +47,15 @@ export default function BlindInventoryProcessPanel({sku,omieDescription,inventor
   if(dbError)throw new Error('Não foi possível listar documentos do processo: '+dbError.message)
   setDocs((data||[]) as DocumentRow[])
  }
- async function lookup(){
+ async function lookup(override?:string){
   invalidate();setProcess(null);setDocs([]);setError('');setNotice('')
-  const requested=code.trim().toUpperCase()
+  const requested=(override??code).trim().toUpperCase()
   if(!/^[A-Z0-9-]{3,40}$/.test(requested)){setError('Informe o código exato do processo SGQ (ex.: FST26125-A).');return}
   setLoading(true)
   try{
    const {data,error:queryError}=await authClient.from('processos')
     .select('id,codigo,cliente,codigo_cliente,status')
-    .eq('codigo',requested).is('excluido_em',null).limit(2)
+    .ilike('codigo',requested).is('excluido_em',null).limit(2)
    if(queryError)throw queryError
    if(!data?.length)throw new Error('Processo não localizado no SGQ. Confira o código completo, inclusive eventual sufixo A/B.')
    if(data.length!==1)throw new Error('Há mais de um registro correspondente. A seleção automática foi bloqueada.')
@@ -91,7 +91,7 @@ export default function BlindInventoryProcessPanel({sku,omieDescription,inventor
     push('Vínculo SKU × processo','nao_verificado','Não é possível validar vínculo sem o cadastro local do produto.')
    }
    push('Cliente físico × SGQ',normalized(client)===normalized(process.cliente)?'conforme':'divergente',
-    'Informado: '+client.trim()+' | SGQ: '+trim(process.cliente)||'Não identificado')
+    'Informado: '+client.trim()+' | SGQ: '+trim(process.cliente||'Não identificado'))
    if(!omie||omie.found!==true){
     push('Processo no Omie',omie?.reason==='not_found_exact'?'divergente':'nao_verificado',
      omie?.reason==='not_found_exact'?'Processo não localizado com o código exato no Omie.':'Consulta ao Omie indisponível ou incompleta; não interpretada como cadastro correto.')
@@ -154,7 +154,11 @@ export default function BlindInventoryProcessPanel({sku,omieDescription,inventor
   if(signError||!data?.signedUrl){setError('Não foi possível abrir a inspeção: '+describe(signError));return}
   window.open(data.signedUrl,'_blank','noopener,noreferrer')
  }
- useEffect(()=>{setProcess(null);setCode('');setClient('');setDocs([]);setChecks([]);setSnapshot(null);setConfirmed(false)},[sku])
+ useEffect(()=>{
+  setProcess(null);setCode(initialProcessCode);setClient('');setDocs([])
+  setChecks([]);setSnapshot(null);setConfirmed(false)
+  if(initialProcessCode)void lookup(initialProcessCode)
+ },[sku,initialProcessCode])
  return <section className="sgq-blind-process">
   <div className="sgq-blind-section-head"><FolderSearch size={20}/><h3>Processo, cliente e divergências cadastrais</h3></div>
   <p>Confirme o processo completo (inclusive sufixos), o cliente físico e o vínculo do produto. Compare os registros do SGQ com o Omie antes de lançar a contagem.</p>
