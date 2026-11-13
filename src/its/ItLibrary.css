@@ -1,0 +1,56 @@
+/* UI/UX Pro Max · Biblioteca de Instruções Técnicas — apresentação apenas */
+.sgq-operational-shell .sgq-it-library {display:grid;gap:16px;min-width:0}
+.sgq-operational-shell .sgq-it-library-toolbar{
+  display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:14px;
+}
+.sgq-operational-shell .sgq-it-library-toolbar h2{font-size:21px;line-height:1.3;color:#112d50;margin:0}
+.sgq-operational-shell .sgq-it-library-toolbar p{font-size:14px;line-height:1.5;color:#526d8f;margin:6px 0 0}
+.sgq-operational-shell .sgq-it-library-search{display:grid;gap:6px;flex:0 1 360px;min-width:min(300px,100%);font-size:13px;font-weight:700;color:#344f71}
+.sgq-operational-shell .sgq-it-search-control{display:flex;gap:9px;align-items:center;border:1px solid #bdcfe0;background:white;border-radius:10px;padding:0 12px;min-height:46px;color:#315f83}
+.sgq-operational-shell .sgq-it-search-control:focus-within{outline:3px solid #b7daf1;outline-offset:2px}
+.sgq-operational-shell .sgq-it-search-control input{border:0!important;box-shadow:none!important;outline:0!important;min-width:0;flex:1;padding:8px 0;font-size:14px;min-height:40px;background:transparent}
+.sgq-operational-shell .sgq-it-library-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sgq-operational-shell .sgq-it-filter{display:inline-flex;gap:8px;align-items:center;justify-content:center;min-height:42px;border:1px solid #d1dfeb;background:#fff;color:#2d506e;border-radius:9px;padding:9px 12px;font:700 13px/1.2 inherit;cursor:pointer}
+.sgq-operational-shell .sgq-it-filter span{display:inline-flex;align-items:center;justify-content:center;min-width:22px;padding:3px 6px;border-radius:999px;background:#edf3f9;color:#25496c;font-size:12px}
+.sgq-operational-shell .sgq-it-filter.is-active{background:#e7f4fc;border-color:#73a9ce;color:#0d527f;box-shadow:inset 0 0 0 1px #73a9ce}
+.sgq-operational-shell .sgq-it-filter.is-active span{background:#d4e9f7}
+.sgq-operational-shell .sgq-it-library-count{font-size:13px;color:#526d8f;margin:0}
+.sgq-operational-shell .sgq-it-library-list{display:grid;gap:11px}
+.sgq-operational-shell .sgq-it-library-card{display:flex;justify-content:space-between;gap:20px;align-items:center;min-width:0;background:#fff;border:1px solid #dbe5f1;border-radius:13px;padding:18px 20px;box-shadow:0 3px 13px rgba(18,55,87,.035)}
+.sgq-operational-shell .sgq-it-library-main{display:grid;gap:7px;min-width:0}
+.sgq-operational-shell .sgq-it-library-identification{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.sgq-operational-shell .sgq-it-library-code{font-size:14px;font-weight:850;color:#145c91;letter-spacing:.02em}
+.sgq-operational-shell .sgq-it-lifecycle{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border:1px solid #d7e4ef;border-radius:999px;font-size:12px;line-height:1.2;font-weight:750;color:#375873;background:#f3f7fb}
+.sgq-operational-shell .sgq-it-lifecycle-vigente{background:#eaf7f2;border-color:#a9d7c2;color:#087057}
+.sgq-operational-shell .sgq-it-lifecycle-revisao{background:#fff7e7;border-color:#ecd9ab;color:#865811}
+.sgq-operational-shell .sgq-it-lifecycle-obsoleto{background:#eef1f5;border-color:#d4dbe3;color:#4b5a6b}
+.sgq-operational-shell .sgq-it-library-main h3{font-size:16px;line-height:1.35;letter-spacing:-.015em;color:#183958;margin:0;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-it-library-meta{display:flex;flex-wrap:wrap;gap:5px 14px;color:#526d8f;font-size:12px;line-height:1.5}
+.sgq-operational-shell .sgq-it-library-meta strong{color:#2a4662}
+.sgq-operational-shell .sgq-it-library-filename{overflow-wrap:anywhere;max-width:460px}
+.sgq-operational-shell .sgq-it-library-ia{margin:0;color:#526d8f;font-size:12px;line-height:1.5}
+.sgq-operational-shell .sgq-it-library-ia span{color:#2574a4;font-size:10px}
+.sgq-operational-shell .sgq-it-library-actions{display:flex;gap:9px;flex-wrap:wrap;justify-content:end;align-items:center;flex:0 0 auto}
+.sgq-operational-shell .sgq-it-library-actions button{min-height:44px;font-size:13px}
+.sgq-operational-shell .sgq-it-library-actions small{font-size:12px;color:#526d8f}
+.sgq-operational-shell .sgq-it-library-empty{display:grid;justify-items:center;text-align:center;gap:8px;padding:38px 20px;background:white;border:1px dashed #c5d7e8;border-radius:13px;color:#365979}
+.sgq-operational-shell .sgq-it-library-empty strong{font-size:16px;color:#183958}
+.sgq-operational-shell .sgq-it-library-empty p{font-size:14px;margin:0 0 5px;color:#526d8f}
+.sgq-operational-shell .sgq-it-upload-panel{border:1px solid #dbe5f1;border-radius:13px;background:#fff;margin:0 0 20px}
+.sgq-operational-shell .sgq-it-upload-panel>summary{cursor:pointer;list-style:revert;padding:15px 20px;font-size:15px;font-weight:800;color:#1b4a71}
+.sgq-operational-shell .sgq-it-upload-panel>summary::marker{color:#1c6193}
+.sgq-operational-shell .sgq-it-upload-panel .sgq-it-upload-content{padding:0 20px 20px}
+.sgq-operational-shell .sgq-it-upload-panel .sgq-it-upload-content>p{font-size:13px;color:#526d8f;line-height:1.5;margin:0 0 15px}
+.sgq-operational-shell .sgq-it-upload-panel .sgq-it-upload-content>form{box-shadow:none;border:0;padding:0;background:transparent}
+@media(max-width:850px){
+  .sgq-operational-shell .sgq-it-library-card{align-items:stretch;flex-direction:column;gap:14px;padding:16px}
+  .sgq-operational-shell .sgq-it-library-actions{justify-content:start}
+  .sgq-operational-shell .sgq-it-library-toolbar{align-items:stretch}
+  .sgq-operational-shell .sgq-it-library-search{flex:1 1 100%;width:100%;min-width:0}
+  .sgq-operational-shell .sgq-it-filter{min-height:44px}
+}
+@media(max-width:480px){
+  .sgq-operational-shell .sgq-it-library-actions button{width:100%;justify-content:center}
+  .sgq-operational-shell .sgq-it-library-filters{gap:6px}
+  .sgq-operational-shell .sgq-it-filter{font-size:12px;padding:8px 10px}
+}
