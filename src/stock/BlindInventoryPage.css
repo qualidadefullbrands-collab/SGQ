@@ -136,3 +136,24 @@
 .sgq-blind-photo-note{width:100%;max-width:none}
 .sgq-blind-client-confirm input[type=checkbox]{min-height:initial}
 @media(max-width:740px){.sgq-blind-inspection-form{grid-template-columns:minmax(0,1fr)}.sgq-blind-checks>div{flex-wrap:wrap}.sgq-blind-checks b{margin-left:26px}}
+
+/* Two entry paths for a blind count: product code or FST process. */
+.sgq-blind-lookup-modes{display:flex;align-items:center;flex-wrap:wrap;gap:9px}
+.sgq-blind-lookup-modes button{min-height:40px}
+.sgq-blind-process-choices{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+.sgq-blind-process-choices button{display:grid;justify-items:start;gap:4px;white-space:normal;text-align:left}
+.sgq-blind-process-choices strong{font-size:13px}
+.sgq-blind-process-choices span{font-size:11px;opacity:.8}
+.sgq-blind-process-found{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:#edf8f5;border:1px solid #cce8dc;color:#245c4b;padding:12px 14px;border-radius:10px}
+.sgq-blind-process-found strong{font-size:13px}
+.sgq-blind-process-found span{font-size:12px;flex:1}
+.sgq-blind-process-hint{font-size:12px;line-height:1.6;color:#5f8192;margin:0}
+.sgq-blind-catalog-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:9px;max-height:285px;overflow:auto}
+.sgq-blind-catalog-list>button{min-height:68px;display:grid;justify-items:start;gap:4px;padding:11px 13px;white-space:normal;text-align:left;border:1px solid #d4e3eb;border-radius:10px;background:white;color:#2b607c;cursor:pointer}
+.sgq-blind-catalog-list>button strong{font-size:14px}
+.sgq-blind-catalog-list>button span{font-size:12px;color:#56798d}
+.sgq-blind-catalog-list>button small{font-size:10px;color:#728da0}
+.sgq-blind-catalog-list>button:hover:not(:disabled){background:#f0f9fc;border-color:#87bdca}
+.sgq-blind-catalog-list>button.sgq-blind-catalog-selected{background:#e9f8f1;border-color:#3da37c;color:#1d7957}
+.sgq-blind-catalog-list>button:disabled{cursor:wait;opacity:.5}
+@media(max-width:650px){.sgq-blind-lookup-modes button{flex:1}.sgq-blind-process-found span{flex-basis:100%}}
