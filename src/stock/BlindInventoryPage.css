@@ -77,3 +77,16 @@
 @media(prefers-reduced-motion:reduce){.sgq-blind-session{transition:none}}
 
 .sgq-blind-photo-note{margin:0;max-width:300px;align-self:center;font-size:11px;line-height:1.45;color:#56798c}
+
+/* Open inventory exclusion: secondary destructive action, never nested in the open card. */
+.sgq-blind-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.sgq-blind-inventory label.sgq-blind-show-deleted{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:650;color:#5a7486;white-space:nowrap;cursor:pointer}
+.sgq-blind-show-deleted input{accent-color:#277f9f;width:16px;height:16px}
+.sgq-blind-session-card{display:grid;min-width:0;border:1px solid #dce9ef;border-radius:11px;overflow:hidden;background:#fbfdff}
+.sgq-blind-session-card>.sgq-blind-session{width:100%;border:0;border-radius:0}
+.sgq-blind-delete{display:inline-flex;align-items:center;justify-content:center;gap:7px;width:max-content;padding:8px 11px;border:1px solid #edcece;border-radius:8px;background:#fff;color:#b04343;font-size:12px;font-weight:700;cursor:pointer}
+.sgq-blind-delete:hover:not(:disabled){background:#fff1f1;border-color:#ce8e8e}
+.sgq-blind-delete:disabled{opacity:.55;cursor:not-allowed}
+.sgq-blind-session-card>.sgq-blind-delete{margin:0 10px 10px;justify-self:start}
+.sgq-blind-session strong[data-status="cancelado"]{background:#f3f4f6;color:#748190}
+@media(max-width:620px){.sgq-blind-actions{width:100%;justify-content:space-between}}
