@@ -34,10 +34,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  const [active,setActive]=useState<Session|null>(null)
  const [items,setItems]=useState<Item[]>([])
  const [address,setAddress]=useState('')
- const [armario,setArmario]=useState('')
- const [prateleira,setPrateleira]=useState('')
- const [caixa,setCaixa]=useState('')
- const [locations,setLocations]=useState<Array<{codigo:string;armario:string|null;prateleira:string|null;caixa:string|null;descricao:string|null}>>([])
+ const [locations,setLocations]=useState<string[]>([])
  const [processContext,setProcessContext]=useState<VerifiedBlindContext|null>(null)
  const [contextRevision,setContextRevision]=useState(0)
  const [currentPhoto,setCurrentPhoto]=useState('')
@@ -73,11 +70,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  const switchLookup=(mode:'codigo'|'processo')=>{
   setLookupMode(mode);resetSearch();setError('');setMessage('')
  }
- const setPhysicalAddress=(value:string)=>{
-  setAddress(value)
-  const known=locations.find(x=>x.codigo.toUpperCase()===value.trim().toUpperCase())
-  if(known){setArmario(known.armario||'');setPrateleira(known.prateleira||'');setCaixa(known.caixa||'')}
- }
+ const setPhysicalAddress=(value:string)=>setAddress(value)
  const sorted=useMemo(()=>items.filter(item=>[item.codigo_omie,item.descricao_omie,item.endereco,item.processo_codigo,item.cliente_nome].join(' ').toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR'))),[items,search])
  const flagged=items.filter(item=>item.foto_para_omie&&item.foto_status!=='sincronizada').length
  const shownSessions=sessions.filter(session=>showDeleted||session.status!=='cancelado')
@@ -98,12 +91,26 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  }
  useEffect(()=>{void fetchSessions()},[])
  useEffect(()=>{
-  let active=true
-  void authClient.from('localizacoes_estoque')
-   .select('codigo,armario,prateleira,caixa,descricao')
-   .eq('ativo',true).order('codigo',{ascending:true}).limit(500)
-   .then(({data})=>{if(active&&data)setLocations(data)})
-  return()=>{active=false}
+  let mounted=true
+  void Promise.all([
+   authClient.from('localizacoes_estoque').select('codigo,armario').eq('ativo',true).limit(500),
+   authClient.from('amostras').select('endereco').limit(1000)
+  ]).then(([registered,samples])=>{
+   if(!mounted)return
+   const candidates=[
+    ...(registered.data||[]).flatMap(row=>[row.codigo,row.armario]),
+    ...(samples.data||[]).map(row=>row.endereco)
+   ]
+   const names=new Map<string,string>()
+   for(const raw of candidates){
+    const value=String(raw||'').trim()
+    if(!/^(?:RUA|ARM(?:ÁRIO|ARIO)?)\b/i.test(value))continue
+    const key=value.toLocaleUpperCase('pt-BR')
+    if(!names.has(key))names.set(key,value)
+   }
+   setLocations([...names.values()].sort((a,b)=>a.localeCompare(b,'pt-BR',{numeric:true})))
+  }).catch(()=>{if(mounted)setLocations([])})
+  return()=>{mounted=false}
  },[])
  async function open(session:Session){
   setError('');setMessage('');setActive(session);setPhysicalAddress(session.endereco||'')
@@ -209,7 +216,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
   if(!processContext||processContext.sku!==product.sku){
    setError('Confirme processo, cliente e consulte as divergências cadastrais antes de registrar o produto.');return
   }
-  if(!address.trim()){setError('Informe um endereço físico para a contagem.');return}
+  if(!address.trim()||!locations.includes(address)){setError('Selecione uma rua ou armário cadastrado.');return}
   const rawCount=count.trim()
   const numeric=Number(rawCount.replace(',','.'))
   if(!/^\d+(?:[.,]\d{1,3})?$/.test(rawCount)||!Number.isFinite(numeric)||numeric<0){
@@ -230,7 +237,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
    let itemId=prior?.id||crypto.randomUUID()
    const payload={
     codigo_omie:code,descricao_omie:product.descricao,endereco:location,
-    endereco_armario:armario.trim(),endereco_prateleira:prateleira.trim(),endereco_caixa:caixa.trim(),
+    endereco_armario:location,endereco_prateleira:'',endereco_caixa:'',
     processo_id:processContext.processoId,processo_codigo:processContext.processoCodigo,
     cliente_nome:processContext.clienteNome,cliente_confirmado:true,
     verificacao_cadastro:processContext.verificacao,
@@ -357,7 +364,12 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
      <button type="button" className="secondary small" disabled={busy} onClick={()=>void fetchSessions()}><RefreshCw size={16}/> Atualizar</button>
     </div></div>
     {canWrite&&<div className="sgq-blind-create">
-      <label>Endereço / setor (opcional)<input placeholder="Ex.: Rua A · Prateleira 03" value={address} maxLength={120} onChange={e=>setAddress(e.target.value)}/></label>
+      <label>Rua ou armário (opcional)
+        <select value={address} onChange={e=>setPhysicalAddress(e.target.value)}>
+         <option value="">Selecione uma rua ou armário</option>
+         {locations.map(local=><option key={local} value={local}>{local}</option>)}
+        </select>
+       </label>
       <button className="primary" type="button" onClick={()=>void create()} disabled={busy}><Plus size={17}/> {busy?'Criando…':'Iniciar contagem cega'}</button>
     </div>}
     <div className="sgq-blind-session-list">
@@ -421,17 +433,17 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
       {processContext&&<p className="sgq-blind-confirmed-context"><CheckCircle2 size={16}/> Confirmado: {processContext.processoCodigo} · {processContext.clienteNome}</p>}
       <div className="sgq-blind-form-grid">
        <label>Quantidade contada<input type="number" inputMode="decimal" min="0" step=".001" value={count} onChange={e=>setCount(e.target.value)} placeholder="0"/></label>
-       <label>Endereço físico / código de localização *<input list="sgq-blind-locations" value={address} maxLength={120} onChange={e=>setPhysicalAddress(e.target.value)} placeholder="Ex.: RUA-A-03 (obrigatório)"/>
-        <datalist id="sgq-blind-locations">{locations.map(x=><option key={x.codigo} value={x.codigo}>{x.descricao||[x.armario,x.prateleira,x.caixa].filter(Boolean).join(' / ')}</option>)}</datalist>
+       <label>Rua ou armário *
+        <select required value={address} onChange={e=>setPhysicalAddress(e.target.value)}>
+         <option value="">Selecione uma rua ou armário</option>
+         {locations.map(local=><option key={local} value={local}>{local}</option>)}
+        </select>
        </label>
-       <label>Rua / armário<input value={armario} maxLength={100} onChange={e=>setArmario(e.target.value)} placeholder="Ex.: Rua A / Armário 02"/></label>
-       <label>Prateleira<input value={prateleira} maxLength={100} onChange={e=>setPrateleira(e.target.value)} placeholder="Ex.: P03"/></label>
-       <label>Caixa / posição<input value={caixa} maxLength={100} onChange={e=>setCaixa(e.target.value)} placeholder="Ex.: CX-11"/></label>
        <label className="sgq-blind-full">Observação (opcional)<textarea value={note} rows={2} maxLength={1000} onChange={e=>setNote(e.target.value)} placeholder="Embalagem, avaria, lote, observações…"/></label>
       </div>
       <div className="sgq-blind-photo-upload">
        <div className="sgq-blind-photo-title"><Camera size={19}/><strong>Foto do produto e atualização de cadastro</strong>
-        <small>Fotografe ou envie da galeria. A imagem registrada atualiza a foto principal no SGQ; o Omie exige aprovação separada.</small></div>
+        </div>
        {currentPhoto&&<div className="sgq-blind-photo-current"><img src={currentPhoto} alt="Foto principal atual no SGQ"/><small>Foto atual no SGQ</small></div>}
        <div className="sgq-blind-photo-actions">
         <label className="sgq-blind-photo-picker"><Camera size={18}/> Tirar foto
@@ -445,11 +457,11 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
        {preview&&<img className="sgq-blind-new-photo" src={preview} alt="Prévia da nova foto do produto"/>}
        <p className="sgq-blind-photo-note">JPG ou PNG até 8 MB. A foto será vinculada ao registro físico e ao cadastro local SGQ.</p>
        <label className="sgq-blind-photo-flag"><input type="checkbox" checked={flagOmie} onChange={e=>setFlagOmie(e.target.checked)} disabled={!selectedFile}/>
-        <span><strong>Marcar para atualizar a foto principal no Omie</strong><small>A foto será enviada ao catálogo somente após validação do gestor e encerramento da contagem.</small></span>
+        <span><strong>Marcar para atualizar a foto principal no Omie</strong></span>
        </label>
       </div>
-      <div className="sgq-blind-footer"><span>O saldo do ERP não será alterado.</span>
-       <button className="primary" type="button" disabled={busy||!canWrite||!product||!processContext||!address.trim()||!count.trim()} onClick={()=>void saveCount()}><Upload size={17}/>{busy?'Salvando…':'Salvar contagem'}</button>
+      <div className="sgq-blind-footer">
+       <button className="primary" type="button" disabled={busy||!canWrite||!product||!processContext||!locations.includes(address)||!count.trim()} onClick={()=>void saveCount()}><Upload size={17}/>{busy?'Salvando…':'Salvar contagem'}</button>
       </div>
      </div>}
      {active.status==='aberto'&&canApprove&&items.length>0&&<div className="sgq-blind-close"><p>Ao concluir, as contagens ficam bloqueadas. A sincronização de fotos não altera estoque.</p><button className="secondary" disabled={busy} onClick={()=>void close()}><ShieldCheck size={16}/> Concluir contagem</button></div>}
@@ -460,7 +472,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
       {sorted.map(item=><article key={item.id} className="sgq-blind-record">
        <div className="sgq-blind-record-main"><div><strong>{item.codigo_omie}</strong><span>{item.descricao_omie}</span><small>{item.endereco||'Sem endereço'} · {when(item.criado_em)}</small>
          <small>Processo {item.processo_codigo||'não informado'} · Cliente {item.cliente_nome||'não informado'}</small>
-         {(item.endereco_armario||item.endereco_prateleira||item.endereco_caixa)&&<small>Rua/armário: {item.endereco_armario||'—'} · Prateleira: {item.endereco_prateleira||'—'} · Caixa: {item.endereco_caixa||'—'}</small>}
+         {item.endereco&&<small>Rua ou armário: {item.endereco}</small>}
          {item.verificacao_cadastro&&<small>Conferência cadastral: {(item.verificacao_cadastro.checks||[]).filter(c=>c.status==='divergente').length} divergência(s) registrada(s)</small>}</div>
         <div className="sgq-blind-quantity"><small>Contagem física</small><b>{fmt(item.quantidade_contada)}</b></div>
        </div>
