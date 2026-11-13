@@ -472,7 +472,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
       {sorted.map(item=><article key={item.id} className="sgq-blind-record">
        <div className="sgq-blind-record-main"><div><strong>{item.codigo_omie}</strong><span>{item.descricao_omie}</span><small>{item.endereco||'Sem endereço'} · {when(item.criado_em)}</small>
          <small>Processo {item.processo_codigo||'não informado'} · Cliente {item.cliente_nome||'não informado'}</small>
-         {item.endereco&&<small>Rua ou armário: {item.endereco}</small>}
+
          {item.verificacao_cadastro&&<small>Conferência cadastral: {(item.verificacao_cadastro.checks||[]).filter(c=>c.status==='divergente').length} divergência(s) registrada(s)</small>}</div>
         <div className="sgq-blind-quantity"><small>Contagem física</small><b>{fmt(item.quantidade_contada)}</b></div>
        </div>
