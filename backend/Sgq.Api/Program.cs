@@ -3913,6 +3913,33 @@ app.MapPost("/api/estoque/inventarios",async(CreateInventoryRequest input,HttpRe
     }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Não foi possível criar inventário.",e.Message),statusCode:500);}
 });
+// Cancels only an open inventory; retains count snapshots for audit and never posts stock movements.
+app.MapPost("/api/estoque/inventarios/{id}/excluir",async(string id,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        if(!Guid.TryParse(id,out _))return Results.Json(Error("Inventário inválido."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        if(!await InventoryAuthorized(client,token,approval:true))
+            return Results.Json(Error("Somente gestores e administradores podem excluir inventários."),statusCode:403);
+        var userId=await CurrentUserId(client,token);
+        var rows=await RestAsync(client,token,HttpMethod.Get,"inventarios",
+            $"select=id,codigo,status,observacao&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inv,found)=FirstRow(rows);
+        if(!found)return Results.Json(Error("Inventário não encontrado."),statusCode:404);
+        if(StockText(inv!.Value,"status")!="aberto")
+            return Results.Json(Error("Somente inventários iniciados e ainda abertos podem ser excluídos."),statusCode:409);
+        var previous=StockText(inv.Value,"observacao");
+        var audit=$"[Excluído em {DateTimeOffset.UtcNow:O} por {userId}]";
+        var observation=string.IsNullOrWhiteSpace(previous)?audit:previous+"\n"+audit;
+        var updated=await RestAsync(client,token,HttpMethod.Patch,"inventarios",
+            $"id=eq.{Uri.EscapeDataString(id)}&status=eq.aberto&select=id",
+            new {status="cancelado",observacao=observation},"return=representation");
+        var (_,saved)=FirstRow(updated);
+        if(!saved)return Results.Json(Error("Inventário já foi concluído ou excluído."),statusCode:409);
+        return Results.Ok(new {data=new{ok=true},error=(object?)null});
+    }catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao excluir inventário.",e.Message),statusCode:500);}
+});
 app.MapGet("/api/estoque/inventarios/{id}",async(string id,HttpRequest request,IHttpClientFactory factory)=>{
     try{
         if(!Guid.TryParse(id,out _))return Results.Json(Error("Inventário inválido."),statusCode:400);
