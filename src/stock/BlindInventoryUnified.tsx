@@ -435,7 +435,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
 
  return <div className="sgq-single-inventory">
   <header className="sgq-single-header">
-   <div><h2>Inventário às cegas · Omie</h2><p>Localização → processo → NF e cliente → produto → quantidade e foto</p></div>
+   <div><h2>Inventário FST · Omie</h2><p>Localização → processo → NF e cliente → produto → quantidade e foto</p></div>
    <button type="button" className="secondary small" disabled={busy||loading} onClick={()=>{clearProcess();void loadLocations()}}><RefreshCw size={15}/> Nova consulta</button>
   </header>
 
