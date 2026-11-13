@@ -53,7 +53,7 @@ export default function InspectionJourney({
     { id: 'verificacoes', title: 'Verificações', done: checklistDone },
     { id: 'dimensionais', title: 'Dimensionais', done: dimensionsDone },
     { id: 'testes', title: 'Testes', done: testsDone },
-    { id: 'fotos', title: 'Fotos', done: photoCount > 0, optional: true },
+    { id: 'fotos', title: 'Fotos', done: photoCount > 0 },
     { id: 'resultado', title: 'Resultado', done: inspectionStatus === 'concluida' },
     { id: 'retencao', title: 'Retenção', done: retentionDone, optional: true },
   ]
@@ -72,7 +72,7 @@ export default function InspectionJourney({
       <section className="sgq-journey-context" aria-label="Contexto da inspeção">
         <div className="sgq-journey-identity">
           <span className="sgq-journey-kicker">
-            {inspectionNumber ? 'INSPEÇÃO ' + inspectionNumber : 'INSPEÇÃO EM ANDAMENTO'}
+            {inspectionNumber ? 'INSPEÇÃO ' + inspectionNumber : 'INSPEÇÃO'}
           </span>
           <strong>{processCode || 'Processo não identificado'}</strong>
           <span className="sgq-journey-client">{client || 'Cliente não informado'}</span>
@@ -97,7 +97,7 @@ export default function InspectionJourney({
             aria-valuemin={0} aria-valuemax={4} aria-valuenow={technicalCompleted}>
             <span style={{ width: (technicalCompleted / 4 * 100) + '%' }} />
           </div>
-          <small>Fotos e retenção são etapas complementares.</small>
+          <small>Progresso das etapas técnicas; fotos e retenção têm acompanhamento próprio.</small>
         </div>
       </section>
 
