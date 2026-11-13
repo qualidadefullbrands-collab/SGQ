@@ -9,6 +9,7 @@ import BlindInventoryUnified from './stock/BlindInventoryUnified'
 import BlindInventoryReconciliation from './stock/BlindInventoryReconciliation'
 import BlindInventoryStatus from './stock/BlindInventoryStatus'
 import InspectionsKanban from './components/InspectionsKanban'
+import InspectionJourney from './components/InspectionJourney'
 import SgqDashboard from './components/SgqDashboard'
 import './SgqOperationsTheme.css'
 import './config/SettingsPage.css'
@@ -3866,21 +3867,26 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </button>
           </div>}
           {detail.status==='concluida' && allowDimensionalRectification && <div className="alert">Modo de retificação: as alterações são auditadas e entram no próximo laudo gerado.</div>}
-          <nav id="inspection-stage-nav" className="inspection-stage-tabs" role="tablist" aria-label="Etapas da inspeção">
-            {([
-              ['dados','Dados',true],['amostragem','Amostragem',samplingDone],
-              ['verificacoes','Verificações',checklistDone],['dimensionais','Dimensionais',dimsDone],
-              ['testes','Testes',testsDone],['fotos','Fotos',Boolean(detail.photos?.length)],
-              ['resultado','Resultado',detail.status==='concluida'],
-              ['retencao','Retenção (opcional)',detail.retencao_decisao!=null],
-            ] as Array<[typeof activeStage,string,boolean]>).map(([key,label,done])=>(
-              <button key={key} type="button" role="tab" aria-selected={activeStage===key}
-                className={'inspection-stage-tab'+(activeStage===key?' active':'')+(done?' done':'')}
-                onClick={()=>selectInspectionStage(key)}>
-                <span className="inspection-stage-dot">{done?'✓':'·'}</span>{label}
-              </button>
-            ))}
-          </nav>
+          <InspectionJourney
+            activeStage={activeStage}
+            onSelectStage={selectInspectionStage}
+            inspectionNumber={detail.numero}
+            processCode={formatFst(detail.grupos_inspecao?.processos?.codigo) +
+              (detail.grupos_inspecao?.subprocesso_codigo ? '-' + detail.grupos_inspecao.subprocesso_codigo : '')}
+            client={detail.grupos_inspecao?.processos?.cliente}
+            nf={detail.grupos_inspecao?.nota_fiscal}
+            instruction={detail.it_versoes?.instrucoes_trabalho?.codigo
+              ? detail.it_versoes.instrucoes_trabalho.codigo + ' · ' + (detail.it_versoes.versao || 'sem versão')
+              : null}
+            instructionSelected={Boolean(detail.it_versao_id)}
+            inspectionStatus={detail.status}
+            samplingDone={samplingDone && Number(detail.tamanho_amostra) > 0}
+            checklistDone={checklistDone}
+            dimensionsDone={dimsDone}
+            testsDone={testsDone}
+            photoCount={detail.photos?.length ?? 0}
+            retentionDone={detail.retencao_decisao != null}
+          />
           {detail.status==='aberta' && activeStage!=='dados' && activeStage!=='fotos' && (
             <div className="inspection-not-started-hint">Esta inspeção ainda não foi iniciada. Revise os dados, selecione uma IT e clique em <strong>Iniciar inspeção</strong> antes de registrar verificações.</div>
           )}
