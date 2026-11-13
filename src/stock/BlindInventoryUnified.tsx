@@ -72,6 +72,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
  },[counts])
  const selectedCounts=countedBySku.get(selectedSku)||[]
  const photosForSelected=photoRows.filter(p=>selectedCounts.some(c=>c.id===p.item_id))
+ const alreadyPhotographed=!!counts.find(c=>c.inventario_id===session?.id&&skuOf(c.codigo_omie)===selectedSku&&photoRows.some(p=>p.item_id===c.id))
 
  useEffect(()=>{
   if(!photo){setPreview('');return}
@@ -108,7 +109,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
  }
  async function addLocation(){
   if(!canWrite||busy)return
-  const code=newLocation.trim().replace(/\s+/g,' ').toUpperCase()
+  const code=newLocation.trim().replace(/\s+/g,' ').toUpperCase().replace(/^ARM(?:ÁRIO|ARIO)\b/,'ARM')
   if(!validLocation.test(code)||code.length<3||code.length>80){
    setError('Informe um endereço iniciado por RUA ou ARM, com até 80 caracteres.');return
   }
@@ -443,6 +444,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
      </div>
     </div>
     {photo&&<div className="sgq-single-preview">{preview&&<img src={preview} alt={'Foto do SKU '+selected.sku}/>}<span>{photo.name}</span><button type="button" className="secondary small" onClick={()=>setPhoto(null)}>Trocar</button></div>}
+    {alreadyPhotographed&&<p className="sgq-single-note">Este produto já possui foto nesta contagem. Você pode selecioná-lo para consultar o registro; evite duplicar a foto.</p>}
     {photosForSelected.length>0&&<div className="sgq-single-status">
      {photosForSelected.map(p=><p key={p.id}>
       Foto: <strong>{p.status==='sincronizada'?'Enviada ao Omie':p.status==='erro'?'Falha no Omie':p.status==='enviando'?'Enviando':'Pendente'}</strong>
@@ -451,7 +453,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
        onClick={()=>void syncPhoto(p.id).then(()=>loadCounts(processCode))}>Reenviar foto</button>}
      </p>)}
     </div>}
-    <button type="button" className="primary" disabled={!canWrite||busy||!!syncing||!quantity.trim()||!photo}
+    <button type="button" className="primary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!quantity.trim()||!photo}
      onClick={()=>void save()}><Upload size={16}/>{busy?'Salvando…':'Salvar contagem e enviar foto ao Omie'}</button>
    </section>}
    <section className="sgq-single-section">
