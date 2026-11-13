@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useRef,useState} from 'react'
-import {ArrowLeft,Camera,CheckCircle2,ClipboardCheck,Eye,ImagePlus,Plus,RefreshCw,Search,ShieldCheck,Upload} from 'lucide-react'
+import {ArrowLeft,Camera,CheckCircle2,ClipboardCheck,Eye,ImagePlus,Plus,RefreshCw,Search,ShieldCheck,Trash2,Upload} from 'lucide-react'
 import {authClient} from '../lib/supabase'
 import {apiPost} from '../lib/supabase'
 import './BlindInventoryPage.css'
@@ -23,6 +23,7 @@ const normalSku=(value:string)=>value.trim().toUpperCase()
 
 export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boolean;canApprove:boolean}){
  const [sessions,setSessions]=useState<Session[]>([])
+ const [showDeleted,setShowDeleted]=useState(false)
  const [active,setActive]=useState<Session|null>(null)
  const [items,setItems]=useState<Item[]>([])
  const [address,setAddress]=useState('')
@@ -50,6 +51,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  const resetSearch=()=>{setSku('');setProduct(null);setCount('');setNote('');setSelectedFile(null);setFlagOmie(false);inputRef.current?.focus()}
  const sorted=useMemo(()=>items.filter(item=>[item.codigo_omie,item.descricao_omie,item.endereco].join(' ').toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR'))),[items,search])
  const flagged=items.filter(item=>item.foto_para_omie&&item.foto_status!=='sincronizada').length
+ const shownSessions=sessions.filter(session=>showDeleted||session.status!=='cancelado')
 
  async function fetchSessions(){
   const {data,error:queryError}=await authClient.from('sgq_inventarios_cegos')
@@ -198,6 +200,24 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
   }catch(e){setError(detail(e))}
   finally{setBusy(false)}
  }
+ async function excludeSession(session:Session){
+  if(!canApprove||session.status!=='aberto'||busy||savingPhotoId)return
+  if(!window.confirm('Excluir o inventário '+session.codigo+'? Ele sairá da lista principal e não poderá mais ser editado. As contagens e fotos ficarão preservadas somente no histórico de auditoria.'))return
+  setBusy(true);setError('');setMessage('')
+  try{
+   const {data:{user},error:authError}=await authClient.auth.getUser()
+   if(authError||!user)throw new Error('Sua sessão expirou. Entre novamente.')
+   const {data,error:dbError}=await authClient.from('sgq_inventarios_cegos')
+    .update({status:'cancelado',fechado_por:user.id,fechado_em:new Date().toISOString()})
+    .eq('id',session.id).eq('status','aberto')
+    .select('id').single()
+   if(dbError||!data)throw dbError||new Error('O inventário não está mais aberto.')
+   if(active?.id===session.id){setActive(null);setItems([]);resetSearch()}
+   await fetchSessions()
+   setMessage('Inventário '+session.codigo+' excluído da lista ativa. Registro preservado para auditoria.')
+  }catch(e){setError('Não foi possível excluir o inventário: '+detail(e))}
+  finally{setBusy(false)}
+ }
  async function syncOmie(item:Item){
   if(!active||active.status!=='fechado'||!canApprove||!item.foto_para_omie||!item.foto_storage_path||busy)return
   if(!photos[item.id]){setError('Abra e confira a foto antes de aprovar a publicação no Omie.');return}
@@ -221,22 +241,31 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
   {error&&<div role="alert" className="alert error">{error}</div>}
   {message&&<div role="status" className="alert success">{message}</div>}
   {!active?<section className="sgq-blind-panel">
-    <div className="sgq-blind-heading"><h3>Inventários</h3><button type="button" className="secondary small" onClick={()=>void fetchSessions()}><RefreshCw size={16}/> Atualizar</button></div>
+    <div className="sgq-blind-heading"><h3>Inventários</h3><div className="sgq-blind-actions">
+     {canApprove&&<label className="sgq-blind-show-deleted"><input type="checkbox" checked={showDeleted} onChange={e=>setShowDeleted(e.target.checked)}/> Ver excluídos</label>}
+     <button type="button" className="secondary small" disabled={busy} onClick={()=>void fetchSessions()}><RefreshCw size={16}/> Atualizar</button>
+    </div></div>
     {canWrite&&<div className="sgq-blind-create">
       <label>Endereço / setor (opcional)<input placeholder="Ex.: Rua A · Prateleira 03" value={address} maxLength={120} onChange={e=>setAddress(e.target.value)}/></label>
       <button className="primary" type="button" onClick={()=>void create()} disabled={busy}><Plus size={17}/> {busy?'Criando…':'Iniciar contagem cega'}</button>
     </div>}
     <div className="sgq-blind-session-list">
-      {sessions.map(s=><button key={s.id} type="button" className="sgq-blind-session" onClick={()=>void open(s)}>
-        <b>{s.codigo}</b><span>{s.endereco||'Setor geral'}</span><small>{when(s.criado_em)}</small><strong data-status={s.status}>{s.status==='aberto'?'Em contagem':s.status==='fechado'?'Concluído':'Cancelado'}</strong>
-      </button>)}
-      {!sessions.length&&<p>Nenhum inventário cego cadastrado.</p>}
+      {shownSessions.map(s=><div key={s.id} className="sgq-blind-session-card">
+        <button type="button" className="sgq-blind-session" disabled={busy} onClick={()=>void open(s)}>
+         <b>{s.codigo}</b><span>{s.endereco||'Setor geral'}</span><small>{when(s.criado_em)}</small>
+         <strong data-status={s.status}>{s.status==='aberto'?'Em contagem':s.status==='fechado'?'Concluído':'Excluído'}</strong>
+        </button>
+        {canApprove&&s.status==='aberto'&&<button type="button" className="sgq-blind-delete" disabled={busy} onClick={()=>void excludeSession(s)}
+         title={'Excluir inventário '+s.codigo} aria-label={'Excluir inventário '+s.codigo}><Trash2 size={15}/> Excluir</button>}
+      </div>)}
+      {!shownSessions.length&&<p>{showDeleted?'Nenhum inventário encontrado.':'Nenhum inventário ativo. Os excluídos permanecem disponíveis no histórico.'}</p>}
     </div>
    </section>:<>
     <section className="sgq-blind-panel">
      <div className="sgq-blind-heading">
       <button className="secondary small" type="button" onClick={()=>{setActive(null);setItems([]);resetSearch();void fetchSessions()}}><ArrowLeft size={16}/> Inventários</button>
-      <div><h3>{active.codigo}</h3><small>{active.endereco||'Setor geral'} · {active.status==='aberto'?'Em contagem':'Concluído'}</small></div>
+      <div><h3>{active.codigo}</h3><small>{active.endereco||'Setor geral'} · {active.status==='aberto'?'Em contagem':active.status==='fechado'?'Concluído':'Excluído'}</small></div>
+      {canApprove&&active.status==='aberto'&&<button type="button" className="sgq-blind-delete" disabled={busy||!!savingPhotoId} onClick={()=>void excludeSession(active)}><Trash2 size={15}/> Excluir inventário</button>}
      </div>
      <div className="sgq-blind-metrics"><div><span>Itens contados</span><strong>{items.length}</strong></div><div><span>Fotos para revisão</span><strong>{flagged}</strong></div><div><span>Sincronizadas no Omie</span><strong>{items.filter(x=>x.foto_status==='sincronizada').length}</strong></div></div>
      {active.status==='aberto'&&canWrite&&<div className="sgq-blind-capture">
