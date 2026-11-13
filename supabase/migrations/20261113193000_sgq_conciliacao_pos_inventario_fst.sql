@@ -98,10 +98,10 @@ declare
  v_source text:=btrim(coalesce(p_fonte,''));
  v_next text;
 begin
- if v_user is null or v_role not in ('administrador','gestor','inspetor') then
+ if v_user is null or v_role is null or v_role not in ('administrador','gestor','inspetor') then
   raise exception 'Sessão sem permissão para conciliação.' using errcode='42501';
  end if;
- v_manager:=v_role in ('administrador','gestor');
+ v_manager:=coalesce(v_role in ('administrador','gestor'),false);
  if p_inventario is null then
   raise exception 'Inventário não informado.' using errcode='22023';
  end if;
