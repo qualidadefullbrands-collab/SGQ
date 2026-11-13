@@ -24,6 +24,7 @@ test('comparison detects code mismatch, description mismatch and missing SKUs se
  assert.match(component,/sgq-inventario-cadastro-omie/)
  assert.match(component,/result\?\.situacao==='codigo_divergente'/)
  assert.match(component,/desc\(result\.descricaoOmie\)!==desc\(descricao\)/)
+ assert.match(component,/\['encontrado','codigo_divergente'\]\.includes\(result\.situacao\)/)
  assert.match(component,/result\?\.situacao==='nao_localizado'/)
  assert.match(component,/result\?\.situacao==='indisponivel'/)
  assert.match(component,/Descrição divergente entre o item contado/)

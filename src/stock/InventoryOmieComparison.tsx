@@ -49,7 +49,7 @@ export default function InventoryOmieComparison({sku,descricao}:{
  },[sku,retry])
  const wrongCode=result?.situacao==='codigo_divergente'||
   (result?.situacao==='encontrado'&&key(result.codigoOmie||'')!==key(sku))
- const wrongDescription=!!result?.descricaoOmie&&result.situacao==='encontrado'&&
+ const wrongDescription=!!result?.descricaoOmie&&['encontrado','codigo_divergente'].includes(result.situacao)&&
   desc(result.descricaoOmie)!==desc(descricao)
  const missing=result?.situacao==='nao_localizado'
  const unavailable=result?.situacao==='indisponivel'
