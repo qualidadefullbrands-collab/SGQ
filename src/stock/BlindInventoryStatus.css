@@ -44,3 +44,8 @@
 .sgq-inventory-status-empty{font-size:13px;margin:0;color:#708993}
 @media(max-width:1000px){.sgq-inventory-status-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:700px){.sgq-inventory-status-filter{grid-template-columns:1fr}.sgq-inventory-status-item{grid-template-columns:1fr}.sgq-inventory-status-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.sgq-inventory-status-panel{padding:12px}.sgq-inventory-status-actions button{flex:1}}
+
+.sgq-inventory-status-quantity{display:grid;gap:5px;align-content:center;font-size:12px}
+.sgq-inventory-status-quantity span{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.sgq-inventory-status-quantity small{font-size:11px;overflow-wrap:anywhere}
+.sgq-inventory-status-audit{grid-column:1/-1;min-width:0}
