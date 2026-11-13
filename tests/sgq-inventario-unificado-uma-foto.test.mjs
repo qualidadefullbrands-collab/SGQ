@@ -35,9 +35,12 @@ test('FST lookup includes Omie invoice, fiscal date and customer validation',()=
 test('one image per SKU count, immediately transmitted to Omie',()=>{
  assert.match(ui,/const \[photo,setPhoto\]=useState<File\|null>\(null\)/)
  assert.doesNotMatch(ui,/multiple[= ]/)
- assert.match(ui,/Salvar contagem e enviar foto ao Omie/)
+ assert.match(ui,/Salvar e próximo item/)
+ assert.match(ui,/onClick=\{\(\)=>void save\(false\)\}/)
+ assert.match(ui,/onClick=\{\(\)=>void save\(true\)\}/)
  assert.match(ui,/functions\.invoke\('sgq-inventario-foto-direta'/)
- assert.match(ui,/Deseja ir para o próximo item/)
+ assert.doesNotMatch(ui,/window\.confirm\('Contagem registrada\. Deseja ir para o próximo item/)
+ assert.match(ui,/resetItem\(delivered\)/)
  assert.match(sql,/sgq_blind_photo_one_per_item/)
  assert.match(remote,/ConsultarProduto/)
  assert.match(remote,/AlterarProduto/)
@@ -53,4 +56,12 @@ test('returning to a process shows already counted items and photo retry',()=>{
  assert.match(ui,/Reenviar foto/)
  assert.match(ui,/setCountedBySku|countedBySku/)
  assert.match(sql,/sgq_inventario_cego_documentos/)
+})
+
+test('Omie items do not wait for paginated NF-e search',()=>{
+ assert.match(ui,/const receiptJob=authClient\.functions\.invoke\('sgq-omie-fst'/)
+ assert.match(ui,/void receiptJob\.then/)
+ assert.match(ui,/setProducts\(\[\.\.\.list\.values\(\)\]/)
+ assert.match(ui,/nfLoading\?'consultando recebimentos no Omie/)
+ assert.match(ui,/lookupRevision\.current/)
 })
