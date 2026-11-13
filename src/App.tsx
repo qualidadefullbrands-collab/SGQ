@@ -3396,6 +3396,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
   return (
     <main className="app-shell sgq-operational-shell" data-sgq-screen={tab}>
+      <a href="#sgq-primary-content" className="sgq-skip-link">Pular para o conteúdo</a>
       <aside className="sgq-side-nav" aria-label="Navegação principal do SGQ">
         <div className="sgq-side-brand"><span className="sgq-brand-symbol"><Boxes size={31}/></span><div><b>SGQ</b><small>Qualidade · Operações</small></div></div>
         <div className="sgq-side-caption">OPERAÇÃO</div>
@@ -3448,6 +3449,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       </header>
 
       {error && <div className="alert error" role="alert">{error}</div>}
+      <div id="sgq-primary-content" className="sgq-primary-content-anchor" tabIndex={-1} />
       {wordDownloading&&<div className="sgq-dialog-backdrop sgq-word-loading" role="dialog"
         aria-modal="true" aria-label="Gerando Word" aria-live="polite">
         <div className="sgq-dialog sgq-word-loading-content">
