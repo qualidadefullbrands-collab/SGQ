@@ -101,7 +101,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   setSession(null);setCounts([]);setPhotoRows([]);setSelectedSku('');setQuantity('');setPhoto(null)
   setInspections([]);setInspection(null);setError('');setMessage('');setWarnings([])
  }
- function resetItem(){setSelectedSku('');setQuantity('');setPhoto(null);setError('')}
+ function resetItem(clearError=true){setSelectedSku('');setQuantity('');setPhoto(null);if(clearError)setError('')}
  function selectLocation(next:string){
   setLocation(next)
   // Preserve process results, but a new location needs its own session confirmation.
@@ -271,7 +271,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   }catch(e){setError('Contagem salva, mas o envio da foto ao Omie não foi concluído: '+explain(e));return false}
   finally{setSyncing('')}
  }
- async function save(){
+ async function save(goToNext:boolean){
   if(!canWrite||busy||!confirmed||!session||!selected)return
   const qty=quantity.trim()
   if(!/^\d+(?:[.,]\d{1,3})?$/.test(qty)){setError('Informe uma quantidade válida (zero permitido).');return}
@@ -323,12 +323,14 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
    const delivered=await syncPhoto(photoRecord.id)
    await loadCounts(processCode)
    if(delivered)setMessage('Contagem salva e foto enviada ao Omie: '+selected.sku)
-   if(window.confirm('Contagem registrada. Deseja ir para o próximo item deste processo?')){
-    resetItem()
+   if(goToNext){
+    resetItem(delivered)
+    if(delivered)setMessage('Contagem salva e foto confirmada no Omie. Selecione o próximo item do processo.')
+    else setMessage('Contagem salva. A foto está pendente no Omie; selecione o próximo item.')
    }else{
-    resetItem()
-    if(delivered)setMessage('Contagem concluída por agora. A foto foi enviada ao SKU no Omie. O processo pode ser consultado novamente.')
-    else setMessage('Contagem encerrada por agora. A foto permanece registrada com envio pendente; consulte o item para reenviar.')
+    setPhoto(null)
+    if(delivered)setMessage('Contagem salva e foto confirmada no SKU '+selected.sku+' do Omie.')
+    else setMessage('Contagem salva. A foto está pendente no Omie e poderá ser reenviada.')
    }
   }catch(e){setError((saved?'Contagem registrada parcialmente. ':'')+explain(e));await loadCounts(processCode)}
   finally{setBusy(false)}
@@ -464,8 +466,12 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
        onClick={()=>void syncPhoto(p.id).then(()=>loadCounts(processCode))}>Reenviar foto</button>}
      </p>)}
     </div>}
-    <button type="button" className="primary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!quantity.trim()||!photo}
-     onClick={()=>void save()}><Upload size={16}/>{busy?'Salvando…':'Salvar contagem e enviar foto ao Omie'}</button>
+    <div className="sgq-single-save-actions">
+     <button type="button" className="secondary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!quantity.trim()||!photo}
+      onClick={()=>void save(false)}><Upload size={16}/>{busy?'Salvando…':'Salvar'}</button>
+     <button type="button" className="primary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!quantity.trim()||!photo}
+      onClick={()=>void save(true)}><Upload size={16}/>{busy?'Salvando…':'Salvar e próximo item'}</button>
+    </div>
    </section>}
    <section className="sgq-single-section">
     <div className="sgq-single-section-title"><Upload size={19}/><h3>Inspeção do processo (opcional)</h3></div>
