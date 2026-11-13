@@ -49,7 +49,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  },[selectedFile])
  const resetSearch=()=>{setSku('');setProduct(null);setCount('');setNote('');setSelectedFile(null);setFlagOmie(false);inputRef.current?.focus()}
  const sorted=useMemo(()=>items.filter(item=>[item.codigo_omie,item.descricao_omie,item.endereco].join(' ').toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR'))),[items,search])
- const flagged=items.filter(item=>item.foto_para_omie).length
+ const flagged=items.filter(item=>item.foto_para_omie&&item.foto_status!=='sincronizada').length
 
  async function fetchSessions(){
   const {data,error:queryError}=await authClient.from('sgq_inventarios_cegos')
@@ -124,8 +124,8 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
     quantidade_contada:numeric,observacao:note.trim(),atualizado_em:new Date().toISOString()
    }
    if(prior){
-    const {error:dbError}=await authClient.from('sgq_inventario_cego_itens').update(payload).eq('id',itemId)
-    if(dbError)throw dbError
+    const {data:saved,error:dbError}=await authClient.from('sgq_inventario_cego_itens').update(payload).eq('id',itemId).select('id').single()
+    if(dbError||!saved)throw dbError||new Error('Não foi possível atualizar a contagem existente.')
    }else{
     const {error:dbError}=await authClient.from('sgq_inventario_cego_itens').insert({
      ...payload,id:itemId,inventario_id:active.id,criado_por:user.id
@@ -139,10 +139,10 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
       upsert:false,contentType:selectedFile.type
     })
     if(uploadError)throw new Error('Contagem salva, mas a foto não foi enviada: '+detail(uploadError))
-    const {error:photoError}=await authClient.from('sgq_inventario_cego_itens').update({
+    const {data:photoSaved,error:photoError}=await authClient.from('sgq_inventario_cego_itens').update({
       foto_storage_path:storagePath,foto_para_omie:flagOmie,atualizado_em:new Date().toISOString()
-    }).eq('id',itemId)
-    if(photoError)throw new Error('Contagem salva, mas o vínculo da foto falhou: '+detail(photoError))
+    }).eq('id',itemId).select('id').single()
+    if(photoError||!photoSaved)throw new Error('Contagem salva, mas o vínculo da foto falhou: '+detail(photoError))
 
     // Reuse the existing SGQ product lookup: it creates the local product if the
     // Omie code is valid and not yet present. Do not merge by similar descriptions.
@@ -154,14 +154,15 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
      upsert:false,contentType:selectedFile.type
     })
     if(catalogError)throw new Error('Contagem e evidência salvas, mas a foto principal do SGQ não foi atualizada: '+detail(catalogError))
-    const {error:productPhotoError}=await authClient.from('produtos').update({
+    const {data:updatedProduct,error:productPhotoError}=await authClient.from('produtos').update({
      foto_principal_path:photoLocalPath,atualizado_em:new Date().toISOString()
-    }).eq('id',local.data.productId)
-    if(productPhotoError)throw new Error('Contagem e evidência salvas, mas não foi possível atualizar o produto SGQ: '+detail(productPhotoError))
-    const {error:linkError}=await authClient.from('sgq_inventario_cego_itens').update({
+    }).eq('id',local.data.productId).select('id,foto_principal_path').single()
+    if(productPhotoError||updatedProduct?.foto_principal_path!==photoLocalPath)
+     throw new Error('Contagem e evidência salvas, mas não foi possível confirmar a foto do produto no SGQ: '+detail(productPhotoError))
+    const {data:linked,error:linkError}=await authClient.from('sgq_inventario_cego_itens').update({
      foto_sgq_path:photoLocalPath
-    }).eq('id',itemId)
-    if(linkError)throw new Error('Foto atualizada no SGQ, mas falhou ao registrar o vínculo de auditoria: '+detail(linkError))
+    }).eq('id',itemId).select('id').single()
+    if(linkError||!linked)throw new Error('Foto atualizada no SGQ, mas falhou ao registrar o vínculo de auditoria: '+detail(linkError))
    }
    await fetchItems(active.id);resetSearch()
    setMessage(selectedFile
