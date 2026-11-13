@@ -10,6 +10,7 @@ import BlindInventoryReconciliation from './stock/BlindInventoryReconciliation'
 import BlindInventoryStatus from './stock/BlindInventoryStatus'
 import InspectionsKanban from './components/InspectionsKanban'
 import InspectionJourney from './components/InspectionJourney'
+import NewInspectionGuide from './components/NewInspectionGuide'
 import SgqDashboard from './components/SgqDashboard'
 import './SgqOperationsTheme.css'
 import './config/SettingsPage.css'
@@ -3609,8 +3610,13 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </div>
 
           {offlineDraftStatus && <span className="sgq-offline-indicator"><CloudUpload size={14}/>{offlineDraftStatus}</span>}
+          <NewInspectionGuide
+            processCode={inspection.codigo ? formatFst(inspection.codigo) : ''}
+            skuCount={skuRows.filter(skuRowHasData).length}
+            hasInstruction={Boolean(inspection.itVersionId)}
+          />
           <form onSubmit={(e)=>void createInspection(e,(e.nativeEvent as SubmitEvent).submitter?.getAttribute('value')==='iniciar')} className="inspection-form">
-            <section className="panel section-card">
+            <section id="sgq-new-inspection-general" className="panel section-card">
               <div className="section-title">
                 <h2>Dados gerais</h2>
                 {inspection.processoId && <span className="pill">Processo existente</span>}
@@ -3695,7 +3701,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
             </section>
 
-            <section className="panel section-card">
+            <section id="sgq-new-inspection-products" className="panel section-card">
               <div className="section-title">
                 <h2>Produtos / componentes</h2>
                 <div className="row-actions">
@@ -3793,7 +3799,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
             </section>
 
-            <section className="panel section-card inspection-it-choice">
+            <section id="sgq-new-inspection-instruction" className="panel section-card inspection-it-choice">
               <div className="section-title"><h2>IT aplicável</h2><button className="secondary small" type="button" disabled={itSuggestBusy} onClick={()=>void suggestApplicableIt(true)}><Sparkles size={16}/>{itSuggestBusy?'Analisando…':'Sugerir com IA'}</button></div>
               <label className="sgq-ai-context-label">Contexto adicional para a IA (opcional)
                 <textarea value={aiItExtraContext} onChange={e=>setAiItExtraContext(e.target.value)} rows={2} maxLength={1600} placeholder="Ex.: especificação do produto, finalidade, condição de recebimento ou requisito adicional."/>
@@ -3913,7 +3919,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               ))}
             </div>
 
-            <div className="section-title"><h3>Observação interna</h3></div>
             <div className="section-title"><h2>Observação interna</h2></div>
             <textarea
               value={internalObservation}
