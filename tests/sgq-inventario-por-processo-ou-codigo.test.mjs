@@ -34,8 +34,8 @@ test('finding process retrieves its linked SKUs and allows selecting an item wit
 test('different process suffixes stay distinct and count still needs confirmation',()=>{
  assert.ok(inventory.includes("Os sufixos A/B identificam registros diferentes"))
  assert.ok(inventory.includes("processContext.processoId"))
- assert.ok(inventory.includes("cliente_confirmado:true"))
- assert.ok(inventory.includes("verificacao_cadastro:processContext.verificacao"))
+ assert.ok(inventory.includes("cliente_confirmado:!!linkedProcess"))
+ assert.ok(inventory.includes("verificacao_cadastro:linkedProcess?.verificacao"))
  assert.ok(inventory.includes("if(!address.trim()||!locations.includes(address))"))
  assert.ok(inventory.includes("foto_para_omie:flagOmie"))
  assert.ok(migration.includes("sgq_inventario_cego_inspecoes"))
