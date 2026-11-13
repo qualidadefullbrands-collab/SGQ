@@ -317,7 +317,9 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
    if(window.confirm('Contagem registrada. Deseja ir para o próximo item deste processo?')){
     resetItem()
    }else{
-    setPhoto(null)
+    resetItem()
+    if(delivered)setMessage('Contagem concluída por agora. A foto foi enviada ao SKU no Omie. O processo pode ser consultado novamente.')
+    else setMessage('Contagem encerrada por agora. A foto permanece registrada com envio pendente; consulte o item para reenviar.')
    }
   }catch(e){setError((saved?'Contagem registrada parcialmente. ':'')+explain(e));await loadCounts(processCode)}
   finally{setBusy(false)}
