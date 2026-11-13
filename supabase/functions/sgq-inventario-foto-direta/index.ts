@@ -1,5 +1,6 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import {createClient} from 'npm:@supabase/supabase-js@2.57.4'
+import {imageIdentity,imagesOf,newlyImportedImage,matchesOmieUpdateTime} from './photoVerification.mjs'
 
 const admin=createClient(Deno.env.get('SUPABASE_URL')||'',Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'',{auth:{persistSession:false}})
 const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization, x-client-info, apikey, content-type','Access-Control-Allow-Methods':'POST, OPTIONS'}
@@ -14,29 +15,7 @@ type Photo={id:string;item_id:string;codigo_omie:string;storage_path:string;cria
 type Item={id:string;codigo_omie:string;inventario_id:string;criado_por:string}
 
 type ImageUrl={url_imagem:string}
-const imageIdentity=(url:string)=>clean(url).split('?')[0]
-const imagesOf=(product:{imagens?:unknown}):ImageUrl[]=>Array.isArray(product.imagens)
- ?product.imagens.map((entry:unknown)=>({url_imagem:clean((entry as {url_imagem?:string})?.url_imagem)}))
-  .filter((entry:ImageUrl)=>/^https:\/\//i.test(entry.url_imagem))
- :[]
-// Omie imports external URLs into its own CDN: a successful write returns a
-// different URL in ConsultarProduto. Never compare the final URL to the source.
-function newlyImportedImage(before:ImageUrl[],after:ImageUrl[]):string|null{
- if(after.length<=before.length)return null
- const previous=new Set(before.map(img=>imageIdentity(img.url_imagem)))
- if(!before.every(img=>after.some(next=>imageIdentity(next.url_imagem)===imageIdentity(img.url_imagem))))return null
- const added=after.filter(img=>!previous.has(imageIdentity(img.url_imagem)))
- return added.length===1?added[0].url_imagem:null
-}
-function matchesOmieUpdateTime(product:{info?:{dAlt?:string;hAlt?:string}},isoDate:string){
- const date=clean(product.info?.dAlt),clock=clean(product.info?.hAlt)
- const m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(date)
- if(!m||!/^\d{2}:\d{2}:\d{2}$/.test(clock))return false
- // Omie's update history is in the Brazilian app's local timezone.
- const updated=Date.parse(m[3]+'-'+m[2]+'-'+m[1]+'T'+clock+'-03:00')
- const attempted=Date.parse(isoDate)
- return Number.isFinite(updated)&&Number.isFinite(attempted)&&Math.abs(updated-attempted)<120000
-}
+// CDN identity and verification helpers are tested in photoVerification.mjs
 const msg=(e:unknown)=>{
  const value=e instanceof Error?e.message:clean(e)
  return (/^(Omie:|Foto:|Produto:|O limite|Cadastro)/.test(value)?value:'Erro de sincronização. Foto preservada no SGQ.').slice(0,380)
