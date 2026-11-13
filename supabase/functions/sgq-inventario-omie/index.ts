@@ -74,7 +74,7 @@ Deno.serve(async request=>{
   .select('status').eq('id',item.inventario_id).single()
  if(sessionError||session?.status!=='fechado')
   return json({ok:false,error:'Conclua o inventário antes de publicar fotos no Omie.'},409)
- if(!/^[\w-]{1,60}$/.test(item.codigo_omie))
+ if(!item.codigo_omie||item.codigo_omie.length>60||/[\x00-\x1f]/.test(item.codigo_omie))
   return json({ok:false,error:'Código Omie inválido.'},422)
 
  // Acquire one-shot claim: concurrent approvals cannot write the same product twice.
@@ -120,9 +120,12 @@ Deno.serve(async request=>{
   oldImages=product.imagens
    .map((entry:unknown)=>({url_imagem:clean((entry as {url_imagem?:string})?.url_imagem)}))
    .filter((entry:{url_imagem:string})=>/^https:\/\//i.test(entry.url_imagem))
+  // If six pictures already exist, replace the old cover while retaining
+  // the remaining five; otherwise append the new cover and retain every old photo.
+  const retained=oldImages.length>=6?oldImages.slice(1,6):oldImages
   const updatedImages=[
    {url_imagem:catalogUrl},
-   ...oldImages.filter(x=>x.url_imagem!==catalogUrl).slice(0,5)
+   ...retained.filter(x=>x.url_imagem!==catalogUrl).slice(0,5)
   ]
   // Keep identity and mandatory product fields unchanged. Only its gallery order changes.
   const change:Record<string,unknown>={
