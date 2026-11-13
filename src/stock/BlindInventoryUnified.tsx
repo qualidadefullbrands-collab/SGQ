@@ -317,7 +317,19 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   try{
    const reply=await authClient.functions.invoke('sgq-inventario-foto-direta',{body:{foto_id:photoId}})
    const body=reply.data as {ok?:boolean;error?:string;sku?:string}|null
-   if(reply.error||!body?.ok)throw new Error(body?.error||explain(reply.error))
+   if(reply.error||!body?.ok){
+    let reason=body?.error||''
+    // Supabase FunctionsHttpError uses a Response in .context, with the
+    // detailed JSON error. Do not discard it behind "non-2xx status code".
+    const context=(reply.error as {context?:{json?:()=>Promise<unknown>}}|null)?.context
+    if(!reason&&context?.json){
+     try{
+      const payload=await context.json() as {error?:string}
+      if(typeof payload?.error==='string'&&payload.error.trim())reason=payload.error
+     }catch{/** HTTP body can be empty or non-JSON. */}
+    }
+    throw new Error(reason||explain(reply.error)||'O Omie não confirmou a atualização.')
+   }
    setMessage('Foto associada ao SKU '+(body.sku||selectedSku)+' no Omie.')
    return true
   }catch(e){setError('Contagem salva, mas o envio da foto ao Omie não foi concluído: '+explain(e));return false}
