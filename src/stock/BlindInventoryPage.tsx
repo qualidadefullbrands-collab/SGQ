@@ -2,6 +2,7 @@ import {useEffect,useMemo,useRef,useState} from 'react'
 import {ArrowLeft,Camera,CheckCircle2,ClipboardCheck,Eye,ImagePlus,Plus,RefreshCw,Search,ShieldCheck,Trash2,Upload} from 'lucide-react'
 import {authClient} from '../lib/supabase'
 import {apiPost} from '../lib/supabase'
+import BlindInventoryProcessPanel,{type VerifiedBlindContext} from './BlindInventoryProcessPanel'
 import './BlindInventoryPage.css'
 
 type Session={
@@ -11,6 +12,9 @@ type Session={
 type Item={
  id:string;inventario_id:string;codigo_omie:string;descricao_omie:string;endereco:string
  quantidade_contada:number;observacao:string;foto_storage_path:string|null;foto_para_omie:boolean
+ processo_id:string|null;processo_codigo:string|null;cliente_nome:string|null
+ endereco_armario:string;endereco_prateleira:string;endereco_caixa:string
+ verificacao_cadastro:{checks?:Array<{status:string}>}|null
  foto_status:'pendente'|'enviando'|'sincronizada'|'erro';foto_omie_url?:string|null
  foto_omie_erro?:string|null;foto_sgq_path?:string|null;criado_em:string
 }
@@ -27,6 +31,13 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  const [active,setActive]=useState<Session|null>(null)
  const [items,setItems]=useState<Item[]>([])
  const [address,setAddress]=useState('')
+ const [armario,setArmario]=useState('')
+ const [prateleira,setPrateleira]=useState('')
+ const [caixa,setCaixa]=useState('')
+ const [locations,setLocations]=useState<Array<{codigo:string;armario:string|null;prateleira:string|null;caixa:string|null;descricao:string|null}>>([])
+ const [processContext,setProcessContext]=useState<VerifiedBlindContext|null>(null)
+ const [contextRevision,setContextRevision]=useState(0)
+ const [currentPhoto,setCurrentPhoto]=useState('')
  const [sku,setSku]=useState('')
  const [count,setCount]=useState('')
  const [product,setProduct]=useState<Product|null>(null)
@@ -48,8 +59,13 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
   setPreview(url)
   return()=>URL.revokeObjectURL(url)
  },[selectedFile])
- const resetSearch=()=>{setSku('');setProduct(null);setCount('');setNote('');setSelectedFile(null);setFlagOmie(false);inputRef.current?.focus()}
- const sorted=useMemo(()=>items.filter(item=>[item.codigo_omie,item.descricao_omie,item.endereco].join(' ').toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR'))),[items,search])
+ const resetSearch=()=>{setSku('');setProduct(null);setCount('');setNote('');setSelectedFile(null);setFlagOmie(false);setProcessContext(null);setCurrentPhoto('');setContextRevision(n=>n+1);inputRef.current?.focus()}
+ const setPhysicalAddress=(value:string)=>{
+  setAddress(value)
+  const known=locations.find(x=>x.codigo.toUpperCase()===value.trim().toUpperCase())
+  if(known){setArmario(known.armario||'');setPrateleira(known.prateleira||'');setCaixa(known.caixa||'')}
+ }
+ const sorted=useMemo(()=>items.filter(item=>[item.codigo_omie,item.descricao_omie,item.endereco,item.processo_codigo,item.cliente_nome].join(' ').toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR'))),[items,search])
  const flagged=items.filter(item=>item.foto_para_omie&&item.foto_status!=='sincronizada').length
  const shownSessions=sessions.filter(session=>showDeleted||session.status!=='cancelado')
 
@@ -62,14 +78,22 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  }
  async function fetchItems(sessionId:string){
   const {data,error:queryError}=await authClient.from('sgq_inventario_cego_itens')
-   .select('id,inventario_id,codigo_omie,descricao_omie,endereco,quantidade_contada,observacao,foto_storage_path,foto_sgq_path,foto_para_omie,foto_status,foto_omie_url,foto_omie_erro,criado_em')
+   .select('id,inventario_id,codigo_omie,descricao_omie,endereco,quantidade_contada,observacao,foto_storage_path,foto_sgq_path,foto_para_omie,foto_status,foto_omie_url,foto_omie_erro,criado_em,processo_id,processo_codigo,cliente_nome,endereco_armario,endereco_prateleira,endereco_caixa,verificacao_cadastro')
    .eq('inventario_id',sessionId).order('criado_em',{ascending:false}).limit(2000)
   if(queryError){setError(detail(queryError));return}
   setItems((data||[]) as Item[])
  }
  useEffect(()=>{void fetchSessions()},[])
+ useEffect(()=>{
+  let active=true
+  void authClient.from('localizacoes_estoque')
+   .select('codigo,armario,prateleira,caixa,descricao')
+   .eq('ativo',true).order('codigo',{ascending:true}).limit(500)
+   .then(({data})=>{if(active&&data)setLocations(data)})
+  return()=>{active=false}
+ },[])
  async function open(session:Session){
-  setError('');setMessage('');setActive(session);setAddress(session.endereco||'')
+  setError('');setMessage('');setActive(session);setPhysicalAddress(session.endereco||'')
   setItems([]);setPhotos({});resetSearch();await fetchItems(session.id)
  }
  async function create(){
@@ -91,18 +115,27 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  async function verify(){
   const code=normalSku(sku)
   if(!code){setError('Informe o código do produto no Omie.');return}
-  setChecking(true);setError('');setProduct(null);setMessage('')
+  setChecking(true);setError('');setProduct(null);setProcessContext(null);setCurrentPhoto('');setMessage('')
   try{
    const result=await apiPost<Product>('/api/estoque/validar-sku',{codigo:code})
    if(result.error||!result.data?.found||!result.data.descricao)
     throw new Error(result.error?.message||'Código não localizado no Omie.')
    setSku(code);setProduct({sku:code,descricao:result.data.descricao,found:true})
-   setMessage('Produto identificado no Omie. Informe a contagem física.')
+   const local=await authClient.from('produtos').select('foto_principal_path').ilike('sku',code).limit(1).maybeSingle()
+   if(local.data?.foto_principal_path){
+    const photo=await authClient.storage.from('produto-fotos').createSignedUrl(local.data.foto_principal_path,600)
+    if(photo.data?.signedUrl)setCurrentPhoto(photo.data.signedUrl)
+   }
+   setMessage('Produto identificado no Omie. Confirme processo, cliente e localização antes da contagem.')
   }catch(e){setError(detail(e))}
   finally{setChecking(false)}
  }
  async function saveCount(){
   if(!active||active.status!=='aberto'||!canWrite||!product||busy)return
+  if(!processContext||processContext.sku!==product.sku){
+   setError('Confirme processo, cliente e consulte as divergências cadastrais antes de registrar o produto.');return
+  }
+  if(!address.trim()){setError('Informe um endereço físico para a contagem.');return}
   const rawCount=count.trim()
   const numeric=Number(rawCount.replace(',','.'))
   if(!/^\d+(?:[.,]\d{1,3})?$/.test(rawCount)||!Number.isFinite(numeric)||numeric<0){
@@ -114,7 +147,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
   if(flagOmie&&!selectedFile){setError('Selecione uma foto para marcá-la como principal no Omie.');return}
   const code=normalSku(product.sku)
   const location=address.trim()
-  const prior=items.find(row=>normalSku(row.codigo_omie)===code&&row.endereco===location)
+  const prior=items.find(row=>normalSku(row.codigo_omie)===code&&row.endereco===location&&row.processo_id===processContext.processoId)
   if(prior&&!window.confirm('Já existe contagem para este código/endereço. Substituir a quantidade registrada?'))return
   setBusy(true);setError('');setMessage('')
   try{
@@ -123,6 +156,10 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
    let itemId=prior?.id||crypto.randomUUID()
    const payload={
     codigo_omie:code,descricao_omie:product.descricao,endereco:location,
+    endereco_armario:armario.trim(),endereco_prateleira:prateleira.trim(),endereco_caixa:caixa.trim(),
+    processo_id:processContext.processoId,processo_codigo:processContext.processoCodigo,
+    cliente_nome:processContext.clienteNome,cliente_confirmado:true,
+    verificacao_cadastro:processContext.verificacao,
     quantidade_contada:numeric,observacao:note.trim(),atualizado_em:new Date().toISOString()
    }
    if(prior){
@@ -276,23 +313,40 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
        <button type="button" className="secondary" disabled={checking||!sku.trim()} onClick={()=>void verify()}><Search size={17}/>{checking?'Consultando…':'Consultar Omie'}</button>
       </div>
       {product&&<div className="sgq-blind-product" role="status"><CheckCircle2 size={19}/><div><strong>{product.sku}</strong><span>{product.descricao}</span></div><small>Confirmado no Omie</small></div>}
+      {product&&<BlindInventoryProcessPanel key={product.sku+'-'+contextRevision} sku={product.sku} omieDescription={product.descricao}
+       inventoryId={active.id} canWrite={canWrite} onChange={setProcessContext}/>}
+      {processContext&&<p className="sgq-blind-confirmed-context"><CheckCircle2 size={16}/> Confirmado: {processContext.processoCodigo} · {processContext.clienteNome}</p>}
       <div className="sgq-blind-form-grid">
        <label>Quantidade contada<input type="number" inputMode="decimal" min="0" step=".001" value={count} onChange={e=>setCount(e.target.value)} placeholder="0"/></label>
-       <label>Endereço físico<input value={address} maxLength={120} onChange={e=>setAddress(e.target.value)} placeholder="Setor / prateleira"/></label>
+       <label>Endereço físico / código de localização *<input list="sgq-blind-locations" value={address} maxLength={120} onChange={e=>setPhysicalAddress(e.target.value)} placeholder="Ex.: RUA-A-03 (obrigatório)"/>
+        <datalist id="sgq-blind-locations">{locations.map(x=><option key={x.codigo} value={x.codigo}>{x.descricao||[x.armario,x.prateleira,x.caixa].filter(Boolean).join(' / ')}</option>)}</datalist>
+       </label>
+       <label>Rua / armário<input value={armario} maxLength={100} onChange={e=>setArmario(e.target.value)} placeholder="Ex.: Rua A / Armário 02"/></label>
+       <label>Prateleira<input value={prateleira} maxLength={100} onChange={e=>setPrateleira(e.target.value)} placeholder="Ex.: P03"/></label>
+       <label>Caixa / posição<input value={caixa} maxLength={100} onChange={e=>setCaixa(e.target.value)} placeholder="Ex.: CX-11"/></label>
        <label className="sgq-blind-full">Observação (opcional)<textarea value={note} rows={2} maxLength={1000} onChange={e=>setNote(e.target.value)} placeholder="Embalagem, avaria, lote, observações…"/></label>
       </div>
       <div className="sgq-blind-photo-upload">
-       <label className="sgq-blind-photo-picker"><Camera size={18}/> {selectedFile?'Trocar foto':'Fotografar produto'}
-        <input type="file" accept="image/jpeg,image/png" capture="environment" onChange={e=>setSelectedFile(e.target.files?.[0]||null)} aria-label="Foto do produto"/>
-       </label>
-       {preview&&<img src={preview} alt="Prévia da foto a registrar"/>}
-       <p className="sgq-blind-photo-note">A foto enviada será definida como foto principal do produto no SGQ.</p>
+       <div className="sgq-blind-photo-title"><Camera size={19}/><strong>Foto do produto e atualização de cadastro</strong>
+        <small>Fotografe ou envie da galeria. A imagem registrada atualiza a foto principal no SGQ; o Omie exige aprovação separada.</small></div>
+       {currentPhoto&&<div className="sgq-blind-photo-current"><img src={currentPhoto} alt="Foto principal atual no SGQ"/><small>Foto atual no SGQ</small></div>}
+       <div className="sgq-blind-photo-actions">
+        <label className="sgq-blind-photo-picker"><Camera size={18}/> Tirar foto
+         <input type="file" accept="image/jpeg,image/png" capture="environment" onChange={e=>setSelectedFile(e.target.files?.[0]||null)} aria-label="Fotografar produto"/>
+        </label>
+        <label className="sgq-blind-photo-picker"><ImagePlus size={18}/> Enviar foto do dispositivo
+         <input type="file" accept="image/jpeg,image/png" onChange={e=>setSelectedFile(e.target.files?.[0]||null)} aria-label="Enviar foto do produto"/>
+        </label>
+       </div>
+       {selectedFile&&<small className="sgq-blind-selected-photo">{selectedFile.name}</small>}
+       {preview&&<img className="sgq-blind-new-photo" src={preview} alt="Prévia da nova foto do produto"/>}
+       <p className="sgq-blind-photo-note">JPG ou PNG até 8 MB. A foto será vinculada ao registro físico e ao cadastro local SGQ.</p>
        <label className="sgq-blind-photo-flag"><input type="checkbox" checked={flagOmie} onChange={e=>setFlagOmie(e.target.checked)} disabled={!selectedFile}/>
         <span><strong>Marcar para atualizar a foto principal no Omie</strong><small>A foto será enviada ao catálogo somente após validação do gestor e encerramento da contagem.</small></span>
        </label>
       </div>
       <div className="sgq-blind-footer"><span>O saldo do ERP não será alterado.</span>
-       <button className="primary" type="button" disabled={busy||!canWrite||!product||!count.trim()} onClick={()=>void saveCount()}><Upload size={17}/>{busy?'Salvando…':'Salvar contagem'}</button>
+       <button className="primary" type="button" disabled={busy||!canWrite||!product||!processContext||!address.trim()||!count.trim()} onClick={()=>void saveCount()}><Upload size={17}/>{busy?'Salvando…':'Salvar contagem'}</button>
       </div>
      </div>}
      {active.status==='aberto'&&canApprove&&items.length>0&&<div className="sgq-blind-close"><p>Ao concluir, as contagens ficam bloqueadas. A sincronização de fotos não altera estoque.</p><button className="secondary" disabled={busy} onClick={()=>void close()}><ShieldCheck size={16}/> Concluir contagem</button></div>}
@@ -301,7 +355,10 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
      <div className="sgq-blind-heading"><div><h3>Registros físicos</h3><p>Somente quantidades informadas pelos conferentes.</p></div><label className="sgq-blind-list-search"><Search size={15}/><input placeholder="Buscar SKU ou local" value={search} onChange={e=>setSearch(e.target.value)}/></label></div>
      <div className="sgq-blind-records">
       {sorted.map(item=><article key={item.id} className="sgq-blind-record">
-       <div className="sgq-blind-record-main"><div><strong>{item.codigo_omie}</strong><span>{item.descricao_omie}</span><small>{item.endereco||'Sem endereço'} · {when(item.criado_em)}</small></div>
+       <div className="sgq-blind-record-main"><div><strong>{item.codigo_omie}</strong><span>{item.descricao_omie}</span><small>{item.endereco||'Sem endereço'} · {when(item.criado_em)}</small>
+         <small>Processo {item.processo_codigo||'não informado'} · Cliente {item.cliente_nome||'não informado'}</small>
+         {(item.endereco_armario||item.endereco_prateleira||item.endereco_caixa)&&<small>Rua/armário: {item.endereco_armario||'—'} · Prateleira: {item.endereco_prateleira||'—'} · Caixa: {item.endereco_caixa||'—'}</small>}
+         {item.verificacao_cadastro&&<small>Conferência cadastral: {(item.verificacao_cadastro.checks||[]).filter(c=>c.status==='divergente').length} divergência(s) registrada(s)</small>}</div>
         <div className="sgq-blind-quantity"><small>Contagem física</small><b>{fmt(item.quantidade_contada)}</b></div>
        </div>
        {item.observacao&&<p>{item.observacao}</p>}
