@@ -147,7 +147,7 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
   const value=input.trim().replace(',','.')
   return /^\d+(?:\.\d{1,3})?$/.test(value)?Number(value):null
  }
- async function operate(action:string,itemId?:string,qty?:number|null,source?:string,note?:string){
+ async function operate(action:string,itemId?:string,qty?:number|null,source?:string|null,note?:string|null){
   if(!selectedId||busy)return
   if(action==='encerrar'&&!window.confirm('Encerrar a contagem física? A conciliação será iniciada e os itens não poderão mais ser editados.'))return
   if(action==='finalizar'&&!window.confirm('Concluir a conciliação de todos os itens? As decisões ficarão bloqueadas. Nenhum saldo do Omie será alterado.'))return
