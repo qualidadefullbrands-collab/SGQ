@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useState} from 'react'
-import {ArrowLeft,CheckCircle2,ClipboardList,RefreshCw,Search,ShieldCheck} from 'lucide-react'
+import {ArrowLeft,CheckCircle2,ClipboardList,RefreshCw,Search,ShieldCheck,Trash2} from 'lucide-react'
 import {apiGet,apiPost,apiPut} from '../lib/supabase'
 import './InventoryPanel.css'
 
@@ -14,6 +14,7 @@ export default function InventoryPanel({samples,canWrite,canApprove,onRefreshSto
  samples:StockSample[];canWrite:boolean;canApprove:boolean;onRefreshStock:()=>Promise<void>
 }){
  const [sessions,setSessions]=useState<Session[]>([])
+ const [showDeleted,setShowDeleted]=useState(false)
  const [detail,setDetail]=useState<Detail|null>(null)
  const [busy,setBusy]=useState(false)
  const [savingId,setSavingId]=useState<string|null>(null)
@@ -24,6 +25,7 @@ export default function InventoryPanel({samples,canWrite,canApprove,onRefreshSto
  const [drafts,setDrafts]=useState<Record<string,string>>({})
  const [onlyDifferences,setOnlyDifferences]=useState(false)
  const addresses=useMemo(()=>[...new Set(samples.map(s=>s.endereco||'').filter(Boolean))].sort(),[samples])
+ const shownSessions=sessions.filter(session=>showDeleted||session.status!=='cancelado')
  async function loadSessions(){
   setError('')
   const r=await apiGet<{inventarios:Session[]}>('/api/estoque/inventarios')
@@ -74,6 +76,19 @@ export default function InventoryPanel({samples,canWrite,canApprove,onRefreshSto
     await open(detail.inventario.id);await loadSessions()}
   setBusy(false)
  }
+ async function excludeSession(session:Session){
+  if(!canApprove||busy||savingId||session.status!=='aberto')return
+  if(!window.confirm('Excluir o inventário '+session.codigo+'? Ele deixará a lista ativa, sem alterar o estoque. As contagens ficarão registradas para auditoria.'))return
+  setBusy(true);setError('');setMessage('')
+  try{
+   const r=await apiPost<{ok:boolean}>('/api/estoque/inventarios/'+encodeURIComponent(session.id)+'/excluir',{})
+   if(r.error||!r.data?.ok)throw new Error(r.error?.message||'Não foi possível excluir o inventário.')
+   if(detail?.inventario.id===session.id){setDetail(null);setDrafts({})}
+   await loadSessions()
+   setMessage('Inventário '+session.codigo+' excluído da lista ativa. Histórico preservado.')
+  }catch(e){setError(e instanceof Error?e.message:String(e))}
+  finally{setBusy(false)}
+ }
  async function apply(){
   if(!detail||busy||savingId||!canApprove||detail.inventario.status!=='fechado')return
   if(!window.confirm('Aplicar os ajustes auditados ao saldo de estoque? A operação altera os saldos e não pode ser desfeita por este botão.'))return
@@ -97,8 +112,10 @@ export default function InventoryPanel({samples,canWrite,canApprove,onRefreshSto
   {error&&<div className="alert error" role="alert">{error}</div>}
   {message&&<div className="alert success" role="status">{message}</div>}
   {!detail?<section className="sgq-inventory-start">
-    <div className="sgq-inventory-head"><h2>Inventários</h2><button type="button" className="secondary small"
-      disabled={busy} onClick={()=>void loadSessions()}><RefreshCw size={15}/> Atualizar</button></div>
+    <div className="sgq-inventory-head"><h2>Inventários</h2><div className="sgq-inventory-session-actions">
+      {canApprove&&<label className="sgq-inventory-show-deleted"><input type="checkbox" checked={showDeleted} onChange={e=>setShowDeleted(e.target.checked)}/> Ver excluídos</label>}
+      <button type="button" className="secondary small" disabled={busy} onClick={()=>void loadSessions()}><RefreshCw size={15}/> Atualizar</button>
+    </div></div>
     {canWrite&&<div className="sgq-inventory-create">
       <select aria-label="Endereço do inventário" value={address} onChange={e=>setAddress(e.target.value)}>
         <option value="">Todos os endereços</option>
@@ -109,12 +126,15 @@ export default function InventoryPanel({samples,canWrite,canApprove,onRefreshSto
       </button>
     </div>}
     <div className="sgq-inventory-sessions">
-      {sessions.map(session=><button type="button" key={session.id} onClick={()=>void open(session.id)}
-        className="sgq-inventory-session" disabled={busy}>
-        <b>{session.codigo}</b><span>{session.endereco||'Todos os endereços'}</span>
-        <small>{date(session.criado_em)}</small><strong data-status={session.status}>{session.status}</strong>
-      </button>)}
-      {!sessions.length&&<p>Nenhum inventário registrado.</p>}
+      {shownSessions.map(session=><div key={session.id} className="sgq-inventory-session-card">
+        <button type="button" onClick={()=>void open(session.id)} className="sgq-inventory-session" disabled={busy}>
+         <b>{session.codigo}</b><span>{session.endereco||'Todos os endereços'}</span>
+         <small>{date(session.criado_em)}</small><strong data-status={session.status}>{session.status==='cancelado'?'excluído':session.status}</strong>
+        </button>
+        {canApprove&&session.status==='aberto'&&<button className="sgq-inventory-delete" type="button" disabled={busy}
+         aria-label={'Excluir inventário '+session.codigo} onClick={()=>void excludeSession(session)}><Trash2 size={15}/> Excluir</button>}
+      </div>)}
+      {!shownSessions.length&&<p>Nenhum inventário ativo.</p>}
     </div>
   </section>:<section className="sgq-inventory-details">
     <div className="sgq-inventory-head">
@@ -122,6 +142,8 @@ export default function InventoryPanel({samples,canWrite,canApprove,onRefreshSto
         <ArrowLeft size={15}/> Inventários
       </button>
       <div><h2>{detail.inventario.codigo}</h2><small>{detail.inventario.endereco||'Todos os endereços'} · {detail.inventario.status}</small></div>
+      {canApprove&&detail.inventario.status==='aberto'&&<button type="button" className="sgq-inventory-delete" disabled={busy||!!savingId}
+        onClick={()=>void excludeSession(detail.inventario)}><Trash2 size={15}/> Excluir inventário</button>}
     </div>
     <div className="sgq-inventory-kpis" aria-label="Resumo do inventário">
       <div><span>Itens</span><strong>{items.length}</strong></div>
