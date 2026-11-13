@@ -140,3 +140,80 @@ create policy sgq_blind_photos_insert on public.sgq_inventario_cego_imagens
 
 comment on table public.sgq_inventario_cego_imagens is
  'Fotos individuais de cada SKU contado, com status de envio imediato ao Omie e trilha de auditoria';
+
+
+-- One photo for each counted SKU; do not accumulate multiple uploaded files
+-- against the same inventory line.
+create unique index if not exists sgq_blind_photo_one_per_item
+ on public.sgq_inventario_cego_imagens(item_id);
+
+-- Allow authorized counters to select and register a real Rua/Armário.
+-- No edit/delete permissions added by these policies.
+drop policy if exists sgq_inventory_locations_select on public.localizacoes_estoque;
+create policy sgq_inventory_locations_select on public.localizacoes_estoque
+ for select to authenticated
+ using(private.current_sgq_role() in ('administrador','gestor','inspetor','consulta'));
+drop policy if exists sgq_inventory_locations_insert on public.localizacoes_estoque;
+create policy sgq_inventory_locations_insert on public.localizacoes_estoque
+ for insert to authenticated with check(
+  private.current_sgq_role() in ('administrador','gestor','inspetor')
+  and length(btrim(codigo)) between 3 and 80
+  and (upper(codigo) like 'RUA %' or upper(codigo) like 'ARM %')
+  and ativo
+ );
+
+create table if not exists public.sgq_inventario_cego_documentos(
+ id uuid primary key default gen_random_uuid(),
+ inventario_id uuid not null references public.sgq_inventarios_cegos(id) on delete restrict,
+ processo_codigo text not null check(processo_codigo ~ '^FST[0-9]{1,8}(-[A-Z0-9]+)?$'),
+ arquivo_nome text not null check(length(btrim(arquivo_nome)) between 1 and 200),
+ mime_type text not null check(mime_type in('application/pdf','application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document','image/jpeg','image/png')),
+ storage_path text not null unique,
+ criado_por uuid not null references auth.users(id) on delete restrict,
+ criado_em timestamptz not null default now(),
+ constraint sgq_inv_document_path check(
+  split_part(storage_path,'/',1)=criado_por::text
+  and split_part(storage_path,'/',2)=inventario_id::text
+  and split_part(storage_path,'/',3)=processo_codigo
+  and split_part(storage_path,'/',5)=''
+ )
+);
+create index if not exists sgq_inv_doc_proc_idx
+ on public.sgq_inventario_cego_documentos(processo_codigo,criado_em desc);
+alter table public.sgq_inventario_cego_documentos enable row level security;
+revoke all on public.sgq_inventario_cego_documentos from anon,authenticated;
+grant select,insert on public.sgq_inventario_cego_documentos to authenticated;
+create policy sgq_inv_doc_read on public.sgq_inventario_cego_documentos
+ for select to authenticated
+ using(private.current_sgq_role() in ('administrador','gestor','inspetor','consulta'));
+create policy sgq_inv_doc_write on public.sgq_inventario_cego_documentos
+ for insert to authenticated with check (
+  criado_por=(select auth.uid())
+  and private.current_sgq_role() in ('administrador','gestor','inspetor')
+  and exists(select 1 from public.sgq_inventarios_cegos s where s.id=inventario_id
+   and s.status='aberto' and s.processo_codigo=processo_codigo)
+ );
+
+insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
+ values('sgq-inventario-documentos','sgq-inventario-documentos',false,15728640,
+ array['application/pdf','application/msword',
+ 'application/vnd.openxmlformats-officedocument.wordprocessingml.document','image/jpeg','image/png'])
+ on conflict(id) do update set public=false,file_size_limit=15728640,
+ allowed_mime_types=excluded.allowed_mime_types;
+
+drop policy if exists sgq_inv_doc_upload on storage.objects;
+create policy sgq_inv_doc_upload on storage.objects
+ for insert to authenticated
+ with check(bucket_id='sgq-inventario-documentos'
+  and split_part(name,'/',1)=(select auth.uid())::text
+  and split_part(name,'/',5)=''
+  and private.current_sgq_role() in ('administrador','gestor','inspetor')
+  and exists(select 1 from public.sgq_inventarios_cegos s
+   where s.id::text=split_part(name,'/',2)
+    and s.processo_codigo=split_part(name,'/',3) and s.status='aberto'));
+drop policy if exists sgq_inv_doc_download on storage.objects;
+create policy sgq_inv_doc_download on storage.objects
+ for select to authenticated
+ using(bucket_id='sgq-inventario-documentos'
+  and private.current_sgq_role() in ('administrador','gestor','inspetor','consulta'));
