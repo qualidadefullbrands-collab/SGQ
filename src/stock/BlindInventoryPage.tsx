@@ -69,7 +69,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
   setPreview(url)
   return()=>URL.revokeObjectURL(url)
  },[selectedFile])
- const resetSearch=()=>{setSku('');setProduct(null);setCount('');setNote('');setSelectedFile(null);setFlagOmie(false);setProcessContext(null);setCurrentPhoto('');setProcessQuery('');setProcessResults([]);setProcessProducts([]);setSelectedProcess(null);setProcessHelp('');setContextRevision(n=>n+1);inputRef.current?.focus()}
+ const resetSearch=(preserveProcess=false)=>{setSku('');setProduct(null);setCount('');setNote('');setSelectedFile(null);setFlagOmie(false);setProcessContext(null);setCurrentPhoto('');if(!preserveProcess){setProcessQuery('');setProcessResults([]);setProcessProducts([]);setSelectedProcess(null);setProcessHelp('')}setContextRevision(n=>n+1);inputRef.current?.focus()}
  const switchLookup=(mode:'codigo'|'processo')=>{
   setLookupMode(mode);resetSearch();setError('');setMessage('')
  }
@@ -277,7 +277,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
     }).eq('id',itemId).select('id').single()
     if(linkError||!linked)throw new Error('Foto atualizada no SGQ, mas falhou ao registrar o vínculo de auditoria: '+detail(linkError))
    }
-   await fetchItems(active.id);resetSearch()
+   await fetchItems(active.id);resetSearch(lookupMode==='processo'&&!!selectedProcess)
    setMessage(selectedFile
     ?flagOmie?'Contagem salva e foto do SGQ atualizada. Envio ao Omie aguardando aprovação.':'Contagem salva e foto principal do produto atualizada no SGQ.'
     :'Contagem salva sem alterar o saldo do Omie.')
