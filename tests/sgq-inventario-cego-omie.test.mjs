@@ -11,7 +11,7 @@ const edge=load('supabase/functions/sgq-inventario-omie/index.ts')
 test('stock preserves previous inventory and adds a separate blind Omie mode',()=>{
  assert.match(app,/import BlindInventoryUnified from '\.\/stock\/BlindInventoryUnified'/)
  assert.match(app,/stockMode==='cego'&&<BlindInventoryUnified/)
- assert.match(app,/Inventário às cegas · Omie/)
+ assert.match(app,/Inventário FST · Omie/)
  assert.match(app,/stockMode==='inventario'&&<InventoryPanel/)
  assert.match(existing,/saldo_sistema/)
 })

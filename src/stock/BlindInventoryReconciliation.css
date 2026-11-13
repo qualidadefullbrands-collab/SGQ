@@ -1,0 +1,49 @@
+.sgq-recon{display:grid;gap:16px;color:#244c60}
+.sgq-recon-header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.sgq-recon-header h2{margin:0;font-size:21px}
+.sgq-recon-header p{margin:6px 0 0;color:#657e8b;font-size:13px}
+.sgq-recon-intro{display:flex;gap:10px;align-items:flex-start;margin:0;padding:13px;border:1px solid #e2dfc6;background:#fffdf3;border-radius:10px;font-size:13px;line-height:1.5;color:#78622d}
+.sgq-recon-intro svg{flex:0 0 auto}
+.sgq-recon-panel{display:grid;gap:13px;padding:19px;border:1px solid #d7e6ec;border-radius:12px;background:#fff}
+.sgq-recon-panel h3{margin:0;font-size:16px}
+.sgq-recon-panel h4{margin:0;font-size:13px}
+.sgq-recon-selector{max-width:750px}
+.sgq-recon label{display:grid;gap:5px;font-size:12px;font-weight:600;color:#426579;min-width:0}
+.sgq-recon input,.sgq-recon select,.sgq-recon textarea{display:block;width:100%;min-width:0;max-width:100%;box-sizing:border-box;padding:10px;border:1px solid #c9dce4;border-radius:8px;background:#fff;color:#24485e;font:inherit;font-size:13px}
+.sgq-recon-title{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;flex-wrap:wrap}
+.sgq-recon-title p{margin:4px 0 0;color:#728794;font-size:12px}
+.sgq-recon-chip{display:inline-flex;padding:6px 11px;border:1px solid #b9d9e4;border-radius:20px;background:#f2f9fc;color:#2d748c;font-weight:600;font-size:12px}
+.sgq-recon-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.sgq-recon-stats>div{display:grid;gap:5px;border:1px solid #e1ebef;background:#f8fbfc;border-radius:8px;padding:12px}
+.sgq-recon-stats small,.sgq-recon-values small{font-size:11px;color:#728995}
+.sgq-recon-stats strong{font-size:22px;color:#285d73}
+.sgq-recon-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.sgq-recon-actions p{margin:0;font-size:12px;flex:1}
+.sgq-recon-actions small{font-size:12px;color:#7c8184}
+.sgq-recon-complete{display:flex;align-items:center;gap:8px;background:#eaf6ed;color:#28734d;border-radius:8px;padding:10px;margin:0;font-size:13px}
+.sgq-recon-rows{display:grid;gap:13px}
+.sgq-recon-item{display:grid;gap:12px;border:1px solid #d5e5ea;border-radius:11px;background:#fff;padding:15px}
+.sgq-recon-item-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sgq-recon-item-head>div:first-child{display:grid;gap:4px}
+.sgq-recon-item-head strong{font-size:16px;color:#1e6077}
+.sgq-recon-item-head span{font-size:13px}
+.sgq-recon-item-head small{font-size:11px;color:#738b97}
+.sgq-recon-item-status{font-size:12px;color:#376b83;font-weight:700}
+.sgq-recon-values{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.sgq-recon-values>div{display:grid;gap:3px;padding:10px;background:#f5f9fa;border-radius:8px}
+.sgq-recon-values b{font-size:17px;color:#2b647b}
+.sgq-recon-values .sgq-recon-different{color:#b65436}
+.sgq-recon-notes{display:grid;gap:6px}
+.sgq-recon-notes p{margin:0;font-size:12px;overflow-wrap:anywhere}
+.sgq-recon-notes button{justify-self:start}
+.sgq-recon-edit{display:grid;gap:11px;border-top:1px solid #e3ebef;padding-top:12px}
+.sgq-recon-edit>button{justify-self:start}
+.sgq-recon-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.sgq-recon-muted{font-size:13px;color:#79909a;margin:0}
+.sgq-recon-filter{width:220px}
+.sgq-recon-events{display:grid;gap:8px;max-height:320px;overflow:auto}
+.sgq-recon-events p{display:flex;align-items:flex-start;gap:9px;font-size:12px;margin:0;padding:8px;background:#f7fafb;border-radius:7px}
+.sgq-recon-events span{display:grid;gap:3px}
+.sgq-recon-events small{font-size:11px;color:#718a96}
+@media(max-width:850px){.sgq-recon-stats{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}.sgq-recon-fields{grid-template-columns:1fr}.sgq-recon-values{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.sgq-recon-panel{padding:12px}.sgq-recon-actions button{width:100%}.sgq-recon-filter{width:100%}.sgq-recon-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}

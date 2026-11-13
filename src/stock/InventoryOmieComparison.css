@@ -1,0 +1,11 @@
+.sgq-omie-comparison{display:grid;gap:8px;padding:10px;border-radius:9px;background:#f7fafb;border:1px solid #dbe8ec;font-size:12px;color:#527486}
+.sgq-omie-comparison.mismatch{background:#fff9f3;border-color:#ebcfb8}
+.sgq-omie-comparison-head{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap}
+.sgq-omie-comparison-head>span{display:inline-flex;gap:6px;align-items:center}
+.sgq-omie-comparison-ok{color:#297757}
+.sgq-omie-comparison-alert{color:#ad5a32!important}
+.sgq-omie-comparison-values{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.sgq-omie-comparison-values>div{display:grid;gap:4px;min-width:0}
+.sgq-omie-comparison-values small{font-size:11px;color:#82939a}
+.sgq-omie-comparison-values b,.sgq-omie-comparison-values span{font-size:12px;overflow-wrap:anywhere}
+@media(max-width:620px){.sgq-omie-comparison-values{grid-template-columns:1fr}}
