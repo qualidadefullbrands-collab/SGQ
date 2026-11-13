@@ -8,14 +8,17 @@ const errors=source('src/stock/blindInventoryErrors.ts')
 const main=source('src/main.tsx')
 const sw=source('public/sw.js')
 
-test('every blind count save carries the fields required by Supabase RLS',()=>{
- for(const part of ['processo_id:processContext.processoId',
-  'processo_codigo:processContext.processoCodigo','cliente_nome:processContext.clienteNome',
-  'cliente_confirmado:true','verificacao_cadastro:processContext.verificacao',
-  'inventario_id:active.id','criado_por:user.id']){
-  assert.ok(page.includes(part),part)
+test('both blind count flows submit the respective fields required by Supabase RLS',()=>{
+ for(const part of [
+  'processo_id:linkedProcess?.processoId||null',
+  'processo_codigo:linkedProcess?.processoCodigo||null',
+  'cliente_nome:linkedProcess?.clienteNome||null',
+  'cliente_confirmado:!!linkedProcess',
+  'verificacao_cadastro:linkedProcess?.verificacao||{',
+  "modo:'codigo_omie'",'inventario_id:active.id','criado_por:user.id']){
+   assert.ok(page.includes(part),part)
  }
- assert.ok(page.includes('if(!processContext||processContext.sku!==product.sku)'))
+ assert.ok(page.includes("if(lookupMode==='processo'&&(!processContext"))
  assert.ok(page.includes('locations.includes(address)'))
 })
 
