@@ -61,10 +61,10 @@ async function omie(call:string,param:Record<string,unknown>,key:string,secret:s
  }finally{clearTimeout(timer)}
 }
 async function storeResult(photo:Photo,userId:string,omieUrl:string,previous:ImageUrl[],sourceUrl:string){
- const {error}=await admin.from('sgq_inventario_cego_imagens').update({
+ const {data:updated,error}=await admin.from('sgq_inventario_cego_imagens').update({
   status:'sincronizada',omie_url:omieUrl,erro:null,sincronizada_em:new Date().toISOString(),atualizado_em:new Date().toISOString()
- }).eq('id',photo.id).eq('status','enviando')
- if(error)throw new Error('Omie: imagem publicada, mas a confirmação local falhou. Confira antes de repetir.')
+ }).eq('id',photo.id).eq('status','enviando').select('id').maybeSingle()
+ if(error||!updated)throw new Error('Omie: imagem publicada, mas a confirmação local falhou. Confira antes de repetir.')
  await admin.from('sgq_inventario_cego_foto_logs').insert({
   item_id:photo.item_id,executado_por:userId,status:'sincronizada',
   url_publicada:sourceUrl,imagens_anteriores:previous,detalhe:'Foto '+photo.id+' confirmada no catálogo Omie (CDN) para o SKU '+photo.codigo_omie
