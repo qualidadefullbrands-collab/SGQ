@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs'
 
 const file=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8')
 const app=file('src/App.tsx')
+const journey=file('src/components/InspectionJourney.tsx')
 const backend=file('backend/Sgq.Api/Program.cs')
 const report=file('server/app.py')
 
@@ -11,7 +12,8 @@ test('inspection completion does not require or prompt for retention',()=>{
   const finish=app.split("async function finishInspection(result:")[1]?.split("async function saveRetention()")[0]||''
   assert.match(finish,/Inspeção finalizada\. A retenção de amostras é opcional/)
   assert.doesNotMatch(finish,/Agora defina a retenção/)
-  assert.match(app,/\['retencao','Retenção \(opcional\)'/)
+  assert.match(app,/<InspectionJourney\b/)
+  assert.match(journey,/\{ id: 'retencao', title: 'Retenção', done: retentionDone, optional: true \}/)
   assert.match(app,/Pular retenção e voltar aos processos/)
   assert.match(app,/Esta etapa não é obrigatória/)
 })
