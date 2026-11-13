@@ -131,7 +131,16 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
    .select('id,inventario_id,codigo_omie,endereco,processo_codigo,quantidade_contada,criado_em,criado_por')
    .ilike('processo_codigo',code).order('criado_em',{ascending:false}).limit(2000)
   if(dbError)throw dbError
-  const records=(data||[]) as CountRow[]
+  const all=(data||[]) as CountRow[]
+  let records:CountRow[]=[]
+  if(all.length){
+   const {data:validSessions,error:sessionsError}=await authClient.from('sgq_inventarios_cegos')
+    .select('id').in('id',[...new Set(all.map(r=>r.inventario_id))])
+    .in('status',['aberto','fechado']).limit(2000)
+   if(sessionsError)throw sessionsError
+   const validIds=new Set((validSessions||[]).map(row=>row.id))
+   records=all.filter(row=>validIds.has(row.inventario_id))
+  }
   setCounts(records)
   if(records.length){
    const {data:images,error:imagesError}=await authClient.from('sgq_inventario_cego_imagens')
