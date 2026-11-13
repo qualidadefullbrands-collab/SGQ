@@ -5,8 +5,7 @@ import {blindInventoryError as explain} from './blindInventoryErrors'
 import './BlindInventoryUnified.css'
 
 type ProcessRow={id:string;codigo:string;cliente:string|null;nota_fiscal:string|null}
-type Order={codigoPedido:number;numeroPedido:string}
-type OmieInfo={found?:boolean;cliente?:string|null;matchedCode?:string;itens?:Array<{sku:string;descricao:string}>;itensDisponiveis?:boolean;pedidos?:Order[];reason?:string;source?:string}
+type OmieInfo={found?:boolean;cliente?:string|null;matchedCode?:string;itens?:Array<{sku:string;descricao:string}>;itensDisponiveis?:boolean;reason?:string;source?:string}
 type NfInfo={found?:boolean;status?:string;numeroNota?:string;data?:string|null;tipoData?:string;dataRegistro?:string|null;dataEmissao?:string|null;serie?:string}
 type Product={sku:string;descricao:string}
 type Session={id:string;codigo:string;endereco:string;status:string;processo_codigo:string|null;nf_entrada:string|null;data_nf:string|null;cliente_nome:string|null}
@@ -43,7 +42,6 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
  const [nfNumber,setNfNumber]=useState('')
  const [nfDate,setNfDate]=useState('')
  const [nfDateSource,setNfDateSource]=useState('informada')
- const [order,setOrder]=useState('')
  const [products,setProducts]=useState<Product[]>([])
  const [confirmed,setConfirmed]=useState(false)
  const [session,setSession]=useState<Session|null>(null)
@@ -103,7 +101,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   nfDateEdited.current=false
   setNfLoading(false)
   setProcessCode('');setSgqProcess(null);setOmie(null);setNfe(null);setClient('');setNfNumber('')
-  setNfDate('');setNfDateSource('informada');setOrder('');setProducts([]);setConfirmed(false)
+  setNfDate('');setNfDateSource('informada');setProducts([]);setConfirmed(false)
   setSession(null);setCounts([]);setPhotoRows([]);setSelectedSku('');setQuantity('');setPhoto(null)
   setInspections([]);setInspection(null);setError('');setMessage('');setWarnings([])
  }
@@ -165,7 +163,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   if(readError)throw readError
   setInspections((data||[]) as DocRow[])
  }
- async function loadProcess(code:string,orderId?:number){
+ async function loadProcess(code:string){
   // Avoid blocking the product list on the potentially lengthy paginated NF-e search.
   const revision=++lookupRevision.current
   nfDateEdited.current=false
@@ -173,7 +171,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   const receiptJob=authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code,modo:'nfe'}})
    .catch(error=>({data:null,error}))
   const [remote,local,existingSession]=await Promise.all([
-   authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code,...(orderId?{codigoPedido:orderId}:{})}}),
+   authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code,modo:'inventario'}}),
    authClient.from('processos').select('id,codigo,cliente,nota_fiscal')
     .in('codigo',[code,code.replace(/^FST/,'')]).is('excluido_em',null).limit(1).maybeSingle(),
    authClient.from('sgq_inventarios_cegos')
@@ -201,11 +199,32 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
     if(sku)list.set(sku,{sku,descricao:row.descricao||sku})
    }
   }
+  // A process need not have an Omie sales order. When project-linked order
+  // data has no SKU detail, use products recorded for the exact FST in SGQ.
+  // Each selected SKU is still checked against Omie before saving the count.
+  let sgqProductFallback=false
+  if((!data.itensDisponiveis||!list.size)&&sgq?.id){
+   const {data:links,error:linkError}=await authClient.from('processo_itens')
+    .select('produto_id').eq('processo_id',sgq.id).limit(500)
+   if(linkError)throw linkError
+   const ids=[...new Set((links||[]).map(x=>x.produto_id).filter(Boolean))]
+   if(ids.length){
+    const {data:catalog,error:catalogError}=await authClient.from('produtos')
+     .select('sku,nome').in('id',ids).limit(500)
+    if(catalogError)throw catalogError
+    for(const row of catalog||[]){
+     const sku=skuOf(row.sku)
+     if(sku){list.set(sku,{sku,descricao:row.nome||sku});sgqProductFallback=true}
+    }
+   }
+  }
+  if(revision!==lookupRevision.current)return
   setProducts([...list.values()].sort((a,b)=>a.sku.localeCompare(b.sku,'pt-BR')))
   const issues:string[]=[]
   if(!data.cliente)issues.push('Cliente não identificado no Omie: confira o cadastro/cliente SGQ.')
   issues.push('Consulta fiscal em andamento: NF de entrada e data podem aparecer em instantes.')
-  if(!data.itensDisponiveis||!list.size)issues.push('Os itens do pedido não foram confirmados no Omie. Selecione um pedido vinculado ou revise o processo.')
+  if(sgqProductFallback)issues.push('Itens obtidos do cadastro SGQ do processo. Cada SKU será validado no Omie antes do registro.')
+  else if(!data.itensDisponiveis||!list.size)issues.push('Os produtos do processo não foram confirmados no Omie. Confira o vínculo dos SKUs ao FST.')
   if(sgq?.cliente&&data.cliente&&normalized(sgq.cliente)!==normalized(data.cliente))
    issues.push('Divergência de cliente: SGQ '+sgq.cliente+' · Omie '+data.cliente)
   setWarnings(issues)
@@ -252,20 +271,12 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   catch(e){setError(explain(e))}
   finally{setLoading(false)}
  }
- async function selectOrder(value:string){
-  if(!processCode||!value)return
-  setLoading(true);setError('');setOrder(value)
-  try{await loadProcess(processCode,Number(value))}
-  catch(e){setError('Pedido não confirmado: '+explain(e))}
-  finally{setLoading(false)}
- }
-
  async function confirmProcess(){
   if(!canWrite||busy||!location||!processCode||!omie)return
   if(!omie.cliente&&(!client||!client.trim())){setError('Informe e valide o cliente.');return}
   if(!client.trim()||client.length>180){setError('Confirme o cliente, com até 180 caracteres.');return}
   if(!nfNumber.trim()||nfNumber.length>30||!nfDate){setError('Informe NF de entrada e data fiscal para validar o processo.');return}
-  if(!products.length){setError('Não há itens confirmados no Omie para este processo. Escolha o pedido correto.');return}
+  if(!products.length){setError('Não há produtos confirmados para este processo. Confira os SKUs vinculados ao FST.');return}
   setBusy(true);setError('')
   try{
    const {data:{user},error:authError}=await authClient.auth.getUser()
@@ -337,8 +348,8 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
     codigo_omie:selected.sku,descricao_omie:selected.descricao,endereco:location,endereco_armario:location,
     processo_id:null,processo_codigo:processCode,cliente_nome:client.trim(),cliente_confirmado:true,
     verificacao_cadastro:{modo:'processo_omie',processo:processCode,sku:selected.sku,
-     cliente_omie:omie?.cliente||null,nf_entrada:nfNumber,data_nf:nfDate,fonte:'omie_projeto_pedido',
-     consultadoEm:new Date().toISOString(),pedido_id:order?Number(order):null},
+     cliente_omie:omie?.cliente||null,nf_entrada:nfNumber,data_nf:nfDate,fonte:'omie_projeto_inventario',
+     consultadoEm:new Date().toISOString()},
     quantidade_contada:Number(qty.replace(',','.')),observacao:'',atualizado_em:new Date().toISOString()
    }
    if(current){
@@ -445,12 +456,6 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
    </div>
    {omie&&processCode&&<>
     <div className="sgq-single-subheading"><strong>{processCode}</strong><span>Processo localizado no Omie</span></div>
-    {!!omie.pedidos?.length&&<label>Pedido de venda vinculado
-     <select value={order} onChange={e=>void selectOrder(e.target.value)} disabled={loading||confirmed}>
-      <option value="">Selecione o pedido (quando houver mais de um)</option>
-      {omie.pedidos.map(p=><option key={p.codigoPedido} value={String(p.codigoPedido)}>{p.numeroPedido||p.codigoPedido}</option>)}
-     </select>
-    </label>}
     <div className="sgq-single-grid">
      <label>Cliente <input value={client} maxLength={180} disabled={confirmed} onChange={e=>setClient(e.target.value)} placeholder="Cliente do processo"/></label>
      <label>NF de entrada <input value={nfNumber} maxLength={30} disabled={confirmed} onChange={e=>setNfNumber(e.target.value)} placeholder="Número da NF"/></label>

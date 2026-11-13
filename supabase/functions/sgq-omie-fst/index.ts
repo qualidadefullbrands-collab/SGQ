@@ -210,6 +210,76 @@ Deno.serve(async req=>{
       for(const row of linkedOrders)if(Number.isFinite(row.codigoCliente)&&row.codigoCliente>0)clientes.add(row.codigoCliente);
       const clients=clientes;
       const totalPages=Number(orders.total_de_paginas||1);
+      // The blind inventory is identified by the exact FST process, never by
+      // an operator-selected sales order. Read all safely bounded project-linked
+      // orders as reference data and consolidate their SKU codes automatically.
+      // Other SGQ workflows still retain their existing explicit order selector.
+      if(modo==="inventario"){
+        const maxPages=3,maxOrders=12;
+        let inventoryOrders=[...linkedOrders];
+        let complete=Number.isInteger(totalPages)&&totalPages>=1&&totalPages<=maxPages;
+        if(complete&&totalPages>1){
+          const responses=await Promise.all(
+            Array.from({length:totalPages-1},(_,i)=>i+2).map(page=>
+              omie(ordersUrl,"ListarPedidos",{
+                pagina:page,registros_por_pagina:50,
+                filtrar_por_projeto:projectId,apenas_resumo:"S"
+              },appKey,appSecret))
+          );
+          for(const response of responses){
+            if(!response){complete=false;continue}
+            const rows=Array.isArray(response.pedido_venda_produto)?response.pedido_venda_produto:[];
+            inventoryOrders.push(...rows.map((row:any)=>({
+              codigoPedido:Number(row?.cabecalho?.codigo_pedido),
+              numeroPedido:String(row?.cabecalho?.numero_pedido||""),
+              codigoCliente:Number(row?.cabecalho?.codigo_cliente),
+              quantidadeItens:Number(row?.cabecalho?.quantidade_itens||0)
+            })).filter((o:any)=>Number.isFinite(o.codigoPedido)&&o.codigoPedido>0))
+          }
+        }
+        const distinctOrders=[...new Map(inventoryOrders.map((o:any)=>[o.codigoPedido,o])).values()];
+        if(!complete||distinctOrders.length>maxOrders)
+          return reply({found:true,matchedCode:project.nome,projectId,source:"omie_projeto_inventario",
+            cliente:null,itens:[],itensDisponiveis:false,
+            reason:"inventory_orders_incomplete"});
+        const allSkus=new Map<string,OmieItem>();
+        let allDetailsVerified=true;
+        const clientIds=new Set<number>();
+        for(let i=0;i<distinctOrders.length;i+=4){
+          const batch=distinctOrders.slice(i,i+4);
+          const detailRows=await Promise.all(batch.map((o:any)=>omie(ordersUrl,"ConsultarPedido",
+            {codigo_pedido:o.codigoPedido},appKey,appSecret)));
+          for(let j=0;j<batch.length;j++){
+            const row=batch[j] as any;
+            const resolved=unwrapOmiePedido(detailRows[j]);
+            if(Number(resolved?.cabecalho?.codigo_pedido)!==row.codigoPedido||
+               Number(resolved?.cabecalho?.codigo_cliente)!==row.codigoCliente){
+              allDetailsVerified=false;continue
+            }
+            if(Number.isSafeInteger(row.codigoCliente)&&row.codigoCliente>0)clientIds.add(row.codigoCliente)
+            for(const item of extractItems(resolved)){
+              const previous=allSkus.get(item.sku);
+              if(previous)previous.quantidade+=item.quantidade;
+              else allSkus.set(item.sku,{...item});
+            }
+          }
+        }
+        let cliente:string|null=null;
+        if(clientIds.size===1){
+          const clientCode=[...clientIds][0];
+          const customer=await omie(customersUrl,"ConsultarCliente",
+            {codigo_cliente_omie:clientCode},appKey,appSecret);
+          cliente=String(customer?.nome_fantasia||customer?.razao_social||"").trim()||null;
+        }
+        return reply({
+          found:true,matchedCode:project.nome,projectId,source:"omie_projeto_inventario",
+          cliente,itens:[...allSkus.values()],
+          itensDisponiveis:allDetailsVerified&&allSkus.size>0,
+          reason:!allDetailsVerified?"inventory_order_details_unavailable":
+            clientIds.size>1?"inventory_multiple_clients":
+            !allSkus.size?"inventory_no_linked_items":null
+        });
+      }
       if(totalPages>1)
         return reply({found:true,cliente:null,source:"omie_projeto",matchedCode:project.nome,
           reason:"multiple_order_pages",projectId,pedidos:[]});

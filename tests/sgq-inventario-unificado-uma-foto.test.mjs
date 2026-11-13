@@ -65,3 +65,17 @@ test('Omie items do not wait for paginated NF-e search',()=>{
  assert.match(ui,/nfLoading\?'consultando recebimentos no Omie/)
  assert.match(ui,/lookupRevision\.current/)
 })
+
+test('inventory no longer asks operator to select or link any sales order',()=>{
+ assert.match(ui,/body:\{codigo:code,modo:'inventario'\}/)
+ assert.doesNotMatch(ui,/Pedido de venda vinculado|Selecione o pedido/)
+ assert.doesNotMatch(ui,/pedido_id:|codigoPedido|selectOrder\(/)
+ assert.match(ui,/const sgqProductFallback=false|let sgqProductFallback=false/)
+ assert.match(ui,/\.from\('processo_itens'\)/)
+ assert.match(ui,/\.from\('produtos'\)/)
+ assert.match(ui,/apiPost<\{found:boolean;descricao:string\}>\('\/api\/estoque\/validar-sku'/)
+ assert.match(fst,/if\(modo==="inventario"\)/)
+ assert.match(fst,/const distinctOrders=/)
+ assert.match(fst,/const allSkus=new Map<string,OmieItem>\(\)/)
+ assert.match(fst,/source:"omie_projeto_inventario"/)
+})
