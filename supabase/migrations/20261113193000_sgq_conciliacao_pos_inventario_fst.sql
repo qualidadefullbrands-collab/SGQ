@@ -31,8 +31,8 @@ create table if not exists public.sgq_inventario_conciliacao_itens (
  atualizado_em timestamptz not null default now(),
  constraint sgq_recon_reference_together check(
   (quantidade_referencia is null and referencia_fonte is null and referencia_evidencia is null)
-  or (quantidade_referencia is not null and length(btrim(referencia_fonte)) between 5 and 240
-   and length(btrim(referencia_evidencia)) between 5 and 500)
+  or (quantidade_referencia is not null and coalesce(length(btrim(referencia_fonte)),0) between 5 and 240
+   and coalesce(length(btrim(referencia_evidencia)),0) between 5 and 500)
  ),
  constraint sgq_recon_review_together check (
   (revisado_por is null and revisado_em is null)
