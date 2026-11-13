@@ -125,10 +125,13 @@ Deno.serve(async(req:Request)=>{
   if(originals.some(img=>img.url_imagem===publicUrl))
    return await storeResult(photo,user.id,publicUrl,originals)
 
-  // Omie supports only six gallery images. Keep its existing cover, insert new
-  // evidence immediately and drop only the oldest non-cover slot when full.
+  // Each count contributes exactly one image. Never delete another Omie image
+  // silently. At the six-image limit, preserve this evidence privately in SGQ
+  // and report the limitation rather than replacing an unrelated product photo.
   const others=originals.filter(img=>img.url_imagem!==publicUrl)
-  const gallery=others.length? [others[0],{url_imagem:publicUrl},...others.slice(1,5)]:
+  if(others.length>=6)
+   throw new Error('O limite de seis fotos do Omie foi atingido. Foto preservada no SGQ; revise as imagens do produto antes de reenviar.')
+  const gallery=others.length?[others[0],{url_imagem:publicUrl},...others.slice(1)]:
    [{url_imagem:publicUrl}]
   const change:Record<string,unknown>={
    codigo_produto:id,codigo:product.codigo,descricao:product.descricao,
