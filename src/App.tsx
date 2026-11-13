@@ -3396,20 +3396,20 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
   return (
     <main className="app-shell sgq-operational-shell" data-sgq-screen={tab}>
-      <aside className="sgq-side-nav">
+      <aside className="sgq-side-nav" aria-label="Navegação principal do SGQ">
         <div className="sgq-side-brand"><span className="sgq-brand-symbol"><Boxes size={31}/></span><div><b>SGQ</b><small>Qualidade · Operações</small></div></div>
         <div className="sgq-side-caption">OPERAÇÃO</div>
-        <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={19}/> Painel</button>
-        <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
-        <button className={tab==='quadro'?'selected':''} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Inspeções</button>
-        <button className={tab==='estoque'?'selected':''} onClick={()=>setTab('estoque')}><Boxes size={19}/> Estoque</button>
-        <button onClick={()=>setTab('fotos-mobile')}><Camera size={19}/> Modo Fotos</button>
-        <button className={tab==='auditorias'?'selected':''} onClick={()=>{setTab('auditorias');setError('')}}><Warehouse size={19}/> Inspeções Armazém</button>
+        <button type="button" className={tab==='painel'||tab==='insights'?'selected':''} aria-current={tab==='painel'||tab==='insights'?'page':undefined} onClick={()=>setTab('painel')}><LayoutDashboard size={19}/> Painel</button>
+        <button type="button" className={tab==='inspecoes'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='inspecoes'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
+        <button type="button" className={tab==='quadro'?'selected':''} aria-current={tab==='quadro'?'page':undefined} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Inspeções</button>
+        <button type="button" className={tab==='estoque'?'selected':''} aria-current={tab==='estoque'?'page':undefined} onClick={()=>setTab('estoque')}><Boxes size={19}/> Estoque</button>
+        <button type="button" onClick={()=>setTab('fotos-mobile')}><Camera size={19}/> Modo Fotos</button>
+        <button type="button" className={tab==='auditorias'?'selected':''} aria-current={tab==='auditorias'?'page':undefined} onClick={()=>{setTab('auditorias');setError('')}}><Warehouse size={19}/> Inspeções Armazém</button>
         <div className="sgq-side-caption">QUALIDADE</div>
-        <button className={tab==='its'?'selected':''} onClick={()=>setTab('its')}><FileText size={19}/> Instruções técnicas</button>
-        <button className={tab==='equipamentos'?'selected':''} onClick={()=>{setTab('equipamentos');void refreshEquipments()}}><Wrench size={19}/> Equipamentos</button>
+        <button type="button" className={tab==='its'?'selected':''} aria-current={tab==='its'?'page':undefined} onClick={()=>setTab('its')}><FileText size={19}/> Instruções técnicas</button>
+        <button type="button" className={tab==='equipamentos'?'selected':''} aria-current={tab==='equipamentos'?'page':undefined} onClick={()=>{setTab('equipamentos');void refreshEquipments()}}><Wrench size={19}/> Equipamentos</button>
         <div className="sgq-side-caption">ADMINISTRAÇÃO</div>
-        <button className={tab==='configuracoes'?'selected':''} onClick={()=>{setError('');setTab('configuracoes')}}><Settings2 size={19}/> Configurações</button>
+        <button type="button" className={tab==='configuracoes'?'selected':''} aria-current={tab==='configuracoes'?'page':undefined} onClick={()=>{setError('');setTab('configuracoes')}}><Settings2 size={19}/> Configurações</button>
         <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button type="button" onClick={()=>void supabase.auth.signOut()}><LogOut size={14}/> Sair</button></div>
       </aside>
       <header className="topbar" aria-label="Cabeçalho do SGQ">
@@ -3447,7 +3447,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </div>
       </header>
 
-      {error && <div className="alert error">{error}</div>}
+      {error && <div className="alert error" role="alert">{error}</div>}
       {wordDownloading&&<div className="sgq-dialog-backdrop sgq-word-loading" role="dialog"
         aria-modal="true" aria-label="Gerando Word" aria-live="polite">
         <div className="sgq-dialog sgq-word-loading-content">
@@ -3462,7 +3462,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <p>{popupMessage}</p><button className="primary" type="button" autoFocus onClick={()=>setPopupMessage('')}>Entendi</button>
         </div>
       </div>}
-      {message && <div className="alert success">{message}</div>}
+      {message && <div className="alert success" role="status">{message}</div>}
       {offlineError && <div className="alert error" role="alert">{offlineError}</div>}
 
       {tab==='insights' && <Suspense fallback={<div className="center-screen">Carregando Insights…</div>}>
