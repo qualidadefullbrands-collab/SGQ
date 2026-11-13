@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState} from 'react'
+import {useEffect,useMemo,useRef,useState} from 'react'
 import {Camera,CheckCircle2,ImagePlus,MapPin,Plus,RefreshCw,Search,ShieldAlert,Upload} from 'lucide-react'
 import {authClient,apiPost} from '../lib/supabase'
 import {blindInventoryError as explain} from './blindInventoryErrors'
@@ -57,6 +57,9 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
  const [inspections,setInspections]=useState<DocRow[]>([])
  const [busy,setBusy]=useState(false)
  const [loading,setLoading]=useState(false)
+ const [nfLoading,setNfLoading]=useState(false)
+ const lookupRevision=useRef(0)
+ const nfDateEdited=useRef(false)
  const [syncing,setSyncing]=useState('')
  const [error,setError]=useState('')
  const [message,setMessage]=useState('')
@@ -96,13 +99,18 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
  useEffect(()=>{void loadLocations().catch(e=>setError(explain(e)))},[])
 
  function clearProcess(){
+  lookupRevision.current++
+  nfDateEdited.current=false
+  setNfLoading(false)
   setProcessCode('');setSgqProcess(null);setOmie(null);setNfe(null);setClient('');setNfNumber('')
   setNfDate('');setNfDateSource('informada');setOrder('');setProducts([]);setConfirmed(false)
   setSession(null);setCounts([]);setPhotoRows([]);setSelectedSku('');setQuantity('');setPhoto(null)
   setInspections([]);setInspection(null);setError('');setMessage('');setWarnings([])
  }
- function resetItem(){setSelectedSku('');setQuantity('');setPhoto(null);setError('')}
+ function resetItem(clearError=true){setSelectedSku('');setQuantity('');setPhoto(null);if(clearError)setError('')}
  function selectLocation(next:string){
+  lookupRevision.current++
+  setNfLoading(false)
   setLocation(next)
   // Preserve process results, but a new location needs its own session confirmation.
   setConfirmed(false);setSession(null);resetItem();setMessage('')
@@ -158,28 +166,34 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   setInspections((data||[]) as DocRow[])
  }
  async function loadProcess(code:string,orderId?:number){
-  const [remote,receipt,local,existingSession]=await Promise.all([
+  // Avoid blocking the product list on the potentially lengthy paginated NF-e search.
+  const revision=++lookupRevision.current
+  nfDateEdited.current=false
+  setNfLoading(true)
+  const receiptJob=authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code,modo:'nfe'}})
+   .catch(error=>({data:null,error}))
+  const [remote,local,existingSession]=await Promise.all([
    authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code,...(orderId?{codigoPedido:orderId}:{})}}),
-   authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code,modo:'nfe'}}),
    authClient.from('processos').select('id,codigo,cliente,nota_fiscal')
     .in('codigo',[code,code.replace(/^FST/,'')]).is('excluido_em',null).limit(1).maybeSingle(),
    authClient.from('sgq_inventarios_cegos')
     .select('id,codigo,endereco,status,processo_codigo,nf_entrada,data_nf,cliente_nome')
     .eq('endereco',location).eq('processo_codigo',code).eq('status','aberto').limit(1).maybeSingle()
   ])
+  if(revision!==lookupRevision.current)return
   if(remote.error)throw new Error('Não foi possível consultar o processo no Omie: '+explain(remote.error))
+  if(local.error||existingSession.error)throw local.error||existingSession.error
   const data=remote.data as OmieInfo|null
   if(!data?.found||normalizedProcess(data.matchedCode||'')!==normalizedProcess(code))
    throw new Error('O processo '+code+' não foi confirmado no Omie. Confira o código completo.')
   const sgq=local.data as ProcessRow|null
-  const fiscal=receipt.error?null:receipt.data as NfInfo|null
   const previous=existingSession.data as Session|null
-  setProcessCode(code);setSgqProcess(sgq);setOmie(data);setNfe(fiscal)
+  const originalDate=toIso(previous?.data_nf)
+  setProcessCode(code);setSgqProcess(sgq);setOmie(data);setNfe(null)
   setClient(data.cliente||previous?.cliente_nome||sgq?.cliente||'')
-  setNfNumber(fiscal?.status==='matched'?fiscal.numeroNota||'':previous?.nf_entrada||sgq?.nota_fiscal||'')
-  const actualDate=toIso(fiscal?.dataRegistro||fiscal?.dataEmissao||fiscal?.data)
-  setNfDate(actualDate||toIso(previous?.data_nf))
-  setNfDateSource(actualDate?(fiscal?.dataRegistro?'registro_omie':'emissao_omie'):'informada')
+  setNfNumber(previous?.nf_entrada||sgq?.nota_fiscal||'')
+  setNfDate(originalDate)
+  setNfDateSource('informada')
   const list=new Map<string,Product>()
   if(data.itensDisponiveis&&Array.isArray(data.itens)){
    for(const row of data.itens){
@@ -190,16 +204,43 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   setProducts([...list.values()].sort((a,b)=>a.sku.localeCompare(b.sku,'pt-BR')))
   const issues:string[]=[]
   if(!data.cliente)issues.push('Cliente não identificado no Omie: confira o cadastro/cliente SGQ.')
-  if(fiscal?.status!=='matched')issues.push('NF de entrada não confirmada de forma única no Omie. Confira os dados informados antes de prosseguir.')
-  if(!actualDate)issues.push('Data fiscal não localizada no retorno do Omie. Informe a data da NF manualmente.')
+  issues.push('Consulta fiscal em andamento: NF de entrada e data podem aparecer em instantes.')
   if(!data.itensDisponiveis||!list.size)issues.push('Os itens do pedido não foram confirmados no Omie. Selecione um pedido vinculado ou revise o processo.')
   if(sgq?.cliente&&data.cliente&&normalized(sgq.cliente)!==normalized(data.cliente))
    issues.push('Divergência de cliente: SGQ '+sgq.cliente+' · Omie '+data.cliente)
-  if(sgq?.nota_fiscal&&fiscal?.numeroNota&&sgq.nota_fiscal!==fiscal.numeroNota)
-   issues.push('Divergência de NF: SGQ '+sgq.nota_fiscal+' · Omie '+fiscal.numeroNota)
   setWarnings(issues)
   setConfirmed(false);setSession(null);resetItem()
   await loadCounts(code)
+  // Continue the slow fiscal lookup in parallel with the operator's review.
+  void receiptJob.then(({data:payload,error:receiptError})=>{
+   if(revision!==lookupRevision.current)return
+   setNfLoading(false)
+   const fiscal=receiptError?null:payload as NfInfo|null
+   setNfe(fiscal)
+   const fiscalDate=toIso(fiscal?.dataRegistro||fiscal?.dataEmissao||fiscal?.data)
+   if(fiscal?.status==='matched'){
+    setNfNumber(current=>current.trim()?current:fiscal.numeroNota||'')
+    if(fiscalDate&&!nfDateEdited.current){
+     setNfDate(current=>current||fiscalDate)
+     if(!originalDate)setNfDateSource(fiscal.dataRegistro?'registro_omie':'emissao_omie')
+    }
+   }
+   setWarnings(current=>{
+    const updated=current.filter(w=>!w.startsWith('Consulta fiscal em andamento:'))
+    if(fiscal?.status!=='matched')
+     updated.push('NF de entrada não confirmada de forma única no Omie. Confira os dados informados antes de prosseguir.')
+    if(!fiscalDate)
+     updated.push('Data fiscal não localizada no retorno do Omie. Informe a data da NF manualmente.')
+    if(sgq?.nota_fiscal&&fiscal?.numeroNota&&sgq.nota_fiscal!==fiscal.numeroNota)
+     updated.push('Divergência de NF: SGQ '+sgq.nota_fiscal+' · Omie '+fiscal.numeroNota)
+    return updated
+   })
+  }).catch(()=>{
+   if(revision!==lookupRevision.current)return
+   setNfLoading(false)
+   setWarnings(current=>current.filter(w=>!w.startsWith('Consulta fiscal em andamento:'))
+    .concat('Não foi possível consultar a NF no Omie. Informe e valide os dados manualmente.'))
+  })
  }
  async function searchProcess(){
   if(!location){setError('Selecione a rua ou armário antes de consultar o processo.');return}
@@ -271,7 +312,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   }catch(e){setError('Contagem salva, mas o envio da foto ao Omie não foi concluído: '+explain(e));return false}
   finally{setSyncing('')}
  }
- async function save(){
+ async function save(goToNext:boolean){
   if(!canWrite||busy||!confirmed||!session||!selected)return
   const qty=quantity.trim()
   if(!/^\d+(?:[.,]\d{1,3})?$/.test(qty)){setError('Informe uma quantidade válida (zero permitido).');return}
@@ -323,12 +364,14 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
    const delivered=await syncPhoto(photoRecord.id)
    await loadCounts(processCode)
    if(delivered)setMessage('Contagem salva e foto enviada ao Omie: '+selected.sku)
-   if(window.confirm('Contagem registrada. Deseja ir para o próximo item deste processo?')){
-    resetItem()
+   if(goToNext){
+    resetItem(delivered)
+    if(delivered)setMessage('Contagem salva e foto confirmada no Omie. Selecione o próximo item do processo.')
+    else setMessage('Contagem salva. A foto está pendente no Omie; selecione o próximo item.')
    }else{
-    resetItem()
-    if(delivered)setMessage('Contagem concluída por agora. A foto foi enviada ao SKU no Omie. O processo pode ser consultado novamente.')
-    else setMessage('Contagem encerrada por agora. A foto permanece registrada com envio pendente; consulte o item para reenviar.')
+    setPhoto(null)
+    if(delivered)setMessage('Contagem salva e foto confirmada no SKU '+selected.sku+' do Omie.')
+    else setMessage('Contagem salva. A foto está pendente no Omie e poderá ser reenviada.')
    }
   }catch(e){setError((saved?'Contagem registrada parcialmente. ':'')+explain(e));await loadCounts(processCode)}
   finally{setBusy(false)}
@@ -411,9 +454,9 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
     <div className="sgq-single-grid">
      <label>Cliente <input value={client} maxLength={180} disabled={confirmed} onChange={e=>setClient(e.target.value)} placeholder="Cliente do processo"/></label>
      <label>NF de entrada <input value={nfNumber} maxLength={30} disabled={confirmed} onChange={e=>setNfNumber(e.target.value)} placeholder="Número da NF"/></label>
-     <label>Data da NF <input type="date" value={nfDate} disabled={confirmed} onChange={e=>{setNfDate(e.target.value);setNfDateSource('informada')}}/></label>
+     <label>Data da NF <input type="date" value={nfDate} disabled={confirmed} onChange={e=>{nfDateEdited.current=true;setNfDate(e.target.value);setNfDateSource('informada')}}/></label>
     </div>
-    <p className="sgq-single-metadata">NF: {nfe?.status==='matched'?'localizada no recebimento Omie':'não confirmada de forma única no Omie'}.
+    <p className="sgq-single-metadata">NF: {nfLoading?'consultando recebimentos no Omie…':nfe?.status==='matched'?'localizada no recebimento Omie':'não confirmada de forma única no Omie'}.
      Data: {nfDateSource==='registro_omie'?'registro no Omie':nfDateSource==='emissao_omie'?'emissão no Omie':'informada manualmente'}.
      {sgqProcess?.cliente?' Cliente cadastrado no SGQ: '+sgqProcess.cliente+'.':''}</p>
     {warnings.length>0&&<div className="sgq-single-warnings">{warnings.map((x,i)=><p key={i}><ShieldAlert size={15}/>{x}</p>)}</div>}
@@ -464,8 +507,12 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
        onClick={()=>void syncPhoto(p.id).then(()=>loadCounts(processCode))}>Reenviar foto</button>}
      </p>)}
     </div>}
-    <button type="button" className="primary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!quantity.trim()||!photo}
-     onClick={()=>void save()}><Upload size={16}/>{busy?'Salvando…':'Salvar contagem e enviar foto ao Omie'}</button>
+    <div className="sgq-single-save-actions">
+     <button type="button" className="secondary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!quantity.trim()||!photo}
+      onClick={()=>void save(false)}><Upload size={16}/>{busy?'Salvando…':'Salvar'}</button>
+     <button type="button" className="primary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!quantity.trim()||!photo}
+      onClick={()=>void save(true)}><Upload size={16}/>{busy?'Salvando…':'Salvar e próximo item'}</button>
+    </div>
    </section>}
    <section className="sgq-single-section">
     <div className="sgq-single-section-title"><Upload size={19}/><h3>Inspeção do processo (opcional)</h3></div>
