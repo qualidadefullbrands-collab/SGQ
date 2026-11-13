@@ -67,7 +67,6 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  }
  useEffect(()=>{void fetchSessions()},[])
  async function open(session:Session){
-  if(busy)return
   setError('');setMessage('');setActive(session);setAddress(session.endereco||'')
   setItems([]);setPhotos({});resetSearch();await fetchItems(session.id)
  }
@@ -102,8 +101,9 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  }
  async function saveCount(){
   if(!active||active.status!=='aberto'||!canWrite||!product||busy)return
-  const numeric=Number(count.trim().replace(',','.'))
-  if(!count.trim()||!Number.isFinite(numeric)||numeric<0||Math.round(numeric*1000)!==numeric*1000){
+  const rawCount=count.trim()
+  const numeric=Number(rawCount.replace(',','.'))
+  if(!/^\d+(?:[.,]\d{1,3})?$/.test(rawCount)||!Number.isFinite(numeric)||numeric<0){
    setError('Informe uma quantidade válida, com até três casas decimais. Zero é permitido.');return
   }
   if(selectedFile&&(!['image/jpeg','image/png'].includes(selectedFile.type)||selectedFile.size>8*1024*1024)){
@@ -178,6 +178,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  }
  async function syncOmie(item:Item){
   if(!active||active.status!=='fechado'||!canApprove||!item.foto_para_omie||!item.foto_storage_path||busy)return
+  if(!photos[item.id]){setError('Abra e confira a foto antes de aprovar a publicação no Omie.');return}
   if(!window.confirm('Confirmar esta foto como principal no Omie? A imagem será publicada no catálogo e poderá substituir a capa atual do produto.'))return
   setSavingPhotoId(item.id);setError('');setMessage('')
   try{
