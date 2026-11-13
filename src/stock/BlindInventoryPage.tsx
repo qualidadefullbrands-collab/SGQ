@@ -19,6 +19,9 @@ type Item={
  foto_omie_erro?:string|null;foto_sgq_path?:string|null;criado_em:string
 }
 type Product={sku:string;descricao:string;found:boolean}
+type LinkedProcess={id:string;codigo:string;cliente:string|null;status:string}
+type ProcessCatalogProduct={sku:string;descricao:string;origem:'SGQ'|'Omie'|'SGQ + Omie'}
+type OmieProcessProducts={found?:boolean;matchedCode?:string;itens?:Array<{sku:string;descricao:string}>;itensDisponiveis?:boolean}
 const bucket='sgq-inventario-cego'
 const fmt=(n:number)=>Number(n).toLocaleString('pt-BR',{maximumFractionDigits:3})
 const when=(s:string)=>new Date(s).toLocaleString('pt-BR')
@@ -38,6 +41,13 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  const [processContext,setProcessContext]=useState<VerifiedBlindContext|null>(null)
  const [contextRevision,setContextRevision]=useState(0)
  const [currentPhoto,setCurrentPhoto]=useState('')
+ const [lookupMode,setLookupMode]=useState<'codigo'|'processo'>('codigo')
+ const [processQuery,setProcessQuery]=useState('')
+ const [processResults,setProcessResults]=useState<LinkedProcess[]>([])
+ const [selectedProcess,setSelectedProcess]=useState<LinkedProcess|null>(null)
+ const [processProducts,setProcessProducts]=useState<ProcessCatalogProduct[]>([])
+ const [processLoading,setProcessLoading]=useState(false)
+ const [processHelp,setProcessHelp]=useState('')
  const [sku,setSku]=useState('')
  const [count,setCount]=useState('')
  const [product,setProduct]=useState<Product|null>(null)
@@ -59,7 +69,10 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
   setPreview(url)
   return()=>URL.revokeObjectURL(url)
  },[selectedFile])
- const resetSearch=()=>{setSku('');setProduct(null);setCount('');setNote('');setSelectedFile(null);setFlagOmie(false);setProcessContext(null);setCurrentPhoto('');setContextRevision(n=>n+1);inputRef.current?.focus()}
+ const resetSearch=()=>{setSku('');setProduct(null);setCount('');setNote('');setSelectedFile(null);setFlagOmie(false);setProcessContext(null);setCurrentPhoto('');setProcessQuery('');setProcessResults([]);setProcessProducts([]);setSelectedProcess(null);setProcessHelp('');setContextRevision(n=>n+1);inputRef.current?.focus()}
+ const switchLookup=(mode:'codigo'|'processo')=>{
+  setLookupMode(mode);resetSearch();setError('');setMessage('')
+ }
  const setPhysicalAddress=(value:string)=>{
   setAddress(value)
   const known=locations.find(x=>x.codigo.toUpperCase()===value.trim().toUpperCase())
@@ -112,10 +125,10 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
   }catch(e){setError('Falha ao abrir inventário: '+detail(e))}
   finally{setBusy(false)}
  }
- async function verify(){
-  const code=normalSku(sku)
+ async function verify(codeOverride?:string){
+  const code=normalSku(codeOverride??sku)
   if(!code){setError('Informe o código do produto no Omie.');return}
-  setChecking(true);setError('');setProduct(null);setProcessContext(null);setCurrentPhoto('');setMessage('')
+  setChecking(true);setError('');setSku(code);setProduct(null);setProcessContext(null);setCurrentPhoto('');setMessage('')
   try{
    const result=await apiPost<Product>('/api/estoque/validar-sku',{codigo:code})
    if(result.error||!result.data?.found||!result.data.descricao)
@@ -129,6 +142,67 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
    setMessage('Produto identificado no Omie. Confirme processo, cliente e localização antes da contagem.')
   }catch(e){setError(detail(e))}
   finally{setChecking(false)}
+ }
+ async function searchByProcess(){
+  const raw=processQuery.trim().toUpperCase().replace(/\s+/g,'')
+  const key=/^\d{1,8}(?:-[A-Z0-9]+)?$/.test(raw)?'FST'+raw:raw
+  if(!/^FST\d{1,8}(?:-[A-Z0-9]+)?$/.test(key)){
+   setError('Informe um processo FST válido, por exemplo FST26125-A ou 26125.');return
+  }
+  setProcessLoading(true);setProcessResults([]);setSelectedProcess(null);setProcessProducts([])
+  setProduct(null);setProcessContext(null);setCurrentPhoto('');setMessage('');setError('');setProcessHelp('')
+  try{
+   const {data,error:queryError}=await authClient.from('processos')
+    .select('id,codigo,cliente,status').ilike('codigo',key+'%')
+    .is('excluido_em',null).order('codigo',{ascending:true}).limit(25)
+   if(queryError)throw queryError
+   const rows=(data||[]) as LinkedProcess[]
+   if(!rows.length)throw new Error('Nenhum processo FST correspondente foi encontrado no SGQ.')
+   setProcessResults(rows)
+   if(rows.length===1)await chooseProcess(rows[0])
+   else setProcessHelp('Selecione o processo correto na lista. Os sufixos A/B identificam registros diferentes.')
+  }catch(e){setError(detail(e))}
+  finally{setProcessLoading(false)}
+ }
+ async function chooseProcess(selected:LinkedProcess){
+  setSelectedProcess(selected);setProcessResults([]);setProcessProducts([])
+  setSku('');setProduct(null);setProcessContext(null);setCurrentPhoto('');setMessage('');setError('')
+  setProcessLoading(true)
+  try{
+   const {data:links,error:linkError}=await authClient.from('processo_itens')
+     .select('produto_id').eq('processo_id',selected.id).limit(1000)
+   if(linkError)throw linkError
+   const ids=[...new Set((links||[]).map(row=>row.produto_id).filter((id):id is string=>typeof id==='string'&&id.length>0))]
+   const catalog=new Map<string,ProcessCatalogProduct>()
+   if(ids.length){
+    const {data:local,error:productError}=await authClient.from('produtos')
+     .select('sku,nome').in('id',ids).limit(1000)
+    if(productError)throw productError
+    for(const p of local||[]){
+     const code=normalSku(p.sku)
+     if(code)catalog.set(code,{sku:code,descricao:p.nome||code,origem:'SGQ'})
+    }
+   }
+   const remote=await authClient.functions.invoke('sgq-omie-fst',{body:{codigo:selected.codigo}})
+   const omie=remote.error?null:remote.data as OmieProcessProducts|null
+   const canonical=(value:unknown)=>String(value??'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'')
+   const exact=canonical(omie?.matchedCode)===canonical(selected.codigo)
+   if(omie?.found&&exact&&omie.itensDisponiveis&&Array.isArray(omie.itens)){
+    for(const row of omie.itens){
+     const code=normalSku(row.sku)
+     if(!code)continue
+     const current=catalog.get(code)
+     catalog.set(code,{sku:code,descricao:row.descricao||current?.descricao||code,
+      origem:current?'SGQ + Omie':'Omie'})
+    }
+   }
+   const rows=[...catalog.values()].sort((a,b)=>a.sku.localeCompare(b.sku,'pt-BR'))
+   setProcessProducts(rows)
+   setProcessHelp(rows.length
+    ?'Selecione abaixo o produto do processo. O código Omie será preenchido automaticamente.'
+    :'Nenhum produto vinculado foi localizado. Você pode consultar um código Omie manualmente dentro deste processo.')
+  }catch(e){setError('Falha ao carregar produtos do processo: '+detail(e))}
+  finally{setProcessLoading(false)}
  }
  async function saveCount(){
   if(!active||active.status!=='aberto'||!canWrite||!product||busy)return
@@ -307,14 +381,43 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
      <div className="sgq-blind-metrics"><div><span>Itens contados</span><strong>{items.length}</strong></div><div><span>Fotos para revisão</span><strong>{flagged}</strong></div><div><span>Sincronizadas no Omie</span><strong>{items.filter(x=>x.foto_status==='sincronizada').length}</strong></div></div>
      {active.status==='aberto'&&canWrite&&<div className="sgq-blind-capture">
       <div className="sgq-blind-section-head"><ClipboardCheck size={20}/><h3>Registrar produto</h3></div>
-      <div className="sgq-blind-find">
-       <label>Código do produto Omie<input ref={inputRef} value={sku} onChange={e=>{setSku(e.target.value);setProduct(null)}}
-         placeholder="Digite ou leia o SKU" maxLength={60} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();void verify()}}}/></label>
-       <button type="button" className="secondary" disabled={checking||!sku.trim()} onClick={()=>void verify()}><Search size={17}/>{checking?'Consultando…':'Consultar Omie'}</button>
+      <div className="sgq-blind-lookup-modes" role="group" aria-label="Buscar produto por código ou processo">
+       <button type="button" className={lookupMode==='codigo'?'primary':'secondary'} aria-pressed={lookupMode==='codigo'} onClick={()=>switchLookup('codigo')}>Buscar por código Omie</button>
+       <button type="button" className={lookupMode==='processo'?'primary':'secondary'} aria-pressed={lookupMode==='processo'} onClick={()=>switchLookup('processo')}>Buscar por processo FST</button>
       </div>
+      {lookupMode==='processo'&&<>
+       <div className="sgq-blind-find">
+        <label>Número do processo<input value={processQuery} maxLength={40} placeholder="FST26125-A ou 26125"
+         onChange={e=>setProcessQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();void searchByProcess()}}}/></label>
+        <button type="button" className="secondary" disabled={processLoading||checking||!processQuery.trim()}
+         onClick={()=>void searchByProcess()}><Search size={17}/>{processLoading?'Buscando…':'Buscar processo'}</button>
+       </div>
+       {processResults.length>0&&<div className="sgq-blind-process-choices" aria-label="Processos encontrados">
+        {processResults.map(row=><button key={row.id} type="button" className="secondary"
+         onClick={()=>void chooseProcess(row)} disabled={processLoading}><strong>{row.codigo}</strong><span>{row.cliente||'Cliente não informado'}</span></button>)}
+       </div>}
+       {selectedProcess&&<div className="sgq-blind-process-found" role="status">
+        <strong>Processo selecionado: {selectedProcess.codigo}</strong>
+        <span>Cliente SGQ: {selectedProcess.cliente||'não informado'}</span>
+        <button className="secondary small" type="button" onClick={()=>{setSelectedProcess(null);setProcessProducts([]);setSku('');setProduct(null);setProcessContext(null)}}>Trocar processo</button>
+       </div>}
+       {processHelp&&<p className="sgq-blind-process-hint">{processHelp}</p>}
+       {processProducts.length>0&&<div className="sgq-blind-catalog-list" aria-label="Produtos vinculados ao processo">
+        {processProducts.map(p=><button type="button" key={p.sku} disabled={checking||processLoading}
+         className={product?.sku===p.sku?'sgq-blind-catalog-selected':'secondary'}
+         onClick={()=>void verify(p.sku)}><strong>{p.sku}</strong><span>{p.descricao}</span><small>Fonte: {p.origem}</small></button>)}
+       </div>}
+      </>}
+      {(lookupMode==='codigo'||selectedProcess)&&<div className="sgq-blind-find">
+       <label>{lookupMode==='codigo'?'Código do produto Omie':'Código Omie (alternativo, caso não apareça na lista)'}
+        <input ref={inputRef} value={sku} onChange={e=>{setSku(e.target.value);setProduct(null);setProcessContext(null)}}
+         placeholder="Digite ou leia o SKU" maxLength={60} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();void verify()}}}/></label>
+       <button type="button" className="secondary" disabled={checking||!sku.trim()} onClick={()=>void verify()}>
+        <Search size={17}/>{checking?'Consultando…':'Consultar Omie'}</button>
+      </div>}
       {product&&<div className="sgq-blind-product" role="status"><CheckCircle2 size={19}/><div><strong>{product.sku}</strong><span>{product.descricao}</span></div><small>Confirmado no Omie</small></div>}
       {product&&<BlindInventoryProcessPanel key={product.sku+'-'+contextRevision} sku={product.sku} omieDescription={product.descricao}
-       inventoryId={active.id} canWrite={canWrite} onChange={setProcessContext}/>}
+       inventoryId={active.id} canWrite={canWrite} initialProcessCode={selectedProcess?.codigo||''} onChange={setProcessContext}/>}
       {processContext&&<p className="sgq-blind-confirmed-context"><CheckCircle2 size={16}/> Confirmado: {processContext.processoCodigo} · {processContext.clienteNome}</p>}
       <div className="sgq-blind-form-grid">
        <label>Quantidade contada<input type="number" inputMode="decimal" min="0" step=".001" value={count} onChange={e=>setCount(e.target.value)} placeholder="0"/></label>
