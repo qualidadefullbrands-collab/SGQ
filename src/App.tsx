@@ -5,6 +5,7 @@ import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from './lib/offline'
 import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSync'
 import InventoryPanel from './stock/InventoryPanel'
+import BlindInventoryPage from './stock/BlindInventoryPage'
 import InspectionsKanban from './components/InspectionsKanban'
 import SgqDashboard from './components/SgqDashboard'
 import './SgqOperationsTheme.css'
@@ -800,7 +801,7 @@ export default function App() {
   }>>({})
   const [retentionReason, setRetentionReason] = useState('')
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
-  const [stockMode,setStockMode]=useState<'posicoes'|'inventario'>('posicoes')
+  const [stockMode,setStockMode]=useState<'posicoes'|'inventario'|'cego'>('posicoes')
   const [stockSkuConflicts,setStockSkuConflicts]=useState<StockSkuConflict[]>([])
   const [stockSkuSelection,setStockSkuSelection]=useState<Record<string,string>>({})
   const [stockSkuFixing,setStockSkuFixing]=useState<string|null>(null)
@@ -4440,7 +4441,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <div className="sgq-stock-mode">
             <button type="button" className={stockMode==='posicoes'?'primary':'secondary'} onClick={()=>setStockMode('posicoes')}>Posições</button>
             <button type="button" className={stockMode==='inventario'?'primary':'secondary'} onClick={()=>{setStockMode('inventario');setSelectedSample(null)}}>Inventário</button>
+            <button type="button" className={stockMode==='cego'?'primary':'secondary'} onClick={()=>{setStockMode('cego');setSelectedSample(null)}}>Inventário às cegas · Omie</button>
           </div>
+          {stockMode==='cego'&&<BlindInventoryPage canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/>}
           {stockMode==='inventario'&&<InventoryPanel samples={samples} canWrite={!!canWrite}
             canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}
             onRefreshStock={loadStock}/>}
