@@ -10,7 +10,7 @@
 .sgq-blind-heading p{font-size:12px;color:#7b92a1;margin:4px 0 0}
 .sgq-blind-create{display:flex;align-items:end;gap:11px;padding:14px;background:#f8fbfd;border:1px solid #e0ecf1;border-radius:12px}
 .sgq-blind-create label{flex:1;min-width:200px}
-.sgq-blind-inventory label:not(.sgq-blind-photo-picker):not(.sgq-blind-photo-flag):not(.sgq-blind-list-search){display:grid;gap:6px;font-size:12px;color:#526e83;font-weight:750}
+.sgq-blind-inventory label:not(.sgq-blind-photo-picker):not(.sgq-blind-photo-flag):not(.sgq-blind-list-search):not(.sgq-blind-show-deleted){display:grid;gap:6px;font-size:12px;color:#526e83;font-weight:750}
 .sgq-blind-inventory input:not([type="checkbox"]):not([type="file"]),.sgq-blind-inventory textarea{box-sizing:border-box;width:100%;border:1px solid #cfdfe9;border-radius:9px;padding:10px 12px;background:#fff;color:#1f4056;min-width:0;min-height:41px;font:inherit;font-size:13px}
 .sgq-blind-inventory input:focus,.sgq-blind-inventory textarea:focus{outline:2px solid #bde6f0;outline-offset:0;border-color:#4f9cbb}
 .sgq-blind-session-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
