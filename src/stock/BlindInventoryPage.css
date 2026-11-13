@@ -157,3 +157,6 @@
 .sgq-blind-catalog-list>button.sgq-blind-catalog-selected{background:#e9f8f1;border-color:#3da37c;color:#1d7957}
 .sgq-blind-catalog-list>button:disabled{cursor:wait;opacity:.5}
 @media(max-width:650px){.sgq-blind-lookup-modes button{flex:1}.sgq-blind-process-found span{flex-basis:100%}}
+
+.sgq-blind-inventory select{box-sizing:border-box;width:100%;border:1px solid #cfdfe9;border-radius:9px;padding:10px 12px;background:#fff;color:#1f4056;min-width:0;min-height:41px;font:inherit;font-size:13px;cursor:pointer}
+.sgq-blind-inventory select:focus{outline:2px solid #bde6f0;outline-offset:0;border-color:#4f9cbb}
