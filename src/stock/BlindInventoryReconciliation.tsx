@@ -190,7 +190,7 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
   <section className="sgq-recon-panel">
    <h3>Contagens por processo FST</h3>
    <label className="sgq-recon-selector">Inventário
-    <select value={selectedId} disabled={busy} onChange={e=>void chooseSession(e.target.value)}>
+    <select value={selectedId} disabled={busy} onChange={e=>{if(e.target.value)void chooseSession(e.target.value);else{setSelectedId('');setError('');setMessage('')}}}>
      <option value="">Selecione um processo e a localização</option>
      {sessions.map(s=><option key={s.id} value={s.id}>
       {s.processo_codigo} · {s.endereco} · {s.status==='aberto'?'Contagem aberta':'Contagem encerrada'} · {new Date(s.criado_em).toLocaleDateString('pt-BR')}
