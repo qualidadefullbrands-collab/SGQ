@@ -42,3 +42,13 @@ jobs:
         run: pip install -r server/requirements.txt
       - name: Validate the eight official IT templates and inspection formatting
         run: python -m unittest discover -s server/tests -v
+
+  inventory-photo-edge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Type-check authenticated Omie catalog photo integration
+        run: deno check --node-modules-dir=auto supabase/functions/sgq-inventario-omie/index.ts
