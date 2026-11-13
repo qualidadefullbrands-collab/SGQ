@@ -7,6 +7,7 @@ import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSyn
 import InventoryPanel from './stock/InventoryPanel'
 import BlindInventoryUnified from './stock/BlindInventoryUnified'
 import BlindInventoryReconciliation from './stock/BlindInventoryReconciliation'
+import BlindInventoryStatus from './stock/BlindInventoryStatus'
 import InspectionsKanban from './components/InspectionsKanban'
 import SgqDashboard from './components/SgqDashboard'
 import './SgqOperationsTheme.css'
@@ -802,7 +803,7 @@ export default function App() {
   }>>({})
   const [retentionReason, setRetentionReason] = useState('')
   const [stockMove, setStockMove] = useState({ tipo: 'retirada', quantidade: '', endereco: '', motivo: '' })
-  const [stockMode,setStockMode]=useState<'posicoes'|'inventario'|'cego'|'conciliacao'>('posicoes')
+  const [stockMode,setStockMode]=useState<'posicoes'|'inventario'|'cego'|'status_cegos'|'conciliacao'>('posicoes')
   const [stockSkuConflicts,setStockSkuConflicts]=useState<StockSkuConflict[]>([])
   const [stockSkuSelection,setStockSkuSelection]=useState<Record<string,string>>({})
   const [stockSkuFixing,setStockSkuFixing]=useState<string|null>(null)
@@ -4443,10 +4444,12 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <button type="button" className={stockMode==='posicoes'?'primary':'secondary'} onClick={()=>setStockMode('posicoes')}>Posições</button>
             <button type="button" className={stockMode==='inventario'?'primary':'secondary'} onClick={()=>{setStockMode('inventario');setSelectedSample(null)}}>Inventário</button>
             <button type="button" className={stockMode==='cego'?'primary':'secondary'} onClick={()=>{setStockMode('cego');setSelectedSample(null)}}>Inventário às cegas · Omie</button>
+            <button type="button" className={stockMode==='status_cegos'?'primary':'secondary'} onClick={()=>{setStockMode('status_cegos');setSelectedSample(null)}}>Status do inventário às cegas</button>
             <button type="button" className={stockMode==='conciliacao'?'primary':'secondary'} onClick={()=>{setStockMode('conciliacao');setSelectedSample(null)}}>Conciliação pós-inventário</button>
           </div>
           {stockMode==='cego'&&<BlindInventoryUnified canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/>}
           {stockMode==='conciliacao'&&<BlindInventoryReconciliation canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/>}
+          {stockMode==='status_cegos'&&<BlindInventoryStatus onOpenCount={()=>setStockMode('cego')} onOpenReconciliation={()=>setStockMode('conciliacao')}/>}
           {stockMode==='inventario'&&<InventoryPanel samples={samples} canWrite={!!canWrite}
             canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}
             onRefreshStock={loadStock}/>}
