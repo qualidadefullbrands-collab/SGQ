@@ -8,7 +8,7 @@ const app=read('src/App.tsx')
 test('SGQ has dedicated blind-inventory status tab and direct navigation',()=>{
  assert.match(app,/import BlindInventoryStatus/)
  assert.match(app,/status_cegos/)
- assert.match(app,/Status do inventário às cegas/)
+ assert.match(app,/Status do inventário FST/)
  assert.match(app,/stockMode==='status_cegos'&&<BlindInventoryStatus/)
  assert.match(app,/onOpenCount=\{\(\)=>setStockMode\('cego'\)\}/)
  assert.match(app,/onOpenReconciliation=\{\(\)=>setStockMode\('conciliacao'\)\}/)
@@ -41,8 +41,8 @@ test('status makes failed photo delivery explicit without hiding stored counts',
 
 test('status reports counts without fabricating planned SKU coverage or moving stock',()=>{
  assert.match(ui,/Itens contados representam registros realizados, não percentual de cobertura/)
- assert.match(ui,/O total esperado por FST não está certificado/)
- assert.match(ui,/Saldo do Omie não é modificado nesta tela/)
+ assert.match(ui,/O saldo esperado da mesma localização é exibido/)
+ assert.match(ui,/nenhum saldo é movimentado nesta tela/)
  assert.doesNotMatch(ui,/authClient\.rpc\(/)
  assert.doesNotMatch(ui,/\.insert\(|\.update\(|\/api\/estoque\/inventarios.*aplicar/)
 })
