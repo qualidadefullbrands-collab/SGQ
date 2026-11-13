@@ -4443,8 +4443,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <div className="sgq-stock-mode">
             <button type="button" className={stockMode==='posicoes'?'primary':'secondary'} onClick={()=>setStockMode('posicoes')}>Posições</button>
             <button type="button" className={stockMode==='inventario'?'primary':'secondary'} onClick={()=>{setStockMode('inventario');setSelectedSample(null)}}>Inventário</button>
-            <button type="button" className={stockMode==='cego'?'primary':'secondary'} onClick={()=>{setStockMode('cego');setSelectedSample(null)}}>Inventário às cegas · Omie</button>
-            <button type="button" className={stockMode==='status_cegos'?'primary':'secondary'} onClick={()=>{setStockMode('status_cegos');setSelectedSample(null)}}>Status do inventário às cegas</button>
+            <button type="button" className={stockMode==='cego'?'primary':'secondary'} onClick={()=>{setStockMode('cego');setSelectedSample(null)}}>Inventário FST · Omie</button>
+            <button type="button" className={stockMode==='status_cegos'?'primary':'secondary'} onClick={()=>{setStockMode('status_cegos');setSelectedSample(null)}}>Status do inventário FST</button>
             <button type="button" className={stockMode==='conciliacao'?'primary':'secondary'} onClick={()=>{setStockMode('conciliacao');setSelectedSample(null)}}>Conciliação pós-inventário</button>
           </div>
           {stockMode==='cego'&&<BlindInventoryUnified canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/>}
