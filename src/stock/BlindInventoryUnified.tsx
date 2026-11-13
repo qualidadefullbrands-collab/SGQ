@@ -199,11 +199,31 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
     if(sku)list.set(sku,{sku,descricao:row.descricao||sku})
    }
   }
+  // A process need not have an Omie sales order. When project-linked order
+  // data has no SKU detail, use products recorded for the exact FST in SGQ.
+  // Each selected SKU is still checked against Omie before saving the count.
+  let sgqProductFallback=false
+  if((!data.itensDisponiveis||!list.size)&&sgq?.id){
+   const {data:links,error:linkError}=await authClient.from('processo_itens')
+    .select('produto_id').eq('processo_id',sgq.id).limit(500)
+   if(linkError)throw linkError
+   const ids=[...new Set((links||[]).map(x=>x.produto_id).filter(Boolean))]
+   if(ids.length){
+    const {data:catalog,error:catalogError}=await authClient.from('produtos')
+     .select('sku,nome').in('id',ids).limit(500)
+    if(catalogError)throw catalogError
+    for(const row of catalog||[]){
+     const sku=skuOf(row.sku)
+     if(sku){list.set(sku,{sku,descricao:row.nome||sku});sgqProductFallback=true}
+    }
+   }
+  }
   setProducts([...list.values()].sort((a,b)=>a.sku.localeCompare(b.sku,'pt-BR')))
   const issues:string[]=[]
   if(!data.cliente)issues.push('Cliente não identificado no Omie: confira o cadastro/cliente SGQ.')
   issues.push('Consulta fiscal em andamento: NF de entrada e data podem aparecer em instantes.')
-  if(!data.itensDisponiveis||!list.size)issues.push('Os produtos do processo não foram confirmados no Omie. Confira o vínculo dos SKUs ao FST.')
+  if(sgqProductFallback)issues.push('Itens obtidos do cadastro SGQ do processo. Cada SKU será validado no Omie antes do registro.')
+  else if(!data.itensDisponiveis||!list.size)issues.push('Os produtos do processo não foram confirmados no Omie. Confira o vínculo dos SKUs ao FST.')
   if(sgq?.cliente&&data.cliente&&normalized(sgq.cliente)!==normalized(data.cliente))
    issues.push('Divergência de cliente: SGQ '+sgq.cliente+' · Omie '+data.cliente)
   setWarnings(issues)
