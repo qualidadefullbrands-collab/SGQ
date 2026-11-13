@@ -132,8 +132,9 @@ create policy sgq_blind_photos_insert on public.sgq_inventario_cego_imagens
   and exists(
    select 1 from public.sgq_inventario_cego_itens i
    join public.sgq_inventarios_cegos s on s.id=i.inventario_id
-   where i.id=item_id and i.codigo_omie=codigo_omie
-     and i.criado_por=criado_por and s.status='aberto'
+   where i.id=sgq_inventario_cego_imagens.item_id
+     and i.codigo_omie=sgq_inventario_cego_imagens.codigo_omie
+     and i.criado_por=sgq_inventario_cego_imagens.criado_por and s.status='aberto'
      and split_part(storage_path,'/',2)=s.id::text
   )
  );
@@ -192,7 +193,7 @@ create policy sgq_inv_doc_write on public.sgq_inventario_cego_documentos
   criado_por=(select auth.uid())
   and private.current_sgq_role() in ('administrador','gestor','inspetor')
   and exists(select 1 from public.sgq_inventarios_cegos s where s.id=inventario_id
-   and s.status='aberto' and s.processo_codigo=processo_codigo)
+   and s.status='aberto' and s.processo_codigo=sgq_inventario_cego_documentos.processo_codigo)
  );
 
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
