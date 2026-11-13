@@ -31,3 +31,13 @@ A aba **Estoque > Status do inventário às cegas** oferece uma visão de todos 
 - Acesso direto às telas de contagem e conciliação.
 
 A visão é **somente leitura** e não altera saldos. Ela registra números de lançamentos realizados, não um percentual de cobertura do FST: a lista oficial de itens esperados deve ser validada separadamente.
+
+## Quantidade esperada e divergências cadastrais
+A modalidade operacional é **Inventário FST · Omie**. A análise não oculta a quantidade esperada. Na tela de status, quando existe uma referência documentada registrada na conciliação, são apresentados lado a lado:
+- **Esperado no local:** quantidade de referência autorizada para o mesmo SKU, processo e localização.
+- **Contado:** quantidade física inicialmente registrada ou a recontagem mais recente.
+- **Diferença:** contado menos esperado, com sinal e indicação de divergência.
+
+Antes de registrar a referência, a quantidade esperada aparece como **Não informado**. Nunca substituir essa lacuna pelo saldo geral do Omie, que pode abranger vários locais e processos.
+
+A tela de status e a conciliação consultam o cadastro de produtos diretamente no Omie por uma Edge Function autenticada e somente leitura. Cada SKU apresenta os códigos e descrições de ambos os sistemas e destaca: código divergente, descrição diferente, código não localizado e consulta indisponível. A conferência é executada quando o operador abre os itens, com até três consultas simultâneas e cache de dois minutos para reduzir latência e chamadas à API. Divergências são alertas de revisão, não alteram automaticamente cadastros nem estoque.
