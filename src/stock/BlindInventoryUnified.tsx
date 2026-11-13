@@ -218,6 +218,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
     }
    }
   }
+  if(revision!==lookupRevision.current)return
   setProducts([...list.values()].sort((a,b)=>a.sku.localeCompare(b.sku,'pt-BR')))
   const issues:string[]=[]
   if(!data.cliente)issues.push('Cliente não identificado no Omie: confira o cadastro/cliente SGQ.')
