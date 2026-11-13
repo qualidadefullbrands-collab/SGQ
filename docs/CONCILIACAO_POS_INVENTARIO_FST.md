@@ -20,3 +20,14 @@ A conciliação **não executa ajustes automáticos de estoque**, não movimenta
 
 ## Limites e próximos passos
 A revisão cobre os **itens efetivamente contados** na sessão. Ela não prova, por si só, que todos os SKUs esperados para o processo foram contados. A origem da referência é informada pelo gestor e precisa corresponder à localização, ao SKU e ao período. Este módulo não contém autorização de ajuste de estoque ou cálculo fiscal.
+
+## Acompanhamento de status
+A aba **Estoque > Status do inventário às cegas** oferece uma visão de todos os FST e localizações registrados, incluindo:
+- Etapa da sessão (contagem aberta, encerrada ou cancelada), cliente, NF e datas.
+- Quantidade de SKUs contados e última atividade por localização.
+- Fotos confirmadas, pendentes, em transmissão ou com erro no Omie, e motivo da falha.
+- Conciliação aguardando início, em análise ou concluída, com itens aprovados/total.
+- Pesquisa por FST, local, SKU e filtro por etapa ou fotos com erro.
+- Acesso direto às telas de contagem e conciliação.
+
+A visão é **somente leitura** e não altera saldos. Ela registra números de lançamentos realizados, não um percentual de cobertura do FST: a lista oficial de itens esperados deve ser validada separadamente.
