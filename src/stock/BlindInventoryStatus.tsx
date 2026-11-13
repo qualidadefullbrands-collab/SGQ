@@ -2,6 +2,7 @@ import {useEffect,useMemo,useState} from 'react'
 import {AlertTriangle,Camera,CheckCircle2,ClipboardList,RefreshCw,Search,TrendingUp} from 'lucide-react'
 import {authClient} from '../lib/supabase'
 import {blindInventoryError as explain} from './blindInventoryErrors'
+import InventoryOmieComparison from './InventoryOmieComparison'
 import './BlindInventoryStatus.css'
 
 type Session={
@@ -14,7 +15,7 @@ type Count={
 }
 type Photo={item_id:string;status:string;erro:string|null;sincronizada_em:string|null}
 type Reconciliation={inventario_id:string;status:string;iniciado_em:string;concluido_em:string|null}
-type Review={inventario_id:string;item_id:string;status:string}
+type Review={inventario_id:string;item_id:string;status:string;quantidade_referencia:number|null;quantidade_recontagem:number|null;referencia_fonte:string|null}
 type StatusFilter='todos'|'aberto'|'fechado'|'cancelado'|'foto_erro'|'analise'|'concluida'
 const group=<T,>(rows:T[],getKey:(row:T)=>string)=>{
  const result=new Map<string,T[]>()
@@ -57,6 +58,7 @@ export default function BlindInventoryStatus({onOpenCount,onOpenReconciliation}:
  const photoByItem=useMemo(()=>new Map(photos.map(photo=>[photo.item_id,photo])),[photos])
  const reconBySession=useMemo(()=>new Map(reconciliations.map(row=>[row.inventario_id,row])),[reconciliations])
  const reviewsBySession=useMemo(()=>group(reviews,row=>row.inventario_id),[reviews])
+ const reviewsByItem=useMemo(()=>new Map(reviews.map(row=>[row.item_id,row])),[reviews])
  const selected=sessions.find(row=>row.id===selectedId)
  const stats=useMemo(()=>{
   const current=sessions.filter(s=>s.status!=='cancelado')
@@ -66,9 +68,10 @@ export default function BlindInventoryStatus({onOpenCount,onOpenReconciliation}:
    reconciled:current.filter(s=>reconBySession.get(s.id)?.status==='concluida').length,
    skuCount:counts.filter(c=>sessions.some(s=>s.id===c.inventario_id&&s.status!=='cancelado')).length,
    photoErrors:photos.filter(p=>p.status==='erro').length,
+   quantityDifferences:counts.filter(c=>{const review=reviewsByItem.get(c.id);return review?.quantidade_referencia!==null&&review?.quantidade_referencia!==undefined&&Number(review.quantidade_recontagem??c.quantidade_contada)!==Number(review.quantidade_referencia)}).length,
    photoPending:photos.filter(p=>p.status==='pendente'||p.status==='enviando').length
   }
- },[sessions,counts,photos,reconBySession])
+ },[sessions,counts,photos,reconBySession,reviewsByItem])
  const visible=useMemo(()=>{
   const needle=query.trim().toUpperCase()
   return sessions.filter(s=>{
@@ -131,7 +134,7 @@ export default function BlindInventoryStatus({onOpenCount,onOpenReconciliation}:
     let page=0
     while(true){
      const reply=await authClient.from('sgq_inventario_conciliacao_itens')
-      .select('inventario_id,item_id,status').in('inventario_id',chunk)
+      .select('inventario_id,item_id,status,quantidade_referencia,quantidade_recontagem,referencia_fonte').in('inventario_id',chunk)
       .order('item_id',{ascending:true}).range(page*500,page*500+499)
      if(reply.error)throw reply.error
      const rows=(reply.data||[]) as Review[]
@@ -148,7 +151,7 @@ export default function BlindInventoryStatus({onOpenCount,onOpenReconciliation}:
  useEffect(()=>{void reload()},[])
  return <div className="sgq-inventory-status">
   <header className="sgq-inventory-status-header">
-   <div><h2>Status do inventário às cegas</h2>
+   <div><h2>Status do inventário FST</h2>
     <p>Visão por processo FST e localização, com andamento da contagem, fotos no Omie e conciliação.</p></div>
    <button type="button" className="secondary small" disabled={loading} onClick={()=>void reload()}>
     <RefreshCw size={16}/>{loading?'Atualizando…':'Atualizar'}</button>
@@ -160,9 +163,10 @@ export default function BlindInventoryStatus({onOpenCount,onOpenReconciliation}:
    <div><small>Conciliações concluídas</small><b>{stats.reconciled}</b></div>
    <div><small>Itens contados</small><b>{stats.skuCount}</b></div>
    <div><small>Fotos com erro</small><b>{stats.photoErrors}</b></div>
+   <div><small>Diferenças físicas confirmáveis</small><b>{stats.quantityDifferences}</b></div>
   </div>
   <p className="sgq-inventory-status-explain">Itens contados representam registros realizados, não percentual de cobertura.
-   O total esperado por FST não está certificado pelo inventário às cegas. Saldo do Omie não é modificado nesta tela.</p>
+   O saldo esperado da mesma localização é exibido quando registrado na conciliação. Saldo global do Omie não substitui essa referência, e nenhum saldo é movimentado nesta tela.</p>
   {truncated&&<p className="sgq-inventory-status-warning">Exibindo as 300 sessões mais recentes. Para um período anterior, será necessária consulta ao histórico completo.</p>}
   {error&&<div role="alert" className="sgq-single-alert">{error}</div>}
   <section className="sgq-inventory-status-panel">
@@ -219,13 +223,25 @@ export default function BlindInventoryStatus({onOpenCount,onOpenReconciliation}:
         <div className="sgq-inventory-status-detail-list">
          {entries.map(c=>{
           const photo=photoByItem.get(c.id)
+          const review=reviewsByItem.get(c.id)
+          const expected=review?.quantidade_referencia
+          const counted=Number(review?.quantidade_recontagem??c.quantidade_contada)
+          const difference=expected===null||expected===undefined?null:counted-Number(expected)
           return <div key={c.id} className="sgq-inventory-status-item">
            <div><b>{c.codigo_omie}</b><span>{c.descricao_omie}</span><small>{c.endereco}</small></div>
-           <span>Contagem: <strong>{fnum(Number(c.quantidade_contada))}</strong></span>
+           <div className="sgq-inventory-status-quantity">
+            <span>Esperado no local: <b>{expected===null||expected===undefined?'Não informado':fnum(Number(expected))}</b></span>
+            <span>Contado: <b>{fnum(counted)}</b></span>
+            <span className={difference!==null&&difference!==0?'sgq-inventory-status-critical':''}>
+             Diferença: <b>{difference===null?'—':(difference>0?'+':'')+fnum(difference)}</b>
+            </span>
+            {review?.referencia_fonte&&<small>Fonte: {review.referencia_fonte}</small>}
+           </div>
            <span className={photo?.status==='erro'?'sgq-inventory-status-critical':''}>
             <Camera size={13}/> {photoLabel(photo?.status)}
             {photo?.erro&&<small title={photo.erro}> · {photo.erro}</small>}
            </span>
+           <div className="sgq-inventory-status-audit"><InventoryOmieComparison sku={c.codigo_omie} descricao={c.descricao_omie}/></div>
           </div>
          })}
         </div>}
