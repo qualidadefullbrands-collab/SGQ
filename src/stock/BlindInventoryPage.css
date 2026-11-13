@@ -90,3 +90,70 @@
 .sgq-blind-session-card>.sgq-blind-delete{margin:0 10px 10px;justify-self:start}
 .sgq-blind-session strong[data-status="cancelado"]{background:#f3f4f6;color:#748190}
 @media(max-width:620px){.sgq-blind-actions{width:100%;justify-content:space-between}}
+
+/* Inventário cego: verificação de vínculo SGQ/Omie e laudo por processo. */
+.sgq-blind-process{display:grid;gap:13px;background:#f7fafc;border:1px solid #cddfe9;border-radius:13px;padding:16px;min-width:0}
+.sgq-blind-process>p{font-size:12px;line-height:1.6;color:#617e90;margin:0}
+.sgq-blind-process-summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#eef7ff;border:1px solid #cde1f2;border-radius:9px;padding:11px}
+.sgq-blind-process-summary strong{color:#1e5473;font-size:14px}
+.sgq-blind-process-summary span,.sgq-blind-process-summary small{font-size:12px;color:#5d7b91}
+.sgq-blind-checks{display:grid;gap:7px}
+.sgq-blind-checks>div{display:flex;gap:10px;align-items:flex-start;padding:10px 11px;border-radius:9px;border:1px solid #dae6eb;background:#fff}
+.sgq-blind-checks>div>span{color:#8196a4}
+.sgq-blind-checks>div[data-result="conforme"]>span{color:#21816a}
+.sgq-blind-checks>div[data-result="divergente"]{border-color:#edc6a8;background:#fffaf6}
+.sgq-blind-checks>div[data-result="divergente"]>span{color:#b56d34}
+.sgq-blind-checks>div>div{display:grid;gap:4px;flex:1;min-width:0}
+.sgq-blind-checks strong{font-size:12px;color:#254f65}
+.sgq-blind-checks small{font-size:11px;color:#5d7b8d;overflow-wrap:anywhere}
+.sgq-blind-checks b{font-size:10px;color:#477689;white-space:nowrap}
+.sgq-blind-checks>div[data-result="divergente"] b{color:#b36938}
+.sgq-blind-inventory label.sgq-blind-client-confirm{display:flex;align-items:flex-start;gap:10px;background:#eaf6f3;padding:12px;border:1px solid #c8e1d6;border-radius:9px;font-size:12px;color:#215c4b;cursor:pointer}
+.sgq-blind-client-confirm input{margin-top:2px;accent-color:#2b8062;width:17px;height:17px;flex-shrink:0}
+.sgq-blind-client-confirm span{line-height:1.5}
+.sgq-blind-inspection-upload{display:grid;gap:10px;border-top:1px solid #e2eaee;padding-top:14px}
+.sgq-blind-inspection-upload>p{margin:0;font-size:12px;color:#5e7889}
+.sgq-blind-inspection-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:end}
+.sgq-blind-inspection-form>button{justify-self:start}
+.sgq-blind-document-list{display:flex;flex-wrap:wrap;gap:7px}
+.sgq-blind-document-list>button{display:inline-flex;align-items:center;max-width:100%;gap:6px}
+.sgq-blind-document-list>button span{overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.sgq-blind-document-list>button small{color:#7a90a0}
+.sgq-blind-document-list>small{font-size:11px;color:#8199a7}
+.sgq-blind-context-notice{background:#eef8fc;color:#2f6b85;border:1px solid #c9e4ed;border-radius:8px;padding:9px;font-size:12px}
+.sgq-blind-context-error{background:#fff1ef;color:#a3483e;border:1px solid #efc9c4;border-radius:8px;padding:9px;font-size:12px}
+.sgq-blind-confirmed-context{display:flex;align-items:center;gap:7px;background:#ebf8f0;padding:10px;border-radius:8px;color:#247b5e;font-size:12px;font-weight:700}
+.sgq-blind-photo-upload{align-items:center}
+.sgq-blind-photo-title{width:100%;display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:#1d6683}
+.sgq-blind-photo-title strong{font-size:15px;color:#21546b}
+.sgq-blind-photo-title small{width:100%;color:#638195;font-size:12px;line-height:1.55}
+.sgq-blind-photo-actions{display:flex;gap:9px;flex-wrap:wrap}
+.sgq-blind-photo-current{display:grid;gap:3px;justify-items:center;padding:8px;background:#fff;border:1px solid #d6e4ec;border-radius:9px}
+.sgq-blind-photo-current img{width:100px;height:100px;object-fit:contain}
+.sgq-blind-photo-current small{font-size:10px;color:#68899a}
+.sgq-blind-new-photo{border-color:#45a3b6!important;width:128px!important;height:128px!important}
+.sgq-blind-selected-photo{font-size:11px;color:#427f91;overflow-wrap:anywhere}
+.sgq-blind-photo-note{width:100%;max-width:none}
+.sgq-blind-client-confirm input[type=checkbox]{min-height:initial}
+@media(max-width:740px){.sgq-blind-inspection-form{grid-template-columns:minmax(0,1fr)}.sgq-blind-checks>div{flex-wrap:wrap}.sgq-blind-checks b{margin-left:26px}}
+
+/* Two entry paths for a blind count: product code or FST process. */
+.sgq-blind-lookup-modes{display:flex;align-items:center;flex-wrap:wrap;gap:9px}
+.sgq-blind-lookup-modes button{min-height:40px}
+.sgq-blind-process-choices{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+.sgq-blind-process-choices button{display:grid;justify-items:start;gap:4px;white-space:normal;text-align:left}
+.sgq-blind-process-choices strong{font-size:13px}
+.sgq-blind-process-choices span{font-size:11px;opacity:.8}
+.sgq-blind-process-found{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:#edf8f5;border:1px solid #cce8dc;color:#245c4b;padding:12px 14px;border-radius:10px}
+.sgq-blind-process-found strong{font-size:13px}
+.sgq-blind-process-found span{font-size:12px;flex:1}
+.sgq-blind-process-hint{font-size:12px;line-height:1.6;color:#5f8192;margin:0}
+.sgq-blind-catalog-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:9px;max-height:285px;overflow:auto}
+.sgq-blind-catalog-list>button{min-height:68px;display:grid;justify-items:start;gap:4px;padding:11px 13px;white-space:normal;text-align:left;border:1px solid #d4e3eb;border-radius:10px;background:white;color:#2b607c;cursor:pointer}
+.sgq-blind-catalog-list>button strong{font-size:14px}
+.sgq-blind-catalog-list>button span{font-size:12px;color:#56798d}
+.sgq-blind-catalog-list>button small{font-size:10px;color:#728da0}
+.sgq-blind-catalog-list>button:hover:not(:disabled){background:#f0f9fc;border-color:#87bdca}
+.sgq-blind-catalog-list>button.sgq-blind-catalog-selected{background:#e9f8f1;border-color:#3da37c;color:#1d7957}
+.sgq-blind-catalog-list>button:disabled{cursor:wait;opacity:.5}
+@media(max-width:650px){.sgq-blind-lookup-modes button{flex:1}.sgq-blind-process-found span{flex-basis:100%}}

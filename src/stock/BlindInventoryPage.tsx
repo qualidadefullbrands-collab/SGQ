@@ -2,6 +2,7 @@ import {useEffect,useMemo,useRef,useState} from 'react'
 import {ArrowLeft,Camera,CheckCircle2,ClipboardCheck,Eye,ImagePlus,Plus,RefreshCw,Search,ShieldCheck,Trash2,Upload} from 'lucide-react'
 import {authClient} from '../lib/supabase'
 import {apiPost} from '../lib/supabase'
+import BlindInventoryProcessPanel,{type VerifiedBlindContext} from './BlindInventoryProcessPanel'
 import './BlindInventoryPage.css'
 
 type Session={
@@ -11,10 +12,16 @@ type Session={
 type Item={
  id:string;inventario_id:string;codigo_omie:string;descricao_omie:string;endereco:string
  quantidade_contada:number;observacao:string;foto_storage_path:string|null;foto_para_omie:boolean
+ processo_id:string|null;processo_codigo:string|null;cliente_nome:string|null
+ endereco_armario:string;endereco_prateleira:string;endereco_caixa:string
+ verificacao_cadastro:{checks?:Array<{status:string}>}|null
  foto_status:'pendente'|'enviando'|'sincronizada'|'erro';foto_omie_url?:string|null
  foto_omie_erro?:string|null;foto_sgq_path?:string|null;criado_em:string
 }
 type Product={sku:string;descricao:string;found:boolean}
+type LinkedProcess={id:string;codigo:string;cliente:string|null;status:string}
+type ProcessCatalogProduct={sku:string;descricao:string;origem:'SGQ'|'Omie'|'SGQ + Omie'}
+type OmieProcessProducts={found?:boolean;matchedCode?:string;itens?:Array<{sku:string;descricao:string}>;itensDisponiveis?:boolean}
 const bucket='sgq-inventario-cego'
 const fmt=(n:number)=>Number(n).toLocaleString('pt-BR',{maximumFractionDigits:3})
 const when=(s:string)=>new Date(s).toLocaleString('pt-BR')
@@ -27,6 +34,20 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  const [active,setActive]=useState<Session|null>(null)
  const [items,setItems]=useState<Item[]>([])
  const [address,setAddress]=useState('')
+ const [armario,setArmario]=useState('')
+ const [prateleira,setPrateleira]=useState('')
+ const [caixa,setCaixa]=useState('')
+ const [locations,setLocations]=useState<Array<{codigo:string;armario:string|null;prateleira:string|null;caixa:string|null;descricao:string|null}>>([])
+ const [processContext,setProcessContext]=useState<VerifiedBlindContext|null>(null)
+ const [contextRevision,setContextRevision]=useState(0)
+ const [currentPhoto,setCurrentPhoto]=useState('')
+ const [lookupMode,setLookupMode]=useState<'codigo'|'processo'>('codigo')
+ const [processQuery,setProcessQuery]=useState('')
+ const [processResults,setProcessResults]=useState<LinkedProcess[]>([])
+ const [selectedProcess,setSelectedProcess]=useState<LinkedProcess|null>(null)
+ const [processProducts,setProcessProducts]=useState<ProcessCatalogProduct[]>([])
+ const [processLoading,setProcessLoading]=useState(false)
+ const [processHelp,setProcessHelp]=useState('')
  const [sku,setSku]=useState('')
  const [count,setCount]=useState('')
  const [product,setProduct]=useState<Product|null>(null)
@@ -48,8 +69,16 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
   setPreview(url)
   return()=>URL.revokeObjectURL(url)
  },[selectedFile])
- const resetSearch=()=>{setSku('');setProduct(null);setCount('');setNote('');setSelectedFile(null);setFlagOmie(false);inputRef.current?.focus()}
- const sorted=useMemo(()=>items.filter(item=>[item.codigo_omie,item.descricao_omie,item.endereco].join(' ').toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR'))),[items,search])
+ const resetSearch=(preserveProcess=false)=>{setSku('');setProduct(null);setCount('');setNote('');setSelectedFile(null);setFlagOmie(false);setProcessContext(null);setCurrentPhoto('');if(!preserveProcess){setProcessQuery('');setProcessResults([]);setProcessProducts([]);setSelectedProcess(null);setProcessHelp('')}setContextRevision(n=>n+1);inputRef.current?.focus()}
+ const switchLookup=(mode:'codigo'|'processo')=>{
+  setLookupMode(mode);resetSearch();setError('');setMessage('')
+ }
+ const setPhysicalAddress=(value:string)=>{
+  setAddress(value)
+  const known=locations.find(x=>x.codigo.toUpperCase()===value.trim().toUpperCase())
+  if(known){setArmario(known.armario||'');setPrateleira(known.prateleira||'');setCaixa(known.caixa||'')}
+ }
+ const sorted=useMemo(()=>items.filter(item=>[item.codigo_omie,item.descricao_omie,item.endereco,item.processo_codigo,item.cliente_nome].join(' ').toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR'))),[items,search])
  const flagged=items.filter(item=>item.foto_para_omie&&item.foto_status!=='sincronizada').length
  const shownSessions=sessions.filter(session=>showDeleted||session.status!=='cancelado')
 
@@ -62,14 +91,22 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  }
  async function fetchItems(sessionId:string){
   const {data,error:queryError}=await authClient.from('sgq_inventario_cego_itens')
-   .select('id,inventario_id,codigo_omie,descricao_omie,endereco,quantidade_contada,observacao,foto_storage_path,foto_sgq_path,foto_para_omie,foto_status,foto_omie_url,foto_omie_erro,criado_em')
+   .select('id,inventario_id,codigo_omie,descricao_omie,endereco,quantidade_contada,observacao,foto_storage_path,foto_sgq_path,foto_para_omie,foto_status,foto_omie_url,foto_omie_erro,criado_em,processo_id,processo_codigo,cliente_nome,endereco_armario,endereco_prateleira,endereco_caixa,verificacao_cadastro')
    .eq('inventario_id',sessionId).order('criado_em',{ascending:false}).limit(2000)
   if(queryError){setError(detail(queryError));return}
   setItems((data||[]) as Item[])
  }
  useEffect(()=>{void fetchSessions()},[])
+ useEffect(()=>{
+  let active=true
+  void authClient.from('localizacoes_estoque')
+   .select('codigo,armario,prateleira,caixa,descricao')
+   .eq('ativo',true).order('codigo',{ascending:true}).limit(500)
+   .then(({data})=>{if(active&&data)setLocations(data)})
+  return()=>{active=false}
+ },[])
  async function open(session:Session){
-  setError('');setMessage('');setActive(session);setAddress(session.endereco||'')
+  setError('');setMessage('');setActive(session);setPhysicalAddress(session.endereco||'')
   setItems([]);setPhotos({});resetSearch();await fetchItems(session.id)
  }
  async function create(){
@@ -88,21 +125,91 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
   }catch(e){setError('Falha ao abrir inventário: '+detail(e))}
   finally{setBusy(false)}
  }
- async function verify(){
-  const code=normalSku(sku)
+ async function verify(codeOverride?:string){
+  const code=normalSku(codeOverride??sku)
   if(!code){setError('Informe o código do produto no Omie.');return}
-  setChecking(true);setError('');setProduct(null);setMessage('')
+  setChecking(true);setError('');setSku(code);setProduct(null);setProcessContext(null);setCurrentPhoto('');setMessage('')
   try{
    const result=await apiPost<Product>('/api/estoque/validar-sku',{codigo:code})
    if(result.error||!result.data?.found||!result.data.descricao)
     throw new Error(result.error?.message||'Código não localizado no Omie.')
    setSku(code);setProduct({sku:code,descricao:result.data.descricao,found:true})
-   setMessage('Produto identificado no Omie. Informe a contagem física.')
+   const local=await authClient.from('produtos').select('foto_principal_path').ilike('sku',code).limit(1).maybeSingle()
+   if(local.data?.foto_principal_path){
+    const photo=await authClient.storage.from('produto-fotos').createSignedUrl(local.data.foto_principal_path,600)
+    if(photo.data?.signedUrl)setCurrentPhoto(photo.data.signedUrl)
+   }
+   setMessage('Produto identificado no Omie. Confirme processo, cliente e localização antes da contagem.')
   }catch(e){setError(detail(e))}
   finally{setChecking(false)}
  }
+ async function searchByProcess(){
+  const raw=processQuery.trim().toUpperCase().replace(/\s+/g,'')
+  const key=/^\d{1,8}(?:-[A-Z0-9]+)?$/.test(raw)?'FST'+raw:raw
+  if(!/^FST\d{1,8}(?:-[A-Z0-9]+)?$/.test(key)){
+   setError('Informe um processo FST válido, por exemplo FST26125-A ou 26125.');return
+  }
+  setProcessLoading(true);setProcessResults([]);setSelectedProcess(null);setProcessProducts([])
+  setProduct(null);setProcessContext(null);setCurrentPhoto('');setMessage('');setError('');setProcessHelp('')
+  try{
+   const {data,error:queryError}=await authClient.from('processos')
+    .select('id,codigo,cliente,status').ilike('codigo',key+'%')
+    .is('excluido_em',null).order('codigo',{ascending:true}).limit(25)
+   if(queryError)throw queryError
+   const rows=(data||[]) as LinkedProcess[]
+   if(!rows.length)throw new Error('Nenhum processo FST correspondente foi encontrado no SGQ.')
+   setProcessResults(rows)
+   if(rows.length===1)await chooseProcess(rows[0])
+   else setProcessHelp('Selecione o processo correto na lista. Os sufixos A/B identificam registros diferentes.')
+  }catch(e){setError(detail(e))}
+  finally{setProcessLoading(false)}
+ }
+ async function chooseProcess(selected:LinkedProcess){
+  setSelectedProcess(selected);setProcessResults([]);setProcessProducts([])
+  setSku('');setProduct(null);setProcessContext(null);setCurrentPhoto('');setMessage('');setError('')
+  setProcessLoading(true)
+  try{
+   const {data:links,error:linkError}=await authClient.from('processo_itens')
+     .select('produto_id').eq('processo_id',selected.id).limit(1000)
+   if(linkError)throw linkError
+   const ids=[...new Set((links||[]).map(row=>row.produto_id).filter((id):id is string=>typeof id==='string'&&id.length>0))]
+   const catalog=new Map<string,ProcessCatalogProduct>()
+   if(ids.length){
+    const {data:local,error:productError}=await authClient.from('produtos')
+     .select('sku,nome').in('id',ids).limit(1000)
+    if(productError)throw productError
+    for(const p of local||[]){
+     const code=normalSku(p.sku)
+     if(code)catalog.set(code,{sku:code,descricao:p.nome||code,origem:'SGQ'})
+    }
+   }
+   const remote=await authClient.functions.invoke('sgq-omie-fst',{body:{codigo:selected.codigo}})
+   const omie=remote.error?null:remote.data as OmieProcessProducts|null
+   const canonical=(value:unknown)=>String(value??'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'')
+   const exact=canonical(omie?.matchedCode)===canonical(selected.codigo)
+   if(omie?.found&&exact&&omie.itensDisponiveis&&Array.isArray(omie.itens)){
+    for(const row of omie.itens){
+     const code=normalSku(row.sku)
+     if(!code)continue
+     const current=catalog.get(code)
+     catalog.set(code,{sku:code,descricao:row.descricao||current?.descricao||code,
+      origem:current?'SGQ + Omie':'Omie'})
+    }
+   }
+   const rows=[...catalog.values()].sort((a,b)=>a.sku.localeCompare(b.sku,'pt-BR'))
+   setProcessProducts(rows)
+   setProcessHelp(rows.length
+    ?'Selecione abaixo o produto do processo. O código Omie será preenchido automaticamente.'
+    :'Nenhum produto vinculado foi localizado. Você pode consultar um código Omie manualmente dentro deste processo.')
+  }catch(e){setError('Falha ao carregar produtos do processo: '+detail(e))}
+  finally{setProcessLoading(false)}
+ }
  async function saveCount(){
   if(!active||active.status!=='aberto'||!canWrite||!product||busy)return
+  if(!processContext||processContext.sku!==product.sku){
+   setError('Confirme processo, cliente e consulte as divergências cadastrais antes de registrar o produto.');return
+  }
+  if(!address.trim()){setError('Informe um endereço físico para a contagem.');return}
   const rawCount=count.trim()
   const numeric=Number(rawCount.replace(',','.'))
   if(!/^\d+(?:[.,]\d{1,3})?$/.test(rawCount)||!Number.isFinite(numeric)||numeric<0){
@@ -114,7 +221,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
   if(flagOmie&&!selectedFile){setError('Selecione uma foto para marcá-la como principal no Omie.');return}
   const code=normalSku(product.sku)
   const location=address.trim()
-  const prior=items.find(row=>normalSku(row.codigo_omie)===code&&row.endereco===location)
+  const prior=items.find(row=>normalSku(row.codigo_omie)===code&&row.endereco===location&&row.processo_id===processContext.processoId)
   if(prior&&!window.confirm('Já existe contagem para este código/endereço. Substituir a quantidade registrada?'))return
   setBusy(true);setError('');setMessage('')
   try{
@@ -123,6 +230,10 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
    let itemId=prior?.id||crypto.randomUUID()
    const payload={
     codigo_omie:code,descricao_omie:product.descricao,endereco:location,
+    endereco_armario:armario.trim(),endereco_prateleira:prateleira.trim(),endereco_caixa:caixa.trim(),
+    processo_id:processContext.processoId,processo_codigo:processContext.processoCodigo,
+    cliente_nome:processContext.clienteNome,cliente_confirmado:true,
+    verificacao_cadastro:processContext.verificacao,
     quantidade_contada:numeric,observacao:note.trim(),atualizado_em:new Date().toISOString()
    }
    if(prior){
@@ -166,7 +277,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
     }).eq('id',itemId).select('id').single()
     if(linkError||!linked)throw new Error('Foto atualizada no SGQ, mas falhou ao registrar o vínculo de auditoria: '+detail(linkError))
    }
-   await fetchItems(active.id);resetSearch()
+   await fetchItems(active.id);resetSearch(lookupMode==='processo'&&!!selectedProcess)
    setMessage(selectedFile
     ?flagOmie?'Contagem salva e foto do SGQ atualizada. Envio ao Omie aguardando aprovação.':'Contagem salva e foto principal do produto atualizada no SGQ.'
     :'Contagem salva sem alterar o saldo do Omie.')
@@ -270,29 +381,75 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
      <div className="sgq-blind-metrics"><div><span>Itens contados</span><strong>{items.length}</strong></div><div><span>Fotos para revisão</span><strong>{flagged}</strong></div><div><span>Sincronizadas no Omie</span><strong>{items.filter(x=>x.foto_status==='sincronizada').length}</strong></div></div>
      {active.status==='aberto'&&canWrite&&<div className="sgq-blind-capture">
       <div className="sgq-blind-section-head"><ClipboardCheck size={20}/><h3>Registrar produto</h3></div>
-      <div className="sgq-blind-find">
-       <label>Código do produto Omie<input ref={inputRef} value={sku} onChange={e=>{setSku(e.target.value);setProduct(null)}}
-         placeholder="Digite ou leia o SKU" maxLength={60} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();void verify()}}}/></label>
-       <button type="button" className="secondary" disabled={checking||!sku.trim()} onClick={()=>void verify()}><Search size={17}/>{checking?'Consultando…':'Consultar Omie'}</button>
+      <div className="sgq-blind-lookup-modes" role="group" aria-label="Buscar produto por código ou processo">
+       <button type="button" className={lookupMode==='codigo'?'primary':'secondary'} aria-pressed={lookupMode==='codigo'} onClick={()=>switchLookup('codigo')}>Buscar por código Omie</button>
+       <button type="button" className={lookupMode==='processo'?'primary':'secondary'} aria-pressed={lookupMode==='processo'} onClick={()=>switchLookup('processo')}>Buscar por processo FST</button>
       </div>
+      {lookupMode==='processo'&&<>
+       <div className="sgq-blind-find">
+        <label>Número do processo<input value={processQuery} maxLength={40} placeholder="FST26125-A ou 26125"
+         onChange={e=>setProcessQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();void searchByProcess()}}}/></label>
+        <button type="button" className="secondary" disabled={processLoading||checking||!processQuery.trim()}
+         onClick={()=>void searchByProcess()}><Search size={17}/>{processLoading?'Buscando…':'Buscar processo'}</button>
+       </div>
+       {processResults.length>0&&<div className="sgq-blind-process-choices" aria-label="Processos encontrados">
+        {processResults.map(row=><button key={row.id} type="button" className="secondary"
+         onClick={()=>void chooseProcess(row)} disabled={processLoading}><strong>{row.codigo}</strong><span>{row.cliente||'Cliente não informado'}</span></button>)}
+       </div>}
+       {selectedProcess&&<div className="sgq-blind-process-found" role="status">
+        <strong>Processo selecionado: {selectedProcess.codigo}</strong>
+        <span>Cliente SGQ: {selectedProcess.cliente||'não informado'}</span>
+        <button className="secondary small" type="button" onClick={()=>{setSelectedProcess(null);setProcessProducts([]);setSku('');setProduct(null);setProcessContext(null)}}>Trocar processo</button>
+       </div>}
+       {processHelp&&<p className="sgq-blind-process-hint">{processHelp}</p>}
+       {processProducts.length>0&&<div className="sgq-blind-catalog-list" aria-label="Produtos vinculados ao processo">
+        {processProducts.map(p=><button type="button" key={p.sku} disabled={checking||processLoading}
+         className={product?.sku===p.sku?'sgq-blind-catalog-selected':'secondary'}
+         onClick={()=>void verify(p.sku)}><strong>{p.sku}</strong><span>{p.descricao}</span><small>Fonte: {p.origem}</small></button>)}
+       </div>}
+      </>}
+      {(lookupMode==='codigo'||selectedProcess)&&<div className="sgq-blind-find">
+       <label>{lookupMode==='codigo'?'Código do produto Omie':'Código Omie (alternativo, caso não apareça na lista)'}
+        <input ref={inputRef} value={sku} onChange={e=>{setSku(e.target.value);setProduct(null);setProcessContext(null)}}
+         placeholder="Digite ou leia o SKU" maxLength={60} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();void verify()}}}/></label>
+       <button type="button" className="secondary" disabled={checking||!sku.trim()} onClick={()=>void verify()}>
+        <Search size={17}/>{checking?'Consultando…':'Consultar Omie'}</button>
+      </div>}
       {product&&<div className="sgq-blind-product" role="status"><CheckCircle2 size={19}/><div><strong>{product.sku}</strong><span>{product.descricao}</span></div><small>Confirmado no Omie</small></div>}
+      {product&&<BlindInventoryProcessPanel key={product.sku+'-'+contextRevision} sku={product.sku} omieDescription={product.descricao}
+       inventoryId={active.id} canWrite={canWrite} initialProcessCode={selectedProcess?.codigo||''} onChange={setProcessContext}/>}
+      {processContext&&<p className="sgq-blind-confirmed-context"><CheckCircle2 size={16}/> Confirmado: {processContext.processoCodigo} · {processContext.clienteNome}</p>}
       <div className="sgq-blind-form-grid">
        <label>Quantidade contada<input type="number" inputMode="decimal" min="0" step=".001" value={count} onChange={e=>setCount(e.target.value)} placeholder="0"/></label>
-       <label>Endereço físico<input value={address} maxLength={120} onChange={e=>setAddress(e.target.value)} placeholder="Setor / prateleira"/></label>
+       <label>Endereço físico / código de localização *<input list="sgq-blind-locations" value={address} maxLength={120} onChange={e=>setPhysicalAddress(e.target.value)} placeholder="Ex.: RUA-A-03 (obrigatório)"/>
+        <datalist id="sgq-blind-locations">{locations.map(x=><option key={x.codigo} value={x.codigo}>{x.descricao||[x.armario,x.prateleira,x.caixa].filter(Boolean).join(' / ')}</option>)}</datalist>
+       </label>
+       <label>Rua / armário<input value={armario} maxLength={100} onChange={e=>setArmario(e.target.value)} placeholder="Ex.: Rua A / Armário 02"/></label>
+       <label>Prateleira<input value={prateleira} maxLength={100} onChange={e=>setPrateleira(e.target.value)} placeholder="Ex.: P03"/></label>
+       <label>Caixa / posição<input value={caixa} maxLength={100} onChange={e=>setCaixa(e.target.value)} placeholder="Ex.: CX-11"/></label>
        <label className="sgq-blind-full">Observação (opcional)<textarea value={note} rows={2} maxLength={1000} onChange={e=>setNote(e.target.value)} placeholder="Embalagem, avaria, lote, observações…"/></label>
       </div>
       <div className="sgq-blind-photo-upload">
-       <label className="sgq-blind-photo-picker"><Camera size={18}/> {selectedFile?'Trocar foto':'Fotografar produto'}
-        <input type="file" accept="image/jpeg,image/png" capture="environment" onChange={e=>setSelectedFile(e.target.files?.[0]||null)} aria-label="Foto do produto"/>
-       </label>
-       {preview&&<img src={preview} alt="Prévia da foto a registrar"/>}
-       <p className="sgq-blind-photo-note">A foto enviada será definida como foto principal do produto no SGQ.</p>
+       <div className="sgq-blind-photo-title"><Camera size={19}/><strong>Foto do produto e atualização de cadastro</strong>
+        <small>Fotografe ou envie da galeria. A imagem registrada atualiza a foto principal no SGQ; o Omie exige aprovação separada.</small></div>
+       {currentPhoto&&<div className="sgq-blind-photo-current"><img src={currentPhoto} alt="Foto principal atual no SGQ"/><small>Foto atual no SGQ</small></div>}
+       <div className="sgq-blind-photo-actions">
+        <label className="sgq-blind-photo-picker"><Camera size={18}/> Tirar foto
+         <input type="file" accept="image/jpeg,image/png" capture="environment" onChange={e=>setSelectedFile(e.target.files?.[0]||null)} aria-label="Fotografar produto"/>
+        </label>
+        <label className="sgq-blind-photo-picker"><ImagePlus size={18}/> Enviar foto do dispositivo
+         <input type="file" accept="image/jpeg,image/png" onChange={e=>setSelectedFile(e.target.files?.[0]||null)} aria-label="Enviar foto do produto"/>
+        </label>
+       </div>
+       {selectedFile&&<small className="sgq-blind-selected-photo">{selectedFile.name}</small>}
+       {preview&&<img className="sgq-blind-new-photo" src={preview} alt="Prévia da nova foto do produto"/>}
+       <p className="sgq-blind-photo-note">JPG ou PNG até 8 MB. A foto será vinculada ao registro físico e ao cadastro local SGQ.</p>
        <label className="sgq-blind-photo-flag"><input type="checkbox" checked={flagOmie} onChange={e=>setFlagOmie(e.target.checked)} disabled={!selectedFile}/>
         <span><strong>Marcar para atualizar a foto principal no Omie</strong><small>A foto será enviada ao catálogo somente após validação do gestor e encerramento da contagem.</small></span>
        </label>
       </div>
       <div className="sgq-blind-footer"><span>O saldo do ERP não será alterado.</span>
-       <button className="primary" type="button" disabled={busy||!canWrite||!product||!count.trim()} onClick={()=>void saveCount()}><Upload size={17}/>{busy?'Salvando…':'Salvar contagem'}</button>
+       <button className="primary" type="button" disabled={busy||!canWrite||!product||!processContext||!address.trim()||!count.trim()} onClick={()=>void saveCount()}><Upload size={17}/>{busy?'Salvando…':'Salvar contagem'}</button>
       </div>
      </div>}
      {active.status==='aberto'&&canApprove&&items.length>0&&<div className="sgq-blind-close"><p>Ao concluir, as contagens ficam bloqueadas. A sincronização de fotos não altera estoque.</p><button className="secondary" disabled={busy} onClick={()=>void close()}><ShieldCheck size={16}/> Concluir contagem</button></div>}
@@ -301,7 +458,10 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
      <div className="sgq-blind-heading"><div><h3>Registros físicos</h3><p>Somente quantidades informadas pelos conferentes.</p></div><label className="sgq-blind-list-search"><Search size={15}/><input placeholder="Buscar SKU ou local" value={search} onChange={e=>setSearch(e.target.value)}/></label></div>
      <div className="sgq-blind-records">
       {sorted.map(item=><article key={item.id} className="sgq-blind-record">
-       <div className="sgq-blind-record-main"><div><strong>{item.codigo_omie}</strong><span>{item.descricao_omie}</span><small>{item.endereco||'Sem endereço'} · {when(item.criado_em)}</small></div>
+       <div className="sgq-blind-record-main"><div><strong>{item.codigo_omie}</strong><span>{item.descricao_omie}</span><small>{item.endereco||'Sem endereço'} · {when(item.criado_em)}</small>
+         <small>Processo {item.processo_codigo||'não informado'} · Cliente {item.cliente_nome||'não informado'}</small>
+         {(item.endereco_armario||item.endereco_prateleira||item.endereco_caixa)&&<small>Rua/armário: {item.endereco_armario||'—'} · Prateleira: {item.endereco_prateleira||'—'} · Caixa: {item.endereco_caixa||'—'}</small>}
+         {item.verificacao_cadastro&&<small>Conferência cadastral: {(item.verificacao_cadastro.checks||[]).filter(c=>c.status==='divergente').length} divergência(s) registrada(s)</small>}</div>
         <div className="sgq-blind-quantity"><small>Contagem física</small><b>{fmt(item.quantidade_contada)}</b></div>
        </div>
        {item.observacao&&<p>{item.observacao}</p>}
