@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useState} from 'react'
-import {Camera,CheckCircle2,ImagePlus,MapPin,Plus,RefreshCw,Search,Upload} from 'lucide-react'
+import {Camera,CheckCircle2,ImagePlus,MapPin,Plus,RefreshCw,Search,ShieldAlert,Upload} from 'lucide-react'
 import {authClient,apiPost} from '../lib/supabase'
 import {blindInventoryError as explain} from './blindInventoryErrors'
 import './BlindInventoryUnified.css'
@@ -148,11 +148,14 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   setInspections((data||[]) as DocRow[])
  }
  async function loadProcess(code:string,orderId?:number){
-  const [remote,receipt,local]=await Promise.all([
+  const [remote,receipt,local,existingSession]=await Promise.all([
    authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code,...(orderId?{codigoPedido:orderId}:{})}}),
    authClient.functions.invoke('sgq-omie-fst',{body:{codigo:code,modo:'nfe'}}),
    authClient.from('processos').select('id,codigo,cliente,nota_fiscal')
-    .in('codigo',[code,code.replace(/^FST/,'')]).is('excluido_em',null).limit(1).maybeSingle()
+    .in('codigo',[code,code.replace(/^FST/,'')]).is('excluido_em',null).limit(1).maybeSingle(),
+   authClient.from('sgq_inventarios_cegos')
+    .select('id,codigo,endereco,status,processo_codigo,nf_entrada,data_nf,cliente_nome')
+    .eq('endereco',location).eq('processo_codigo',code).eq('status','aberto').limit(1).maybeSingle()
   ])
   if(remote.error)throw new Error('Não foi possível consultar o processo no Omie: '+explain(remote.error))
   const data=remote.data as OmieInfo|null
@@ -160,11 +163,13 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
    throw new Error('O processo '+code+' não foi confirmado no Omie. Confira o código completo.')
   const sgq=local.data as ProcessRow|null
   const fiscal=receipt.error?null:receipt.data as NfInfo|null
+  const previous=existingSession.data as Session|null
   setProcessCode(code);setSgqProcess(sgq);setOmie(data);setNfe(fiscal)
-  setClient(data.cliente||sgq?.cliente||'')
-  setNfNumber(fiscal?.status==='matched'?fiscal.numeroNota||'':sgq?.nota_fiscal||'')
+  setClient(data.cliente||previous?.cliente_nome||sgq?.cliente||'')
+  setNfNumber(fiscal?.status==='matched'?fiscal.numeroNota||'':previous?.nf_entrada||sgq?.nota_fiscal||'')
   const actualDate=toIso(fiscal?.dataRegistro||fiscal?.dataEmissao||fiscal?.data)
-  setNfDate(actualDate);setNfDateSource(actualDate?(fiscal?.dataRegistro?'registro_omie':'emissao_omie'):'informada')
+  setNfDate(actualDate||toIso(previous?.data_nf))
+  setNfDateSource(actualDate?(fiscal?.dataRegistro?'registro_omie':'emissao_omie'):'informada')
   const list=new Map<string,Product>()
   if(data.itensDisponiveis&&Array.isArray(data.itens)){
    for(const row of data.itens){
