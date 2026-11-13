@@ -147,7 +147,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
     const photo=await authClient.storage.from('produto-fotos').createSignedUrl(local.data.foto_principal_path,600)
     if(photo.data?.signedUrl)setCurrentPhoto(photo.data.signedUrl)
    }
-   setMessage('Produto identificado no Omie. Confirme processo, cliente e localização antes da contagem.')
+   setMessage(lookupMode==='codigo'?'Produto localizado no Omie. Informe a quantidade, selecione a rua ou armário e salve a contagem.':'Produto localizado no Omie. Confira processo e cliente antes de salvar.')
   }catch(e){setError(detail(e))}
   finally{setChecking(false)}
  }
@@ -214,8 +214,8 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  }
  async function saveCount(){
   if(!active||active.status!=='aberto'||!canWrite||!product||busy)return
-  if(!processContext||processContext.sku!==product.sku){
-   setError('Confirme processo, cliente e consulte as divergências cadastrais antes de registrar o produto.');return
+  if(lookupMode==='processo'&&(!processContext||processContext.sku!==product.sku||!selectedProcess||processContext.processoId!==selectedProcess.id)){
+   setError('Para a busca por processo, confirme processo, cliente e divergências antes de salvar.');return
   }
   if(!address.trim()||!locations.includes(address)){setError('Selecione uma rua ou armário cadastrado.');return}
   const rawCount=count.trim()
@@ -229,7 +229,8 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
   if(flagOmie&&!selectedFile){setError('Selecione uma foto para marcá-la como principal no Omie.');return}
   const code=normalSku(product.sku)
   const location=address.trim()
-  const prior=items.find(row=>normalSku(row.codigo_omie)===code&&row.endereco===location&&row.processo_id===processContext.processoId)
+  const linkedProcess=lookupMode==='processo'?processContext:null
+  const prior=items.find(row=>normalSku(row.codigo_omie)===code&&row.endereco===location&&(row.processo_id||null)===(linkedProcess?.processoId||null))
   if(prior&&!window.confirm('Já existe contagem para este código/endereço. Substituir a quantidade registrada?'))return
   setBusy(true);setError('');setMessage('')
   try{
@@ -239,9 +240,12 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
    const payload={
     codigo_omie:code,descricao_omie:product.descricao,endereco:location,
     endereco_armario:location,endereco_prateleira:'',endereco_caixa:'',
-    processo_id:processContext.processoId,processo_codigo:processContext.processoCodigo,
-    cliente_nome:processContext.clienteNome,cliente_confirmado:true,
-    verificacao_cadastro:processContext.verificacao,
+    processo_id:linkedProcess?.processoId||null,processo_codigo:linkedProcess?.processoCodigo||null,
+    cliente_nome:linkedProcess?.clienteNome||null,cliente_confirmado:!!linkedProcess,
+    verificacao_cadastro:linkedProcess?.verificacao||{
+     modo:'codigo_omie',sku:code,consultadoEm:new Date().toISOString(),
+     fonte:'api_omie_validar_sku'
+    },
     quantidade_contada:numeric,observacao:note.trim(),atualizado_em:new Date().toISOString()
    }
    if(prior){
@@ -431,7 +435,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
         <Search size={17}/>{checking?'Consultando…':'Consultar Omie'}</button>
       </div>}
       {product&&<div className="sgq-blind-product" role="status"><CheckCircle2 size={19}/><div><strong>{product.sku}</strong><span>{product.descricao}</span></div><small>Confirmado no Omie</small></div>}
-      {product&&<BlindInventoryProcessPanel key={product.sku+'-'+contextRevision} sku={product.sku} omieDescription={product.descricao}
+      {product&&lookupMode==='processo'&&<BlindInventoryProcessPanel key={product.sku+'-'+contextRevision} sku={product.sku} omieDescription={product.descricao}
        inventoryId={active.id} canWrite={canWrite} initialProcessCode={selectedProcess?.codigo||''} onChange={setProcessContext}/>}
       {processContext&&<p className="sgq-blind-confirmed-context"><CheckCircle2 size={16}/> Confirmado: {processContext.processoCodigo} · {processContext.clienteNome}</p>}
       <div className="sgq-blind-form-grid">
@@ -464,7 +468,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
        </label>
       </div>
       <div className="sgq-blind-footer">
-       <button className="primary" type="button" disabled={busy||!canWrite||!product||!processContext||!locations.includes(address)||!count.trim()} onClick={()=>void saveCount()}><Upload size={17}/>{busy?'Salvando…':'Salvar contagem'}</button>
+       <button className="primary" type="button" disabled={busy||!canWrite||!product||(lookupMode==='processo'&&!processContext)||!locations.includes(address)||!count.trim()} onClick={()=>void saveCount()}><Upload size={17}/>{busy?'Salvando…':'Salvar contagem'}</button>
       </div>
      </div>}
      {active.status==='aberto'&&canApprove&&items.length>0&&<div className="sgq-blind-close"><p>Ao concluir, as contagens ficam bloqueadas. A sincronização de fotos não altera estoque.</p><button className="secondary" disabled={busy} onClick={()=>void close()}><ShieldCheck size={16}/> Concluir contagem</button></div>}
@@ -474,7 +478,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
      <div className="sgq-blind-records">
       {sorted.map(item=><article key={item.id} className="sgq-blind-record">
        <div className="sgq-blind-record-main"><div><strong>{item.codigo_omie}</strong><span>{item.descricao_omie}</span><small>{item.endereco||'Sem endereço'} · {when(item.criado_em)}</small>
-         <small>Processo {item.processo_codigo||'não informado'} · Cliente {item.cliente_nome||'não informado'}</small>
+         <small>{item.processo_codigo?'Processo '+item.processo_codigo+' · Cliente '+(item.cliente_nome||'não informado'):'Registrado diretamente pelo código Omie'}</small>
 
          {item.verificacao_cadastro&&<small>Conferência cadastral: {(item.verificacao_cadastro.checks||[]).filter(c=>c.status==='divergente').length} divergência(s) registrada(s)</small>}</div>
         <div className="sgq-blind-quantity"><small>Contagem física</small><b>{fmt(item.quantidade_contada)}</b></div>
