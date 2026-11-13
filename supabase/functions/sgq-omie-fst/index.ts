@@ -70,7 +70,7 @@ const receiptLimitPages=25;
 // Incoming supplier NF-e: only an explicit Omie project association can
 // automatically populate a legal document number. SKU/client similarity is unsafe.
 function receiptsForProject(rows:any[],projectId:number){
-  const byKey=new Map<string,{numero:string;serie:string;chave:string;recebId:number}>();
+  const byKey=new Map<string,{numero:string;serie:string;chave:string;recebId:number;dataRegistro:string;dataEmissao:string}>();
   for(const row of rows){
     if(Number(row?.infoAdicionais?.nIdProjeto)!==projectId)continue;
     const status=row?.infoCadastro||{};
@@ -83,7 +83,7 @@ function receiptsForProject(rows:any[],projectId:number){
     const chave=String(head.cChaveNfe||"").trim();
     const recebId=Number(head.nIdReceb||0);
     const key=chave.length===44?chave:serie+"/"+numero+"/"+recebId;
-    byKey.set(key,{numero,serie,chave,recebId});
+    byKey.set(key,{numero,serie,chave,recebId,dataRegistro:String(row?.infoAdicionais?.dRegistro||'').trim(),dataEmissao:String(head?.dEmissaoNFe||'').trim()});
   }
   return [...byKey.values()];
 }
@@ -126,7 +126,10 @@ async function lookupIncomingNfePages(projectId:number,appKey:string,appSecret:s
   const unique=new Map(matches.map(item=>[item.chave||item.serie+"/"+item.numero+"/"+item.recebId,item]));
   matches=[...unique.values()];
   const result=!complete?{status:"incomplete",numeroNota:null}:
-    matches.length===1?{status:"matched",numeroNota:matches[0].numero,serie:matches[0].serie,source:"recebimento_nfe"}:
+    matches.length===1?{status:"matched",numeroNota:matches[0].numero,serie:matches[0].serie,
+      dataRegistro:matches[0].dataRegistro||null,dataEmissao:matches[0].dataEmissao||null,
+      data:matches[0].dataRegistro||matches[0].dataEmissao||null,
+      tipoData:matches[0].dataRegistro?"registro_omie":"emissao_omie",source:"recebimento_nfe"}:
     {status:matches.length>1?"multiple":"not_found",numeroNota:null};
   receiptCache.set(projectId,{timestamp:Date.now(),result});
   return result;
