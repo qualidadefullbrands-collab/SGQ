@@ -1,6 +1,7 @@
 import {useEffect,useState} from 'react'
 import {CheckCircle2,FileText,FolderSearch,Paperclip,RefreshCw,Search,ShieldAlert,Upload} from 'lucide-react'
 import {authClient} from '../lib/supabase'
+import {blindInventoryError} from './blindInventoryErrors'
 
 type ProcessRow={id:string;codigo:string;cliente:string|null;codigo_cliente:string|null;status:string}
 type ProcessItem={produto_id:string|null}
@@ -16,7 +17,7 @@ type DocumentRow={id:string;arquivo_nome:string;criado_em:string;storage_path:st
 const docBucket='sgq-inventario-inspecoes'
 const trim=(v:unknown)=>String(v??'').trim()
 const normalized=(v:unknown)=>trim(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]/g,'')
-const describe=(e:unknown)=>e instanceof Error?e.message:trim(e)||'Erro desconhecido'
+const describe=blindInventoryError
 const formats=['application/pdf','image/jpeg','image/png','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document']
 const limit=15*1024*1024
 

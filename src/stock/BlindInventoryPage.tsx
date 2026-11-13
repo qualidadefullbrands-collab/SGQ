@@ -3,6 +3,7 @@ import {ArrowLeft,Camera,CheckCircle2,ClipboardCheck,Eye,ImagePlus,Plus,RefreshC
 import {authClient} from '../lib/supabase'
 import {apiPost} from '../lib/supabase'
 import BlindInventoryProcessPanel,{type VerifiedBlindContext} from './BlindInventoryProcessPanel'
+import {blindInventoryError} from './blindInventoryErrors'
 import './BlindInventoryPage.css'
 
 type Session={
@@ -25,7 +26,7 @@ type OmieProcessProducts={found?:boolean;matchedCode?:string;itens?:Array<{sku:s
 const bucket='sgq-inventario-cego'
 const fmt=(n:number)=>Number(n).toLocaleString('pt-BR',{maximumFractionDigits:3})
 const when=(s:string)=>new Date(s).toLocaleString('pt-BR')
-const detail=(error:unknown)=>error instanceof Error?error.message:String(error||'Operação não concluída')
+const detail=blindInventoryError
 const normalSku=(value:string)=>value.trim().toUpperCase()
 
 export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boolean;canApprove:boolean}){
@@ -288,7 +289,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
    setMessage(selectedFile
     ?flagOmie?'Contagem salva e foto do SGQ atualizada. Envio ao Omie aguardando aprovação.':'Contagem salva e foto principal do produto atualizada no SGQ.'
     :'Contagem salva sem alterar o saldo do Omie.')
-  }catch(e){setError(detail(e));await fetchItems(active.id)}
+  }catch(e){setError('Não foi possível salvar a contagem: '+detail(e));await fetchItems(active.id)}
   finally{setBusy(false)}
  }
  async function openPhoto(item:Item){
@@ -356,7 +357,9 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
     <p>Localize o produto pelo código Omie, registre a quantidade física e, se necessário, fotografe o item. Nenhum saldo esperado ou diferença será exibido durante a contagem.</p></div>
    <span className="sgq-blind-seal"><Eye size={19}/> Sem saldo do sistema</span>
   </header>
-  {error&&<div role="alert" className="alert error">{error}</div>}
+  {error&&<div role="alert" className="alert error">{error}
+    {error.includes('42501')&&<button type="button" className="secondary small" onClick={()=>window.location.reload()}>Atualizar SGQ agora</button>}
+  </div>}
   {message&&<div role="status" className="alert success">{message}</div>}
   {!active?<section className="sgq-blind-panel">
     <div className="sgq-blind-heading"><h3>Inventários</h3><div className="sgq-blind-actions">
