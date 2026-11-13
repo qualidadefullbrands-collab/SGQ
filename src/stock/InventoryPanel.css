@@ -58,3 +58,16 @@
 .sgq-operational-shell .sgq-inventory-empty-state p{font-size:12px;max-width:500px;margin:0}
 @media(max-width:1100px){.sgq-operational-shell .sgq-inventory-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:620px){.sgq-operational-shell .sgq-inventory-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.sgq-operational-shell .sgq-inventory-kpis>*{min-width:0}}
+
+/* Exclusion of open inventories, leaving historic counts and audit untouched. */
+.sgq-inventory-session-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.sgq-inventory-show-deleted{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#58748a;cursor:pointer}
+.sgq-inventory-show-deleted input{accent-color:#2686a6;width:16px;height:16px}
+.sgq-inventory-session-card{display:grid;min-width:0;border:1px solid #d8e5eb;border-radius:11px;overflow:hidden;background:#f8fbfc}
+.sgq-inventory-session-card>.sgq-inventory-session{width:100%;border:0;border-radius:0}
+.sgq-inventory-delete{display:inline-flex;align-items:center;justify-content:center;gap:7px;width:max-content;border:1px solid #edcaca;color:#b04343;background:#fff;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:12px;font-weight:700}
+.sgq-inventory-delete:hover:not(:disabled){background:#fff0f0;border-color:#d89797}
+.sgq-inventory-delete:disabled{opacity:.55;cursor:not-allowed}
+.sgq-inventory-session-card>.sgq-inventory-delete{margin:0 10px 10px;justify-self:start}
+.sgq-inventory-session strong[data-status="cancelado"]{background:#f2f4f5;color:#738294}
+@media(max-width:680px){.sgq-inventory-session-actions{width:100%;justify-content:space-between}}
