@@ -12,7 +12,7 @@ type Item={
  id:string;inventario_id:string;codigo_omie:string;descricao_omie:string;endereco:string
  quantidade_contada:number;observacao:string;foto_storage_path:string|null;foto_para_omie:boolean
  foto_status:'pendente'|'enviando'|'sincronizada'|'erro';foto_omie_url?:string|null
- foto_omie_erro?:string|null;criado_em:string
+ foto_omie_erro?:string|null;foto_sgq_path?:string|null;criado_em:string
 }
 type Product={sku:string;descricao:string;found:boolean}
 const bucket='sgq-inventario-cego'
@@ -60,7 +60,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
  }
  async function fetchItems(sessionId:string){
   const {data,error:queryError}=await authClient.from('sgq_inventario_cego_itens')
-   .select('id,inventario_id,codigo_omie,descricao_omie,endereco,quantidade_contada,observacao,foto_storage_path,foto_para_omie,foto_status,foto_omie_url,foto_omie_erro,criado_em')
+   .select('id,inventario_id,codigo_omie,descricao_omie,endereco,quantidade_contada,observacao,foto_storage_path,foto_sgq_path,foto_para_omie,foto_status,foto_omie_url,foto_omie_erro,criado_em')
    .eq('inventario_id',sessionId).order('criado_em',{ascending:false}).limit(2000)
   if(queryError){setError(detail(queryError));return}
   setItems((data||[]) as Item[])
@@ -143,9 +143,30 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
       foto_storage_path:storagePath,foto_para_omie:flagOmie,atualizado_em:new Date().toISOString()
     }).eq('id',itemId)
     if(photoError)throw new Error('Contagem salva, mas o vínculo da foto falhou: '+detail(photoError))
+
+    // Reuse the existing SGQ product lookup: it creates the local product if the
+    // Omie code is valid and not yet present. Do not merge by similar descriptions.
+    const local=await apiPost<{found:boolean;productId:string}>('/api/produtos/consultar',{codigo:code})
+    if(local.error||!local.data?.found||!local.data.productId)
+     throw new Error('Contagem e evidência salvas, mas o produto local não pôde ser identificado: '+(local.error?.message||'falha na consulta'))
+    const photoLocalPath=[local.data.productId,crypto.randomUUID()+'.'+extension].join('/')
+    const {error:catalogError}=await authClient.storage.from('produto-fotos').upload(photoLocalPath,selectedFile,{
+     upsert:false,contentType:selectedFile.type
+    })
+    if(catalogError)throw new Error('Contagem e evidência salvas, mas a foto principal do SGQ não foi atualizada: '+detail(catalogError))
+    const {error:productPhotoError}=await authClient.from('produtos').update({
+     foto_principal_path:photoLocalPath,atualizado_em:new Date().toISOString()
+    }).eq('id',local.data.productId)
+    if(productPhotoError)throw new Error('Contagem e evidência salvas, mas não foi possível atualizar o produto SGQ: '+detail(productPhotoError))
+    const {error:linkError}=await authClient.from('sgq_inventario_cego_itens').update({
+     foto_sgq_path:photoLocalPath
+    }).eq('id',itemId)
+    if(linkError)throw new Error('Foto atualizada no SGQ, mas falhou ao registrar o vínculo de auditoria: '+detail(linkError))
    }
    await fetchItems(active.id);resetSearch()
-   setMessage(flagOmie?'Contagem salva. Foto marcada e aguardando aprovação para o Omie.':'Contagem salva sem alterar o saldo do Omie.')
+   setMessage(selectedFile
+    ?flagOmie?'Contagem salva e foto do SGQ atualizada. Envio ao Omie aguardando aprovação.':'Contagem salva e foto principal do produto atualizada no SGQ.'
+    :'Contagem salva sem alterar o saldo do Omie.')
   }catch(e){setError(detail(e));await fetchItems(active.id)}
   finally{setBusy(false)}
  }
@@ -235,6 +256,7 @@ export default function BlindInventoryPage({canWrite,canApprove}:{canWrite:boole
         <input type="file" accept="image/jpeg,image/png" capture="environment" onChange={e=>setSelectedFile(e.target.files?.[0]||null)} aria-label="Foto do produto"/>
        </label>
        {preview&&<img src={preview} alt="Prévia da foto a registrar"/>}
+       <p className="sgq-blind-photo-note">A foto enviada será definida como foto principal do produto no SGQ.</p>
        <label className="sgq-blind-photo-flag"><input type="checkbox" checked={flagOmie} onChange={e=>setFlagOmie(e.target.checked)} disabled={!selectedFile}/>
         <span><strong>Marcar para atualizar a foto principal no Omie</strong><small>A foto será enviada ao catálogo somente após validação do gestor e encerramento da contagem.</small></span>
        </label>
