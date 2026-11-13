@@ -2,6 +2,7 @@ import {useEffect,useMemo,useState} from 'react'
 import {ArrowRight,CheckCircle2,ClipboardCheck,FileSearch,RefreshCw,ShieldAlert} from 'lucide-react'
 import {authClient} from '../lib/supabase'
 import {blindInventoryError as explain} from './blindInventoryErrors'
+import InventoryOmieComparison from './InventoryOmieComparison'
 import './BlindInventoryReconciliation.css'
 
 type Session={
@@ -181,7 +182,7 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
     <RefreshCw size={16}/> Atualizar</button>
   </header>
   <p className="sgq-recon-intro"><ShieldAlert size={16}/>
-   A referência deve representar o mesmo SKU e a mesma localização da contagem.
+   A quantidade esperada deve corresponder ao mesmo SKU e à mesma localização da contagem.
    O saldo global do Omie não é automaticamente comparável a um armário ou rua.
    A aprovação registra uma decisão auditável, mas não ajusta saldos.</p>
   {error&&<div className="sgq-single-alert" role="alert">{error}</div>}
@@ -253,12 +254,13 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
        </div>
        <div className="sgq-recon-values">
         <div><small>Contagem inicial</small><b>{num(original)}</b></div>
-        <div><small>Referência local</small><b>{ref===null||ref===undefined?'—':num(Number(ref))}</b></div>
+        <div><small>Quantidade esperada · local</small><b>{ref===null||ref===undefined?'—':num(Number(ref))}</b></div>
         {row?.quantidade_recontagem!==null&&row?.quantidade_recontagem!==undefined&&
          <div><small>Recontagem</small><b>{num(Number(row.quantidade_recontagem))}</b></div>}
         <div><small>Diferença</small><b className={delta!==null&&delta!==0?'sgq-recon-different':''}>{delta===null?'—':(delta>0?'+':'')+num(delta)}</b></div>
        </div>
        <div className="sgq-recon-notes">
+        <InventoryOmieComparison sku={item.codigo_omie} descricao={item.descricao_omie}/>
         {row?.referencia_fonte&&<p><b>Origem:</b> {row.referencia_fonte} · {row.referencia_evidencia}</p>}
         {row?.recontagem_justificativa&&<p><b>Recontagem:</b> {row.recontagem_justificativa}</p>}
         {row?.justificativa_analise&&<p><b>Decisão:</b> {row.justificativa_analise}</p>}
@@ -266,9 +268,9 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
          <FileSearch size={15}/> Ver foto da contagem</button>}
        </div>
        {canEdit&&canApprove&&row&&<div className="sgq-recon-edit">
-        <h4>Referência da mesma localização</h4>
+        <h4>Quantidade esperada na mesma localização</h4>
         <div className="sgq-recon-fields">
-         <label>Quantidade de referência<input type="number" min="0" step="0.001" inputMode="decimal"
+         <label>Quantidade esperada<input type="number" min="0" step="0.001" inputMode="decimal"
           value={draft.reference} onChange={e=>patch(item.id,{reference:e.target.value})}/></label>
          <label>Origem da referência<input maxLength={240} value={draft.source}
           placeholder="Ex.: relatório de posição do endereço"
