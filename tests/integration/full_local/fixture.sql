@@ -146,7 +146,7 @@ begin
       tbl
     );
   end loop;
-end $;
+end $$;
 
 -- The real API is now exercised for photo registration/replacement; these
 -- permissions are limited to this synthetic fixture and remain isolated.
