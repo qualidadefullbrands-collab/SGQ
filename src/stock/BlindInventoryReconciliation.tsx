@@ -3,7 +3,7 @@ import {ArrowRight,CheckCircle2,ClipboardCheck,FileSearch,RefreshCw,ShieldAlert}
 import {authClient} from '../lib/supabase'
 import {blindInventoryError as explain} from './blindInventoryErrors'
 import InventoryOmieComparison from './InventoryOmieComparison'
-import {invalidQuantityReferenceSource,localQuantityReference} from './StockQuantityPolicy'
+import {invalidQuantityReferenceSource,isApprovedLocalSource,localQuantityReference,LOCAL_QUANTITY_SOURCES,quantitySourceLabel} from './StockQuantityPolicy'
 import './BlindInventoryReconciliation.css'
 
 type Session={
@@ -67,7 +67,7 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
    if(expected===null)needsCount++
    const q=row?.quantidade_recontagem??item.quantidade_contada
    if(expected!==null&&Number(q)!==expected)different++
-   if(row&&reviewed(row.status))complete++
+   if(row&&reviewed(row.status)&&expected!==null)complete++
    else pending++
   }
   const invalidSources=revisions.filter(row=>invalidQuantityReferenceSource(row.referencia_fonte)).length
@@ -157,7 +157,7 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
  async function operate(action:string,itemId?:string,qty?:number|null,source?:string|null,note?:string|null){
   if(!selectedId||busy)return
   if(action==='referencia'&&invalidQuantityReferenceSource(source)){
-   setError('A referência de quantidade deve ser um registro físico da localização no SGQ, não um saldo do Omie.');return
+   setError('Selecione uma fonte física válida do SGQ para a mesma localização, sem quantidades do Omie.');return
   }
   if(action==='revisar'&&revisions.some(row=>row.item_id===itemId&&invalidQuantityReferenceSource(row.referencia_fonte))){
    setError('Atualize a origem da quantidade esperada para um controle físico do SGQ antes de aprovar.');return
@@ -276,8 +276,8 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
        </div>
        <div className="sgq-recon-notes">
         <div role="group" aria-label="Conferência cadastral do produto no Omie, sem quantidades"><InventoryOmieComparison sku={item.codigo_omie} descricao={item.descricao_omie}/></div>
-        {row?.referencia_fonte&&<p><b>Origem da referência física:</b> {row.referencia_fonte} · {row.referencia_evidencia}</p>}
-        {invalidQuantityReferenceSource(row?.referencia_fonte)&&<p className="sgq-single-alert" role="alert">Referência de quantidade inválida: escolha um controle físico do SGQ para esta localização.</p>}
+        {row?.referencia_fonte&&<p><b>Origem da referência física:</b> {quantitySourceLabel(row.referencia_fonte)} · {row.referencia_evidencia}</p>}
+        {invalidQuantityReferenceSource(row?.referencia_fonte)&&<p className="sgq-single-alert" role="alert">Origem de quantidade não reconhecida. Selecione uma fonte física SGQ válida para esta localização antes de aprovar.</p>}
         {row?.recontagem_justificativa&&<p><b>Recontagem:</b> {row.recontagem_justificativa}</p>}
         {row?.justificativa_analise&&<p><b>Decisão:</b> {row.justificativa_analise}</p>}
         {photos.some(p=>p.item_id===item.id)&&<button className="secondary small" type="button" onClick={()=>void openPhoto(item.id)}>
@@ -288,15 +288,20 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
         <div className="sgq-recon-fields">
          <label>Quantidade esperada<input type="number" min="0" step="0.001" inputMode="decimal"
           value={draft.reference} onChange={e=>patch(item.id,{reference:e.target.value})}/></label>
-         <label>Origem da referência física (SGQ)<input maxLength={240} value={draft.source}
-          placeholder="Ex.: contagem anterior deste endereço no SGQ"
-          onChange={e=>patch(item.id,{source:e.target.value})}/></label>
+         <label>Origem da referência física (SGQ)
+          <select value={draft.source} onChange={e=>patch(item.id,{source:e.target.value})}>
+           <option value="">Selecione o registro de referência</option>
+           {invalidQuantityReferenceSource(draft.source)&&
+            <option value={draft.source} disabled>Origem anterior — regularização necessária</option>}
+           {LOCAL_QUANTITY_SOURCES.map(source=><option key={source.value} value={source.value}>{source.label}</option>)}
+          </select>
+         </label>
          <label>Evidência / documento físico<input maxLength={500} value={draft.evidence}
           placeholder="Ex.: relatório, data e localização conferida"
           onChange={e=>patch(item.id,{evidence:e.target.value})}/></label>
         </div>
-        {invalidQuantityReferenceSource(draft.source)&&<p className="sgq-single-alert" role="alert">O saldo do Omie não é uma referência válida de quantidade. Informe um registro físico local do SGQ.</p>}
-        <button type="button" className="secondary small" disabled={busy||parseQty(draft.reference)===null||draft.source.trim().length<5||draft.evidence.trim().length<5||invalidQuantityReferenceSource(draft.source)}
+        {invalidQuantityReferenceSource(draft.source)&&<p className="sgq-single-alert" role="alert">Esta origem não é válida para uma quantidade de referência. Selecione um registro físico do mesmo endereço no SGQ; não use saldos do Omie.</p>}
+        <button type="button" className="secondary small" disabled={busy||parseQty(draft.reference)===null||!isApprovedLocalSource(draft.source)||draft.evidence.trim().length<5}
          onClick={()=>void operate('referencia',item.id,parseQty(draft.reference),draft.source.trim(),draft.evidence.trim())}>
          Salvar referência</button>
        </div>}
