@@ -10,7 +10,7 @@
 .sgq-operational-shell .sgq-it-search-control:focus-within{outline:3px solid #b7daf1;outline-offset:2px}
 .sgq-operational-shell .sgq-it-search-control input{border:0!important;box-shadow:none!important;outline:0!important;min-width:0;flex:1;padding:8px 0;font-size:14px;min-height:40px;background:transparent}
 .sgq-operational-shell .sgq-it-library-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.sgq-operational-shell .sgq-it-filter{display:inline-flex;gap:8px;align-items:center;justify-content:center;min-height:42px;border:1px solid #d1dfeb;background:#fff;color:#2d506e;border-radius:9px;padding:9px 12px;font:700 13px/1.2 inherit;cursor:pointer}
+.sgq-operational-shell .sgq-it-filter{display:inline-flex;gap:8px;align-items:center;justify-content:center;min-height:42px;border:1px solid #d1dfeb;background:#fff;color:#2d506e;border-radius:9px;padding:9px 12px;font-weight:700;font-size:13px;line-height:1.2;font-family:inherit;cursor:pointer}
 .sgq-operational-shell .sgq-it-filter span{display:inline-flex;align-items:center;justify-content:center;min-width:22px;padding:3px 6px;border-radius:999px;background:#edf3f9;color:#25496c;font-size:12px}
 .sgq-operational-shell .sgq-it-filter.is-active{background:#e7f4fc;border-color:#73a9ce;color:#0d527f;box-shadow:inset 0 0 0 1px #73a9ce}
 .sgq-operational-shell .sgq-it-filter.is-active span{background:#d4e9f7}
