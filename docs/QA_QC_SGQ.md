@@ -139,3 +139,14 @@ Em cada issue: versão/ambiente, passos, esperado/obtido, evidência sanitizada,
 - Resultado do CI deve ser considerado **PASS apenas após execução**, não pela presença do arquivo ou criação da PR.
 
 **Limitação:** Auth, gateway e Storage são serviços reais *locais*; a função de papel e o cadastro de inventário são simulações mínimas. Essa etapa verifica políticas originais e comunicação entre serviços, mas ainda **não** testa toda a API .NET, a autenticação/perfis reais do projeto hospedado, Edge Functions/Omie ou geração Word. O item #79 continua parcialmente aberto até a homologação ponta a ponta em ambiente isolado.
+
+
+## 11. Teste HTTP real API .NET → Word FastAPI com dados sintéticos
+
+A workflow `.github/workflows/sgq-api-word-http.yml` compila e inicia **o backend ASP.NET Core 10 real** e **o servidor FastAPI/Word real** em `127.0.0.1` no GitHub Actions. O projeto de produção não é acionado.
+
+- `tests/integration/api_word/mock_supabase.py`: somente **Auth/PostgREST/Storage simulados**, com FST fictício, subprocessos A/B, duas inspeções concluídas, duas fotos PNG sintéticas e autorização dos tokens `qc-ready`, `qc-pending`, `qc-missing-photo`. Qualquer escrita no stub retorna HTTP 405. Nenhuma conexão com projetos Supabase externos ou Omie.
+- `tests/integration/api_word/run.py`: configura URLs locais de API, Word e stub; inicia os serviços, espera readiness, executa a suite e encerra os processos, com logs para falhas.
+- `tests/integration/api_word/test_api_word.py`: valida `/health/word` (self-test Word com 8 modelos), falta de Bearer ou token inválido (401), parâmetros inválidos (400), consulta real de prontidão (A/B), bloqueio de Word sem foto (409), laudo consolidado (A+B), opção individual, DOCX/ZIP legível, conteúdo por SKU e evidências, falha de foto física (503) e verificação do stub somente leitura.
+
+**Escopo comprovável:** chamadas HTTP reais, geração `.docx` com `python-docx`, leitura/propagação de erros e identificação de subprocessos. **Limites:** não usa Supabase Auth real, políticas RLS reais, tabelas da produção, nem Storage real nesta etapa; a suite local Auth/Storage da PR #86 e a suite PostgreSQL da PR #85 cobrem aspectos complementares, mas **não constituem um único teste ponta a ponta com todos os serviços reais**. A issue #79 permanece aberta para essa integração completa.
