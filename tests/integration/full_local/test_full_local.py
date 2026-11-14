@@ -202,13 +202,102 @@ class FullLocalIntegration(unittest.TestCase):
         self.assertFalse(r.content.startswith(b"PK"))
         self.assertNotIn(REPORT_MIME,r.headers.get("content-type",""))
 
-    def test_10_sql_read_only_for_app_clients(self):
+    def test_09a_batch_registration_is_atomic_when_one_photo_is_missing(self):
+        good=f"{INSP_A}/gerais/{uuid.uuid4()}-valid.png"
+        missing=f"{INSP_A}/gerais/{uuid.uuid4()}-missing.png"
+        uploaded=self.http.post(
+            self.sb+"/storage/v1/object/inspecao-fotos/"+good,
+            headers={**self.headers(self.owner_token),"Content-Type":"image/png"},
+            content=self.image)
+        self.assertIn(uploaded.status_code,(200,201),fail_text(uploaded))
+        result=self.http.post(
+            self.api+f"/api/inspecoes/{INSP_A}/fotos/registrar",
+            headers=self.headers(self.owner_token),
+            json={"fotos":[{"storagePath":good,"legenda":"Upload real"},
+                           {"storagePath":missing,"legenda":"Ausente"}]})
+        self.assertEqual(result.status_code,409,fail_text(result))
+        # Even the existing object must not be registered if another is
+        # missing: the UI can retry safely after the upload completes.
+        check=self.http.get(self.sb+"/rest/v1/inspecao_fotos",
+            headers=self.headers(self.owner_token),
+            params={"select":"id,storage_path","storage_path":f"eq.{good}"})
+        self.assertEqual(check.status_code,200,fail_text(check))
+        self.assertEqual(check.json(),[])
+
+    def test_09b_real_photo_registration_is_idempotent(self):
+        path=f"{INSP_A}/gerais/{uuid.uuid4()}-real.png"
+        uploaded=self.http.post(
+            self.sb+"/storage/v1/object/inspecao-fotos/"+path,
+            headers={**self.headers(self.owner_token),"Content-Type":"image/png"},
+            content=self.image)
+        self.assertIn(uploaded.status_code,(200,201),fail_text(uploaded))
+        body={"fotos":[{"storagePath":path,"legenda":"Evidência válida"}]}
+        for _ in range(2):
+            res=self.http.post(
+                self.api+f"/api/inspecoes/{INSP_A}/fotos/registrar",
+                headers=self.headers(self.owner_token),json=body)
+            self.assertEqual(res.status_code,200,fail_text(res))
+            self.assertEqual(res.json()["data"]["salvas"],1)
+        check=self.http.get(self.sb+"/rest/v1/inspecao_fotos",
+            headers=self.headers(self.owner_token),
+            params={"select":"id","storage_path":f"eq.{path}"})
+        self.assertEqual(check.status_code,200,fail_text(check))
+        self.assertEqual(len(check.json()),1,"retries must not duplicate photo rows")
+
+    def test_09c_missing_replacement_never_archives_original(self):
+        original="33333333-4444-4555-8666-777777777777"
+        missing=f"{INSP_A}/gerais/{uuid.uuid4()}-not-uploaded.png"
+        res=self.http.post(
+            self.api+f"/api/inspecoes/{INSP_A}/fotos/{original}/substituir",
+            headers=self.headers(self.owner_token),
+            json={"storagePath":missing,"legenda":"Não existente"})
+        self.assertEqual(res.status_code,409,fail_text(res))
+        old=self.http.get(self.sb+"/rest/v1/inspecao_fotos",
+            headers=self.headers(self.owner_token),
+            params={"select":"id,excluido_em","id":f"eq.{original}"})
+        self.assertEqual(old.status_code,200,fail_text(old))
+        self.assertEqual(old.json()[0]["excluido_em"],None,
+            "Missing file must never archive the old evidence")
+
+    def test_09d_real_replacement_archives_original_and_audits(self):
+        original="33333333-4444-4555-8666-777777777777"
+        path=f"{INSP_A}/gerais/{uuid.uuid4()}-replacement.png"
+        upload=self.http.post(
+            self.sb+"/storage/v1/object/inspecao-fotos/"+path,
+            headers={**self.headers(self.owner_token),"Content-Type":"image/png"},
+            content=self.image)
+        self.assertIn(upload.status_code,(200,201),fail_text(upload))
+        res=self.http.post(
+            self.api+f"/api/inspecoes/{INSP_A}/fotos/{original}/substituir",
+            headers=self.headers(self.owner_token),
+            json={"storagePath":path,"legenda":"Imagem substituta"})
+        self.assertEqual(res.status_code,200,fail_text(res))
+        self.assertTrue(res.json()["data"]["ok"])
+        check=self.http.get(self.sb+"/rest/v1/inspecao_fotos",
+            headers=self.headers(self.owner_token),
+            params={"select":"id,excluido_em,substituida_por,storage_path",
+                    "inspecao_id":f"eq.{INSP_A}"})
+        self.assertEqual(check.status_code,200,fail_text(check))
+        rows=check.json()
+        old=next(x for x in rows if x["id"]==original)
+        new=next(x for x in rows if x["storage_path"]==path)
+        self.assertIsNotNone(old["excluido_em"])
+        self.assertEqual(old["substituida_por"],new["id"])
+        self.assertIsNone(new["excluido_em"])
+        audit=self.http.get(self.sb+"/rest/v1/audit_log",
+            headers=self.headers(self.owner_token),
+            params={"select":"acao","entidade_id":f"eq.{original}"})
+        self.assertEqual(audit.status_code,200,fail_text(audit))
+        self.assertTrue(any(x["acao"]=="substituicao_foto" for x in audit.json()),
+            "photo replacement must persist its audit event")
+
+    def test_10_another_user_cannot_mutate_evidence(self):
         r=self.http.patch(self.sb+"/rest/v1/inspecao_fotos",
               params={"inspecao_id":f"eq.{INSP_A}"},
-              headers={**self.headers(self.owner_token),
+              headers={**self.headers(self.other_token),
                        "Content-Type":"application/json","Prefer":"return=representation"},
               json={"storage_path":"tampered.png"})
-        self.assertIn(r.status_code,(401,403),"RLS+grants must forbid app-side update")
+        self.assertIn(r.status_code,(401,403),"RLS must forbid edits by another user")
         check=self.http.get(self.sb+"/rest/v1/inspecao_fotos",
                         params={"inspecao_id":f"eq.{INSP_A}","select":"storage_path"},
                         headers=self.headers(self.owner_token))
