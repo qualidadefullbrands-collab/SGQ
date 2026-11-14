@@ -140,10 +140,16 @@ test('Storage real: chamada anônima não pode fazer upload', async () => {
   assertStorageError(r, 'anonymous upload')
 })
 
-test('Storage real: bucket privado não permite leitura anônima', async () => {
+test('Storage real: bucket privado oculta o objeto ao usuário anônimo', async () => {
+  // Storage pode retornar 404 em vez de 401/403 para não revelar a
+  // existência de arquivos privados. O objeto foi lido pelo gestor acima.
   const r = await unauth.storage.from('sgq-inventario-cego')
     .download(name('gestor'))
-  assertStorageError(r, 'anonymous read')
+  assert(r.error, 'anonymous read unexpectedly succeeded')
+  const status = Number(r.error.statusCode ?? r.error.status)
+  assert([400,401,403,404].includes(status),
+    'anonymous read must be denied, including privacy-preserving 404: ' + status)
+  assert.equal(r.data, null)
 })
 
 test('Storage real: consulta pode ler evidência, conforme política do SGQ', async () => {
