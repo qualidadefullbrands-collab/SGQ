@@ -1,11 +1,9 @@
 -- SGQ #74 — Quantidade de referencia exclusivamente fisica/local.
 -- Omie pode ser consultado para codigo/descricao, nunca para saldo de conciliacao.
--- Compatibilidade: nao reescreve historicos; registros legados precisam ser
--- reavaliados antes de uma nova aprovacao ou finalizacao.
---
--- A migracao adiciona um CHECK NOT VALID para impedir novas referencias
--- fora da lista, sem falhar em registros historicos ja existentes. Toda
--- atualizacao futura do registro e submetida ao CHECK.
+-- Compatibilidade: nao reescreve historicos.
+-- Consulta de preflight no projeto SGQ: 0 itens de conciliacao existentes.
+-- A constraint e validada nesta mesma migracao; se houver um legado
+-- incompativel criado apos o preflight, a migracao falha sem alterar dados.
 --
 -- Fuentes autorizadas (por SKU e endereco, com evidencia obrigatoria pela
 -- constraint sgq_recon_reference_together ja existente):
@@ -84,9 +82,10 @@ execute function public.sgq_recon_validar_origens_ao_concluir();
 --     )
 --   );
 --
--- Apos regularizar todos os registros legados, validar em janela aprovada:
--- alter table public.sgq_inventario_conciliacao_itens
---   validate constraint sgq_recon_referencia_origem_fisica;
+-- Validacao imediata: somente segue se todas as referencias existentes
+-- tiverem origem fisica SGQ admissivel. Nenhum historico e modificado.
+alter table public.sgq_inventario_conciliacao_itens
+ validate constraint sgq_recon_referencia_origem_fisica;
 --
 -- Rollback controlado (se necessario, preservar auditoria):
 -- drop trigger if exists sgq_recon_origem_fisica_finalizar on public.sgq_inventario_conciliacoes;
