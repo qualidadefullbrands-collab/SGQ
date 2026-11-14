@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {performance} from 'node:perf_hooks'
+import {setTimeout as delay} from 'node:timers/promises'
 
 // QC remoto e SOMENTE LEITURA: URLs públicos, GET, nenhuma credencial.
 function endpoint(name) {
@@ -64,12 +65,33 @@ test('QC/PROD: JavaScript inicial do frontend está publicado', async () => {
     'bundle respondeu com HTML (possível fallback ou erro de deploy)')
 })
 
-test('QC/PROD: API health responde com status ok', async () => {
-  const r = await probe(api, '/health', 'API /health')
-  requireStatus(r, 200, 'API /health')
-  let data
-  try { data = JSON.parse(r.body) } catch { assert.fail('API /health retornou JSON inválido') }
-  assert.equal(data?.status, 'ok', 'API /health não informou status ok')
+test('QC/PROD: API atinge prontidão após eventual inicialização a frio', async () => {
+  const started = performance.now()
+  let attempts = 0
+  let transient503 = 0
+
+  // Polling por condição observável de prontidão. Registra cada 503, limita a
+  // janela de inicialização e NUNCA transforma falha persistente em sucesso.
+  while (performance.now() - started < 90000) {
+    attempts++
+    const r = await probe(api, '/health', 'API /health tentativa ' + attempts)
+    if (r.response.status === 200) {
+      let data
+      try { data = JSON.parse(r.body) } catch { assert.fail('API /health retornou JSON inválido') }
+      assert.equal(data?.status, 'ok', 'API /health não informou status ok')
+      const timeMs = Math.round(performance.now() - started)
+      if (transient503 > 0) {
+        console.warn('QC/DEGRADADO: API indisponível com HTTP 503 em', transient503,
+          'tentativa(s); recuperação após', timeMs + 'ms')
+      }
+      console.log('QC API pronta em', timeMs + 'ms após', attempts, 'tentativa(s)')
+      return
+    }
+    requireStatus(r, 503, 'API /health (status não recuperável)')
+    transient503++
+    await delay(3000)
+  }
+  assert.fail('API não atingiu prontidão em 90 segundos; HTTP 503 persistente')
 })
 
 test('QC/SEGURANÇA: rota protegida rejeita acesso anônimo', async () => {
