@@ -1,0 +1,67 @@
+name: SGQ · QC PostgreSQL Isolado
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reconciliacao-postgres:
+    name: PostgreSQL real · migrações SGQ / conciliação física
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    # Database is a disposable GitHub runner service; no Supabase
+    # connection, no secrets and no writes to production whatsoever.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: sgq-local-qc-only
+          POSTGRES_DB: sgq_qc_isolated
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sgq_qc_isolated"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 15
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: sgq-local-qc-only
+      PGDATABASE: sgq_qc_isolated
+      PGOPTIONS: -c client_min_messages=notice
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar cliente PostgreSQL
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+
+      - name: Executar migrações reais e casos negativos/positivos
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "SGQ QC: PostgreSQL efêmero, sem integração externa"
+            psql -X -v ON_ERROR_STOP=1 -f tests/integration/postgres/bootstrap.sql
+            psql -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261113193000_sgq_conciliacao_pos_inventario_fst.sql
+            psql -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261114003316_sgq_conciliacao_referencia_local.sql
+            psql -X -v ON_ERROR_STOP=1 -f tests/integration/postgres/reconciliation.sql
+          } 2>&1 | tee sgq-db-integrity.log
+
+      - name: Arquivar evidência SQL
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgq-qc-postgres-${{ github.run_id }}
+          path: sgq-db-integrity.log
+          if-no-files-found: warn
+          retention-days: 30

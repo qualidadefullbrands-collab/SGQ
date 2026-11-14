@@ -113,3 +113,17 @@ Em cada issue: versão/ambiente, passos, esperado/obtido, evidência sanitizada,
 - Testes de UI isolada: implementados, sujeitos a evidências da execução CI da PR específica; não contam como testes reais de autenticação Supabase, integrações Omie, persistência de fotos, banco/RPC, Word ou tratamento de falhas de dados.
 - Para concluir a issue #79 integralmente ainda é necessário preparar um projeto SGQ de homologação com dados e papéis sintéticos, migrar schema, habilitar API/Storage/Edge de sandbox, e executar fluxos autenticados de gravação com rollback/limpeza.
 - Falhas de axe-core sérias/críticas devem gerar correção de acessibilidade, sem permitir filtros silenciosos ou saltar testes.
+
+
+## 9. Integração PostgreSQL efêmera — conciliação física
+
+**Finalidade:** confirmar que o PostgreSQL executa as mesmas regras de fonte física local e os bloqueios reais da RPC, além dos testes Node que apenas leem o SQL.
+
+- Workflow: `.github/workflows/sgq-db-integrity.yml`, em PR e manual, runner GitHub Actions com PostgreSQL 16 descartável.
+- Bootstrap: `tests/integration/postgres/bootstrap.sql` com tabelas/usuários **exclusivamente sintéticos**, `auth.uid()` e resolvedor de perfil simulado, sem importar dados ou credenciais.
+- **Migrações reais** aplicadas no banco efêmero, sem edição ou cópia: `20261113193000_sgq_conciliacao_pos_inventario_fst.sql` e `20261114003316_sgq_conciliacao_referencia_local.sql`.
+- Assertivas SQL: constraint ativa/validada, trigger habilitado, ausência de permissionamento de escrita no navegador, rejeição de referência quantitativa Omie, aceitação das três fontes físicas, recusa de fechamento pendente, trilha de eventos, recontagem, aprovação justificada, diferenciação de papéis e comportamento de RLS.
+- Teste negativo de legado: remover temporariamente a constraint **no banco efêmero e em uma transação que é revertida**; verificar que o trigger impede conclusão com origem Omie mesmo assim.
+- Nenhum projeto Supabase externo é acessado; não cria custos de projeto ou registros operacionais. Falha SQL cancela o workflow e preserva log por 30 dias.
+
+**Limitações de evidência:** é PostgreSQL real com DDL de conciliação real, mas o ambiente não reproduz toda a estrutura Supabase: `auth.uid()`, `private.current_sgq_role()`, funções gerenciadas, políticas de Storage e tabelas pré-existentes estão simuladas/minimizadas. Isso comprova a execução dos contratos SQL de conciliação em isolamento, **não** a homologação completa de Supabase Auth/RLS/Storage/Edge/Omie. A issue #79 permanece aberta até o ciclo integrado.
