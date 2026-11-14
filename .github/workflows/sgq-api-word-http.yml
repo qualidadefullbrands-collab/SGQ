@@ -1,0 +1,51 @@
+name: SGQ · QC HTTP .NET e Laudos Word
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  api-word-http:
+    name: API ASP.NET 10 → Word FastAPI · HTTP sintético
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar gerador Word e dependências do servidor
+        run: pip install --disable-pip-version-check -r server/requirements.txt
+
+      - name: Compilar API .NET para execução real
+        run: dotnet build backend/Sgq.Api/Sgq.Api.csproj --configuration Release
+
+      - name: Exercitar HTTP da API, Word real e prontidão documental
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -u tests/integration/api_word/run.py 2>&1 | tee sgq-api-word-qc.log
+
+      - name: Guardar somente logs de testes sem tokens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgq-api-word-qc-${{ github.run_id }}
+          path: |
+            sgq-api-word-qc.log
+            sgq-qc-http-logs/
+          if-no-files-found: ignore
+          retention-days: 14
