@@ -55,7 +55,7 @@ export default function ReportReadinessPanel({
       </div>
       {status?.error && <p className="sgq-report-error" role="alert">{status.error}</p>}
       {Boolean(status?.pending.length) && (
-        <div className="sgq-report-pendencies">
+        <div id="sgq-word-pendencias" className="sgq-report-pendencies" aria-label="Pendências documentais">
           <strong>{status!.pending.length} {status!.pending.length === 1 ? 'item para verificar' : 'itens para verificar'}</strong>
           <ul>{status!.pending.map((item, i) => <li key={i}>{item}</li>)}</ul>
         </div>
