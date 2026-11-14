@@ -1,0 +1,79 @@
+name: SGQ · QC Paridade RLS/Storage por Perfil
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  role-policy-parity:
+    name: Roles reais · RLS/PostgREST/Storage · SQL de políticas do SGQ
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SUPABASE_TELEMETRY_DISABLED: '1'
+      DO_NOT_TRACK: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.84.2
+
+      - name: Preparar dependências para fixture local
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --package-lock=false
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+
+      - name: Criar stack Supabase local descartável
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sgq-role-parity"
+          cd "$RUNNER_TEMP/sgq-role-parity"
+          supabase init --yes
+          supabase start -x studio,imgproxy,inbucket,analytics,vector,realtime,edge_runtime
+          supabase status -o env > "$RUNNER_TEMP/sgq-role-parity.env"
+
+      - name: Testar Auth/JWT, perfis, PostgREST e Storage com regras hospedadas
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source "$RUNNER_TEMP/sgq-role-parity.env"
+          set +a
+          : "${API_URL:?Missing local API}"
+          : "${ANON_KEY:?Missing local anon}"
+          : "${SERVICE_ROLE_KEY:?Missing local admin key}"
+          : "${DB_URL:?Missing local DB}"
+          export SGQ_QC_API_URL="$API_URL"
+          export SGQ_QC_ANON_KEY="$ANON_KEY"
+          export SGQ_QC_SERVICE_KEY="$SERVICE_ROLE_KEY"
+          export SGQ_QC_DB_URL="$DB_URL"
+          node --test tests/integration/role_parity/roles.test.mjs 2>&1 | tee sgq-role-parity-qc.log
+
+      - name: Arquivar resultado sem tokens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgq-role-parity-qc-${{ github.run_id }}
+          path: sgq-role-parity-qc.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Descartar banco, contas e objetos locais
+        if: always()
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/sgq-role-parity" 2>/dev/null || exit 0
+          supabase stop --no-backup || true

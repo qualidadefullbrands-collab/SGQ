@@ -163,3 +163,17 @@ A workflow `.github/workflows/sgq-api-word-http.yml` compila e inicia **o backen
 **Diferença importante:** os serviços HTTP são reais, mas **o esquema SQL sintético e as políticas de RLS para documentos/fotografias não são cópias nem certificação da configuração de produção**. O teste não cobre Edge/Omie, nem o ciclo completo de cadastro/inspeção via interface, nem concorrência/offline. A issue #79 segue aberta até validar o esquema e perfis reais em ambiente de homologação completo. Resultado deve ser publicado como **PASS somente após GitHub Actions verde**.
 
 **Segurança:** URLs de Supabase e PostgreSQL validadas para `localhost/127.0.0.1`, nenhuma chave hosted/segredo de produção utilizado, `supabase init` fora do checkout sem link com projeto remoto; stack interrompida e descartada ao final. Evidências limitadas a saída textual de testes sem JWTs.
+
+
+## 13. Paridade das políticas SGQ por perfil (issue #89)
+
+Em 14/11/2026, foram consultados **somente metadados** do PostgreSQL hospedado, sem acesso a dados de pessoas ou operações: `pg_policies`, `pg_get_functiondef(private.current_sgq_role)`, grants e metadados do bucket `inspecao-fotos`. O objetivo é distinguir uma regra de teste por proprietário da **autorização efetivamente baseada em perfil de equipe** no SGQ.
+
+- `tests/integration/role_parity/hosted_policy_snapshot.sql`: reproduz as **expressões de autorização observadas nessa data** para `profiles`, `processos`, `inspecoes`, `inspecao_fotos` e `storage.objects` no bucket `inspecao-fotos`, inclusive o corpo de `private.current_sgq_role()`. As tabelas e registros são **mínimos, sintéticos** e não reproduzem as demais regras de banco e triggers.
+- `.github/workflows/sgq-role-parity.yml`: Supabase CLI fixo, GoTrue Auth, PostgREST, PostgreSQL e Storage **reais locais**, usuários fictícios de perfis `administrador`, `gestor`, `inspetor`, `consulta`, `inativo` e `semPerfil`; além de anônimo.
+- `tests/integration/role_parity/roles.test.mjs`: matriz de **16 verificações** de JWT, leitura de processos, seleção de perfis, edição administrativa de perfil, inclusão/alteração/exclusão de processos, upload/download e exclusão de fotos, bloqueios por perfil, `upsert` sem política UPDATE e leitura entre colegas.
+- O bucket hospedado é privado, mas não possui `file_size_limit` ou `allowed_mime_types` *específicos do bucket*. Isso não significa automaticamente ausência de limites globais, nem autoriza mudanças sem validação funcional.
+
+**Observações de segurança e de negócio a validar, não mudanças automáticas:** as políticas hospedadas do bucket de inspeção permitem **compartilhamento de fotos entre usuários autorizados pelo perfil** e **caminhos de objeto sem vínculo explícito no RLS com o UUID do usuário ou da inspeção**. Isso pode corresponder ao fluxo compartilhado do SGQ. O teste marca esse comportamento como paridade, **não como aprovação de risco**. A decisão sobre restrição por FST, cliente, processo ou inspeção requer requisito validado, análise da API de uploads e impacto em laudos/retificações.
+
+**Limites:** o snapshot é estático (14/11/2026); uma alteração futura de policy no projeto hospedado não altera este arquivo automaticamente. Valida a semântica de políticas observadas sobre tabelas mínimas e serviços locais, não todas as permissões/grants, funções, triggers, Edge, integrações Omie, UX ou a infraestrutura hospedada. O projeto de produção não recebe SQL de teste. Continuar a issue #89 para revisão de risco/aceite e a #79 para homologação final com esquema equivalente ao real.
