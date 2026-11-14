@@ -41,7 +41,8 @@ create table public.inspecoes (
   tamanho_amostra numeric, total_inspecionado numeric, total_nao_conforme numeric,
   limite_rejeicao numeric, dimensionais_finalizados boolean,
   testes_finalizados boolean, codigo_amostragem text, caixas_recebidas numeric,
-  caixas_avaliar numeric, criado_em timestamptz default now()
+  caixas_avaliar numeric, criado_em timestamptz default now(),
+  documento_gerado_em timestamptz
 );
 create table public.produtos (
   id uuid primary key, owner_id uuid not null references auth.users(id),
@@ -61,11 +62,26 @@ create table public.grupo_inspecao_itens (
   unidades_por_conjunto numeric
 );
 create table public.inspecao_fotos (
-  id uuid primary key, owner_id uuid not null references auth.users(id),
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null default auth.uid() references auth.users(id),
   inspecao_id uuid not null references public.inspecoes(id),
   storage_path text not null, legenda text,
-  excluido_em timestamptz, criado_em timestamptz default now()
+  nc_id uuid, excluido_por uuid, substituida_por uuid,
+  excluido_em timestamptz, criado_em timestamptz default now(),
+  unique(inspecao_id,storage_path)
 );
+create table public.audit_log (
+  id uuid primary key default gen_random_uuid(),
+  usuario_id uuid not null references auth.users(id),
+  entidade text not null, entidade_id uuid not null,
+  acao text not null, dados jsonb not null default '{}'::jsonb
+);
+alter table public.audit_log enable row level security;
+grant select,insert on public.audit_log to authenticated;
+create policy qa_audit_read on public.audit_log for select to authenticated
+  using (usuario_id=(select auth.uid()));
+create policy qa_audit_insert on public.audit_log for insert to authenticated
+  with check (usuario_id=(select auth.uid()));
 create table public.it_checklist (
   id uuid primary key, owner_id uuid not null references auth.users(id),
   it_versao_id uuid references public.it_versoes(id),
@@ -131,6 +147,19 @@ begin
     );
   end loop;
 end $$;
+
+-- The real API is now exercised for photo registration/replacement; these
+-- permissions are limited to this synthetic fixture and remain isolated.
+grant insert,update on public.inspecao_fotos to authenticated;
+create policy qa_photo_insert on public.inspecao_fotos for insert to authenticated
+  with check (owner_id=(select auth.uid()));
+create policy qa_photo_update on public.inspecao_fotos for update to authenticated
+  using (owner_id=(select auth.uid()))
+  with check (owner_id=(select auth.uid()));
+grant update on public.inspecoes to authenticated;
+create policy qa_inspection_update on public.inspecoes for update to authenticated
+  using (owner_id=(select auth.uid()))
+  with check (owner_id=(select auth.uid()));
 
 insert into public.profiles(id,owner_id,nome,perfil,ativo) values
  ('__OWNER_UUID__','__OWNER_UUID__','Inspetor QA Sintético','gestor',true);
@@ -203,22 +232,32 @@ create policy qa_inspection_photos_insert on storage.objects
   for insert to authenticated
   with check (
     bucket_id='inspecao-fotos'
-    and split_part(name,'/',1)=(select auth.uid())::text
-    and exists (
-      select 1 from public.inspecoes i
-      where i.id::text=split_part(name,'/',2)
-        and i.owner_id=(select auth.uid())
+    and (
+      (split_part(name,'/',1)=(select auth.uid())::text
+       and exists (select 1 from public.inspecoes i
+         where i.id::text=split_part(name,'/',2)
+           and i.owner_id=(select auth.uid())))
+      or
+      (split_part(name,'/',2)='gerais'
+       and exists (select 1 from public.inspecoes i
+         where i.id::text=split_part(name,'/',1)
+           and i.owner_id=(select auth.uid())))
     )
   );
 create policy qa_inspection_photos_select on storage.objects
   for select to authenticated
   using (
     bucket_id='inspecao-fotos'
-    and split_part(name,'/',1)=(select auth.uid())::text
-    and exists (
-      select 1 from public.inspecoes i
-      where i.id::text=split_part(name,'/',2)
-        and i.owner_id=(select auth.uid())
+    and (
+      (split_part(name,'/',1)=(select auth.uid())::text
+       and exists (select 1 from public.inspecoes i
+         where i.id::text=split_part(name,'/',2)
+           and i.owner_id=(select auth.uid())))
+      or
+      (split_part(name,'/',2)='gerais'
+       and exists (select 1 from public.inspecoes i
+         where i.id::text=split_part(name,'/',1)
+           and i.owner_id=(select auth.uid())))
     )
   );
 

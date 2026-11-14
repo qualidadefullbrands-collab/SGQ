@@ -57,6 +57,22 @@ void ApplyAuth(HttpRequestMessage req, string token)
 string EncodedPath(string path) =>
     string.Join("/", path.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.EscapeDataString));
 
+// Validate that a user-accessible private Storage object really exists BEFORE
+// linking its path to a Word inspection. A prefix check alone can create
+// dangling evidence rows and later 503s during report generation.
+// HEAD is intentionally used to avoid downloading photos on the API server.
+// Storage itself enforces SELECT RLS using the end user's Bearer token.
+async Task<(bool Exists,int Status)> InspectionPhotoExists(
+    HttpClient client,string token,string path)
+{
+    using var msg=new HttpRequestMessage(HttpMethod.Head,
+        $"{supabaseUrl}/storage/v1/object/authenticated/inspecao-fotos/{EncodedPath(path)}");
+    ApplyAuth(msg,token);
+    using var response=await client.SendAsync(msg,HttpCompletionOption.ResponseHeadersRead);
+    var valid=response.IsSuccessStatusCode && response.Content.Headers.ContentLength is not 0;
+    return (valid,(int)response.StatusCode);
+}
+
 object Error(string message, string? detail = null) => new
 {
     data = (object?)null,
@@ -3041,6 +3057,33 @@ app.MapPost("/api/inspecoes/{id}/fotos/registrar", async (string id,RegisterInsp
                 return Results.Json(Error("A foto não pertence a esta inspeção."),statusCode:400);
             if(paths.Add(photo.StoragePath))valid.Add(photo);
         }
+        // Verify each object with the authenticated Storage API before inserting
+        // any evidence row. A broken upload must never appear as a saved photo.
+        // Limit parallel HEAD calls so a large mobile batch does not overwhelm
+        // the Storage service. Retry only a 404 once for immediate post-upload lag.
+        if(valid.Count>0)
+        {
+            using var gate=new SemaphoreSlim(4);
+            var checks=await Task.WhenAll(valid.Select(async photo=>{
+                await gate.WaitAsync();
+                try{
+                    var result=await InspectionPhotoExists(client,token,photo.StoragePath);
+                    if(!result.Exists && result.Status==404)
+                    {
+                        await Task.Delay(150);
+                        result=await InspectionPhotoExists(client,token,photo.StoragePath);
+                    }
+                    return result;
+                }
+                finally{gate.Release();}
+            }));
+            if(checks.Any(x=>x.Status==401 || x.Status==403))
+                return Results.Json(Error("Sem permissão para acessar uma das fotografias."),statusCode:403);
+            if(checks.Any(x=>x.Status==429 || x.Status>=500))
+                return Results.Json(Error("O armazenamento de fotos está temporariamente indisponível. Reenvie o registro sem repetir a contagem."),statusCode:503);
+            if(checks.Any(x=>!x.Exists))
+                return Results.Json(Error("Uma ou mais fotos ainda não estão disponíveis no armazenamento. Verifique o envio e tente registrar novamente."),statusCode:409);
+        }
         // DB unique index (inspecao_id,storage_path) + ignore-duplicates makes batch
         // upload idempotent, including client retry after a lost network response.
         if(valid.Count>0)
@@ -3202,6 +3245,15 @@ app.MapPost("/api/inspecoes/{id}/fotos/{photoId}/substituir", async(
         var (original,exists)=FirstRow(before);
         if(!exists)return Results.Json(Error("Foto original não encontrada nesta inspeção."),statusCode:404);
         var ncId=original!.Value.TryGetProperty("nc_id",out var ncProp)&&ncProp.ValueKind==JsonValueKind.String?ncProp.GetString():null;
+        // Never archive valid original evidence in favor of an upload which
+        // has no actual object in private Storage.
+        var replacementCheck=await InspectionPhotoExists(client,token,path);
+        if(replacementCheck.Status==401 || replacementCheck.Status==403)
+            return Results.Json(Error("Sem permissão para acessar a foto de substituição."),statusCode:403);
+        if(replacementCheck.Status==429 || replacementCheck.Status>=500)
+            return Results.Json(Error("Armazenamento temporariamente indisponível. A foto original foi preservada."),statusCode:503);
+        if(!replacementCheck.Exists)
+            return Results.Json(Error("Foto de substituição não encontrada no armazenamento. A foto original permanece ativa."),statusCode:409);
         // Insert replacement BEFORE archiving the old photo. If the insertion
         // fails, the original evidence remains available and unchanged.
         var inserted=await RestAsync(client,token,HttpMethod.Post,"inspecao_fotos","select=id",
