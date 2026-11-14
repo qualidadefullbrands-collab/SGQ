@@ -300,7 +300,7 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
          onClick={()=>void operate('referencia',item.id,parseQty(draft.reference),draft.source.trim(),draft.evidence.trim())}>
          Salvar referência</button>
        </div>}
-       {canEdit&&localQuantityReference(row)!==null&&
+       {canEdit&&row&&localQuantityReference(row)!==null&&
         <div className="sgq-recon-edit">
          {canApprove&&!reviewed(row.status)&&row.status!=='recontagem_solicitada'&&<>
           <label>Justificativa da análise ou pedido de recontagem
