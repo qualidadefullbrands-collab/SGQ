@@ -150,3 +150,16 @@ A workflow `.github/workflows/sgq-api-word-http.yml` compila e inicia **o backen
 - `tests/integration/api_word/test_api_word.py`: valida `/health/word` (self-test Word com 8 modelos), falta de Bearer ou token inválido (401), parâmetros inválidos (400), consulta real de prontidão (A/B), bloqueio de Word sem foto (409), laudo consolidado (A+B), opção individual, DOCX/ZIP legível, conteúdo por SKU e evidências, falha de foto física (503) e verificação do stub somente leitura.
 
 **Escopo comprovável:** chamadas HTTP reais, geração `.docx` com `python-docx`, leitura/propagação de erros e identificação de subprocessos. **Limites:** não usa Supabase Auth real, políticas RLS reais, tabelas da produção, nem Storage real nesta etapa; a suite local Auth/Storage da PR #86 e a suite PostgreSQL da PR #85 cobrem aspectos complementares, mas **não constituem um único teste ponta a ponta com todos os serviços reais**. A issue #79 permanece aberta para essa integração completa.
+
+
+## 12. E2E unificado real em Supabase local + ASP.NET Core + Word
+
+**Workflow:** `.github/workflows/sgq-full-local-e2e.yml`. O GitHub Actions inicia uma única stack Supabase local (Auth/GoTrue, PostgreSQL, PostgREST e Storage), compila e executa a API ASP.NET Core 10 do repositório e inicia o serviço Word FastAPI real. Não utiliza mocks HTTP de Auth, PostgREST, Storage ou Word nesse ensaio.
+
+**Preparação:** `tests/integration/full_local/fixture.sql` cria apenas um **esquema mínimo sintético**, com chaves estrangeiras reais e políticas RLS de leitura restrita ao `auth.uid()` para tabelas usadas na emissão dos laudos. Dois usuários são registrados e autenticados pelo GoTrue local com JWTs reais. Fotografias PNG sintéticas são enviadas via Storage HTTP real a bucket privado criado para o teste. A suite `tests/integration/full_local/test_full_local.py` exerce o fluxo através de endpoints de rede locais, sem chamar Omie/Render/Supabase hosted.
+
+**Comportamentos verificados:** autorização e isolamento de usuários via PostgREST e Storage, `/api/processos/{id}/laudo-status`, laudo FST A+B com duas fotografias reais, laudo individual por SKU, 8 modelos Word embarcados, JWT inválido, negativa de escrita client-side, desaparecimento do arquivo físico (503 sem Word inválido) e remoção do registro fotográfico (409 até regularizar). Todas as modificações de teste são em tabelas locais descartáveis.
+
+**Diferença importante:** os serviços HTTP são reais, mas **o esquema SQL sintético e as políticas de RLS para documentos/fotografias não são cópias nem certificação da configuração de produção**. O teste não cobre Edge/Omie, nem o ciclo completo de cadastro/inspeção via interface, nem concorrência/offline. A issue #79 segue aberta até validar o esquema e perfis reais em ambiente de homologação completo. Resultado deve ser publicado como **PASS somente após GitHub Actions verde**.
+
+**Segurança:** URLs de Supabase e PostgreSQL validadas para `localhost/127.0.0.1`, nenhuma chave hosted/segredo de produção utilizado, `supabase init` fora do checkout sem link com projeto remoto; stack interrompida e descartada ao final. Evidências limitadas a saída textual de testes sem JWTs.

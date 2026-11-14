@@ -1,0 +1,84 @@
+name: SGQ · QC E2E Local Completo (Supabase + .NET + Word)
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sgq-full-local:
+    name: JWT real → PostgREST/RLS + Storage → API .NET → Word
+    runs-on: ubuntu-latest
+    timeout-minutes: 42
+    env:
+      SUPABASE_TELEMETRY_DISABLED: '1'
+      DO_NOT_TRACK: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.84.2
+
+      - name: Preparar serviços e clientes
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install --disable-pip-version-check -r server/requirements.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          dotnet build backend/Sgq.Api/Sgq.Api.csproj --configuration Release
+
+      - name: Iniciar Supabase efêmero com GoTrue, PostgREST, Storage e PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sgq-full-local-qc"
+          cd "$RUNNER_TEMP/sgq-full-local-qc"
+          supabase init --yes
+          # No 'supabase link', no Supabase cloud project, no production tokens.
+          supabase start -x studio,imgproxy,inbucket,analytics,vector,realtime,edge_runtime
+          supabase status -o env > "$RUNNER_TEMP/sgq-full-local.env"
+
+      - name: E2E real (Auth + RLS + Storage + .NET + Word)
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source "$RUNNER_TEMP/sgq-full-local.env"
+          set +a
+          : "${API_URL:?Local Supabase API not started}"
+          : "${ANON_KEY:?Local anon key missing}"
+          : "${SERVICE_ROLE_KEY:?Local test service key missing}"
+          : "${DB_URL:?Local Postgres URL missing}"
+          export SGQ_QC_API_URL="$API_URL"
+          export SGQ_QC_ANON_KEY="$ANON_KEY"
+          export SGQ_QC_SERVICE_KEY="$SERVICE_ROLE_KEY"
+          export SGQ_QC_DB_URL="$DB_URL"
+          python -u tests/integration/full_local/run.py 2>&1 | tee sgq-full-local-qc.log
+
+      - name: Arquivar relatório textual sem credenciais
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgq-full-local-qc-${{ github.run_id }}
+          path: sgq-full-local-qc.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Encerrar e destruir Supabase local
+        if: always()
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/sgq-full-local-qc" 2>/dev/null || exit 0
+          supabase stop --no-backup || true
