@@ -3,7 +3,7 @@ import {AlertTriangle,Camera,CheckCircle2,ClipboardList,RefreshCw,Search,Trendin
 import {authClient} from '../lib/supabase'
 import {blindInventoryError as explain} from './blindInventoryErrors'
 import InventoryOmieComparison from './InventoryOmieComparison'
-import {invalidQuantityReferenceSource,localQuantityReference} from './StockQuantityPolicy'
+import {invalidQuantityReferenceSource,localQuantityReference,quantitySourceLabel} from './StockQuantityPolicy'
 import './BlindInventoryStatus.css'
 
 type Session={
@@ -237,7 +237,7 @@ export default function BlindInventoryStatus({onOpenCount,onOpenReconciliation}:
             <span className={difference!==null&&difference!==0?'sgq-inventory-status-critical':''}>
              Diferença: <b>{difference===null?'—':(difference>0?'+':'')+fnum(difference)}</b>
             </span>
-            {review?.referencia_fonte&&<small>Fonte informada: {review.referencia_fonte}</small>}
+            {review?.referencia_fonte&&<small>Fonte informada: {quantitySourceLabel(review.referencia_fonte)}</small>}
             {invalidQuantityReferenceSource(review?.referencia_fonte)&&<small className="sgq-inventory-status-critical" role="alert">A origem de quantidade vinculada ao Omie não é válida; registre uma referência física do SGQ na conciliação.</small>}
            </div>
            <span className={photo?.status==='erro'?'sgq-inventory-status-critical':''}>
