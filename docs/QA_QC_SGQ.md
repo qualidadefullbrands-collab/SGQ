@@ -127,3 +127,15 @@ Em cada issue: versão/ambiente, passos, esperado/obtido, evidência sanitizada,
 - Nenhum projeto Supabase externo é acessado; não cria custos de projeto ou registros operacionais. Falha SQL cancela o workflow e preserva log por 30 dias.
 
 **Limitações de evidência:** é PostgreSQL real com DDL de conciliação real, mas o ambiente não reproduz toda a estrutura Supabase: `auth.uid()`, `private.current_sgq_role()`, funções gerenciadas, políticas de Storage e tabelas pré-existentes estão simuladas/minimizadas. Isso comprova a execução dos contratos SQL de conciliação em isolamento, **não** a homologação completa de Supabase Auth/RLS/Storage/Edge/Omie. A issue #79 permanece aberta até o ciclo integrado.
+
+
+## 10. Integração Auth e Storage locais — Supabase em CI
+
+- Workflow `.github/workflows/sgq-auth-storage-local.yml`: inicia GoTrue Auth, PostgreSQL, Storage, API Gateway e PostgREST via Supabase CLI **v2.84.2** numa pasta temporária do GitHub Actions, sem `supabase link` e sem credenciais/projetos hosted.
+- O arquivo `tests/integration/supabase-local/setup.mjs` **extrai e executa, sem reescrever**, a seção original de buckets e políticas Storage da migração `20261113080000_sgq_inventario_cego_omie_fotos.sql`.
+- O setup local cria somente a tabela de inventários mínima e uma implementação **simulada** de `private.current_sgq_role()`, ligada a usuários sintéticos; **não reproduz** o cadastro/perfis de produção.
+- `auth-storage.test.mjs` cria contas por Admin Auth local e realiza login real com senha/JWT. Em Storage verifica upload/foto PNG, leitura privada, duplicate `upsert=false`, prefixo de usuário, sessão fechada, perfil somente consulta, acesso anônimo, leitura permitida, MIME e limite 8 MiB.
+- Somente `localhost/127.0.0.1` são aceitos pela suite. Nenhuma URL ou token de produção entra no teste; secrets local-only ficam no diretório temporário do runner e não são publicados como artifacts.
+- Resultado do CI deve ser considerado **PASS apenas após execução**, não pela presença do arquivo ou criação da PR.
+
+**Limitação:** Auth, gateway e Storage são serviços reais *locais*; a função de papel e o cadastro de inventário são simulações mínimas. Essa etapa verifica políticas originais e comunicação entre serviços, mas ainda **não** testa toda a API .NET, a autenticação/perfis reais do projeto hospedado, Edge Functions/Omie ou geração Word. O item #79 continua parcialmente aberto até a homologação ponta a ponta em ambiente isolado.

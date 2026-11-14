@@ -1,0 +1,86 @@
+name: SGQ · QC Supabase Auth e Storage Local
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  supabase-auth-storage:
+    name: Auth real · Storage RLS · dados totalmente sintéticos
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SUPABASE_TELEMETRY_DISABLED: '1'
+      DO_NOT_TRACK: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # v2 pinned: CLI v3 changed local/hosted command semantics in Nov/2026.
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.84.2
+
+      - name: Preparar dependências para testes locais
+        run: |
+          npm install --no-audit --no-fund --package-lock=false
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+
+      - name: Iniciar GoTrue, Postgres, Storage e gateway exclusivamente locais
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sgq-supabase-qc"
+          cd "$RUNNER_TEMP/sgq-supabase-qc"
+          supabase init --yes
+          # The CLI never links this directory to any hosted project.
+          # Exclude unnecessary services, preserving Auth, DB, Storage and PostgREST.
+          supabase start -x studio,imgproxy,inbucket,analytics,vector,realtime,edge_runtime
+          # Local-only keys are retained in the ephemeral runner temp dir,
+          # not echoed to logs and never uploaded as artifacts.
+          supabase status -o env > "$RUNNER_TEMP/sgq-supabase-qc.env"
+
+      - name: Executar integração Auth / Storage com políticas reais do SGQ
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source "$RUNNER_TEMP/sgq-supabase-qc.env"
+          set +a
+          : "${API_URL:?Local API URL not found}"
+          : "${ANON_KEY:?Local anon key not found}"
+          : "${SERVICE_ROLE_KEY:?Local service key not found}"
+          : "${DB_URL:?Local DB URL not found}"
+          export SGQ_QC_API_URL="$API_URL"
+          export SGQ_QC_ANON_KEY="$ANON_KEY"
+          export SGQ_QC_SERVICE_KEY="$SERVICE_ROLE_KEY"
+          export SGQ_QC_DB_URL="$DB_URL"
+
+          {
+            node tests/integration/supabase-local/setup.mjs
+            node --test tests/integration/supabase-local/auth-storage.test.mjs
+          } 2>&1 | tee sgq-auth-storage-qc.log
+
+      - name: Evidências sanitizadas — sem tokens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgq-auth-storage-qc-${{ github.run_id }}
+          path: sgq-auth-storage-qc.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Encerrar e destruir stack local
+        if: always()
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/sgq-supabase-qc" 2>/dev/null || exit 0
+          supabase stop --no-backup || true
