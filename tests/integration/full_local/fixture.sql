@@ -62,7 +62,7 @@ create table public.grupo_inspecao_itens (
   unidades_por_conjunto numeric
 );
 create table public.inspecao_fotos (
-  id uuid primary key,
+  id uuid primary key default gen_random_uuid(),
   owner_id uuid not null default auth.uid() references auth.users(id),
   inspecao_id uuid not null references public.inspecoes(id),
   storage_path text not null, legenda text,
