@@ -297,17 +297,25 @@ class FullLocalIntegration(unittest.TestCase):
               headers={**self.headers(self.other_token),
                        "Content-Type":"application/json","Prefer":"return=representation"},
               json={"storage_path":"tampered.png"})
-        self.assertIn(r.status_code,(401,403),"RLS must forbid edits by another user")
+        # PostgREST may return 200 with zero rows for an UPDATE filtered by
+        # RLS; that is still a denied mutation. Verify the stored value.
+        self.assertIn(r.status_code,(200,204,401,403),fail_text(r))
+        if r.status_code==200:
+            self.assertEqual(r.json(),[],"cross-user PATCH affected rows")
         check=self.http.get(self.sb+"/rest/v1/inspecao_fotos",
-                        params={"inspecao_id":f"eq.{INSP_A}","select":"storage_path"},
+                        params={"id":"eq.33333333-4444-4555-8666-777777777777",
+                                "select":"storage_path"},
                         headers=self.headers(self.owner_token))
         self.assertEqual(check.status_code,200,fail_text(check))
         self.assertEqual(check.json()[0]["storage_path"],self.path_a)
 
     def test_11_real_storage_missing_evidence_never_delivers_valid_word(self):
+        # There can be several active/archived photos after real replacement.
+        # Each synthetic missing path must be unique to respect the actual
+        # (inspection_id,storage_path) constraint.
         self.run_sql(
             "update public.inspecao_fotos set storage_path='"+
-            self.owner+"/"+INSP_A+"/missing-in-storage.png' "+
+            self.owner+"/"+INSP_A+"/missing-' || id::text || '.png' "+
             "where inspecao_id='"+INSP_A+"';")
         r=self.http.post(self.api+f"/api/inspecoes/{INSP_A}/laudo",
               params={"individual":"1"},headers=self.headers(self.owner_token))
