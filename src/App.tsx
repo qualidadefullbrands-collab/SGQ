@@ -10,6 +10,7 @@ import BlindInventoryReconciliation from './stock/BlindInventoryReconciliation'
 import BlindInventoryStatus from './stock/BlindInventoryStatus'
 import InspectionsKanban from './components/InspectionsKanban'
 import InspectionJourney from './components/InspectionJourney'
+import ReportReadinessPanel from './components/ReportReadinessPanel'
 import NewInspectionGuide from './components/NewInspectionGuide'
 import SgqDashboard from './components/SgqDashboard'
 import './SgqOperationsTheme.css'
@@ -20,6 +21,7 @@ const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
 // Canonical production target: password emails must never redirect to localhost.
 const RECOVERY_REDIRECT_URL = 'https://app-sgq.onrender.com/?auth=recovery'
 const ItEditorDemo=lazy(()=>import('./its/ItEditorDemo'))
+const ItLibrary=lazy(()=>import('./its/ItLibrary'))
 const MobileFotos=lazy(()=>import('./mobile/MobileFotos'))
 const InsightsPage=lazy(()=>import('./insights/InsightsPage'))
 const SettingsPage=lazy(()=>import('./config/SettingsPage'))
@@ -3861,18 +3863,17 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
-          {detail.status==='concluida' && wordStatus && !wordStatus.ready && <div id="sgq-word-pendencias" className="alert" role="status">
-            <strong>{wordStatus?.error?'Falha ao consultar o laudo':wordStatus
-              ?'O laudo ainda possui '+wordStatus.pending.length+' pendência(s)':'Não foi possível gerar o Word.'}</strong>
-            {wordStatus?.error && <p>{wordStatus.error} A validação falhou; isso não significa que os dados da inspeção estejam incompletos.</p>}
-            {!!wordStatus?.pending.length && <ul>
-              {wordStatus.pending.map((reason,index)=><li key={index}>{reason}</li>)}
-            </ul>}
-            <button className="secondary small" type="button" disabled={wordCheckBusy} onClick={()=>void refreshWordStatus()}>
-              <RefreshCw size={14}/>{wordCheckBusy?'Verificando…':'Verificar novamente'}
-            </button>
-          </div>}
           {detail.status==='concluida' && allowDimensionalRectification && <div className="alert">Modo de retificação: as alterações são auditadas e entram no próximo laudo gerado.</div>}
+          {detail.status==='concluida' && (
+            <ReportReadinessPanel
+              status={wordStatus}
+              checking={wordCheckBusy}
+              generating={wordDownloading}
+              consolidated={Boolean(detail.grupos_inspecao?.processo_id && detail.grupos_inspecao?.subprocesso_codigo)}
+              onCheck={()=>void refreshWordStatus()}
+              onGenerate={()=>void downloadInspectionWord()}
+            />
+          )}
           <InspectionJourney
             activeStage={activeStage}
             onSelectStage={selectInspectionStage}
@@ -4362,7 +4363,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </Suspense>
           ) : (<>
           {canManageIts && (
-            <form className="panel section-card" onSubmit={uploadIt}>
+            <details className="sgq-it-upload-panel">
+              <summary>Importar IT existente (Word ou PDF)</summary>
+              <div className="sgq-it-upload-content">
+                <p>Cadastre um documento para leitura e revisão da estrutura antes da publicação.</p>
+                <form className="panel section-card" onSubmit={uploadIt}>
               <h2>Nova IT</h2>
               <div className="form-grid">
                 <label>Código<input value={itForm.codigo} onChange={(e)=>setItForm({...itForm,codigo:e.target.value})} placeholder="IT 015"/></label>
@@ -4372,31 +4377,19 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <label className="span-2">Word ou PDF<input type="file" accept=".docx,.pdf" onChange={(e)=>setItFile(e.target.files?.[0] ?? null)}/></label>
               </div>
               <div className="actions"><button className="primary" type="submit" disabled={!itFile}><Upload size={17}/> Enviar para leitura</button></div>
-            </form>
+                </form>
+              </div>
+            </details>
           )}
-          <div className="list">
-            {itVersions.map((it)=>(
-              <article className="row-card it-row" key={it.id}>
-                <div>
-                  <strong>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo}</strong>
-                  <span>Versão {it.versao}{it.arquivo_nome?' · '+it.arquivo_nome:''}</span>
-                </div>
-                <div className="row-actions">
-                  <span className="pill">{it.leitura_ia_status.replaceAll('_',' ')}</span>
-                  {canManageIts && ['nao_iniciada','aguardando','erro'].includes(it.leitura_ia_status) && (
-                    <button className="secondary small" disabled={itBusyId===it.id} onClick={()=>structureItVersion(it.id)}>
-                      {itBusyId===it.id?'Lendo…':'Estruturar com IA'}
-                    </button>
-                  )}
-                  {['revisao','publicada'].includes(it.leitura_ia_status) && (
-                    <button className="secondary small" disabled={itBusyId===it.id} onClick={()=>reviewItVersion(it)}>
-                      Revisar estrutura
-                    </button>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
+          <Suspense fallback={<div className="panel section-card" role="status">Carregando biblioteca de ITs…</div>}>
+            <ItLibrary
+              versions={itVersions}
+              canManage={!!canManageIts}
+              busyId={itBusyId}
+              onStructure={id=>void structureItVersion(id)}
+              onReview={version=>void reviewItVersion(version)}
+            />
+          </Suspense>
           </>)}
         </section>
       )}
