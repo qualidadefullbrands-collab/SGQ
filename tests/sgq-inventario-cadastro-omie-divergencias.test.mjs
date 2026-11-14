@@ -7,6 +7,7 @@ const component=read('src/stock/InventoryOmieComparison.tsx')
 const dashboard=read('src/stock/BlindInventoryStatus.tsx')
 const reconciliation=read('src/stock/BlindInventoryReconciliation.tsx')
 const app=read('src/App.tsx')
+const navigation=read('src/stock/StockWorkspaceNav.tsx')
 
 test('catalogue verification is authenticated, read-only and returns actual Omie product code',()=>{
  assert.match(edge,/admin\.auth\.getUser\(authorization\.slice\(7\)\)/)
@@ -36,13 +37,13 @@ test('comparison detects code mismatch, description mismatch and missing SKUs se
 
 test('inventory status shows expected local qty, counted, difference and Omie catalog consistency',()=>{
  assert.match(dashboard,/quantidade_referencia,quantidade_recontagem,referencia_fonte/)
- assert.match(dashboard,/Esperado no local:/)
+ assert.match(dashboard,/Referência física SGQ:/)
  assert.match(dashboard,/Contado:/)
  assert.match(dashboard,/Diferença:/)
  assert.match(dashboard,/difference===null\?'—'/)
  assert.match(dashboard,/InventoryOmieComparison sku=\{c\.codigo_omie\} descricao=\{c\.descricao_omie\}/)
- assert.match(dashboard,/O saldo esperado da mesma localização é exibido/)
- assert.match(dashboard,/Saldo global do Omie não substitui essa referência/)
+ assert.match(dashboard,/A referência de quantidade é física e local ao SGQ/)
+ assert.match(dashboard,/O Omie é utilizado somente para conferir código e descrição/)
  assert.match(dashboard,/Status do inventário FST/)
 })
 
@@ -51,11 +52,12 @@ test('reconciliation also displays the source of expected qty and live Omie disc
  assert.match(reconciliation,/Quantidade esperada na mesma localização/)
  assert.match(reconciliation,/InventoryOmieComparison sku=\{item\.codigo_omie\} descricao=\{item\.descricao_omie\}/)
  assert.match(reconciliation,/A quantidade esperada deve corresponder ao mesmo SKU/)
- assert.match(reconciliation,/O saldo global do Omie não é automaticamente comparável/)
+ assert.match(reconciliation,/O Omie é consultado somente para código e descrição/)
 })
 
 test('navigation presents FST inventory rather than forcing blind view',()=>{
- assert.match(app,/Inventário FST · Omie/)
- assert.match(app,/Status do inventário FST/)
+ assert.match(navigation,/Contagem FST/)
+ assert.match(navigation,/Acompanhamento/)
+ assert.match(app,/<StockWorkspaceNav/)
  assert.doesNotMatch(app,/Inventário às cegas · Omie/)
 })
