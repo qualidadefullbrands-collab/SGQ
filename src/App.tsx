@@ -4387,7 +4387,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               canManage={!!canManageIts}
               busyId={itBusyId}
               onStructure={id=>void structureItVersion(id)}
-              onReview={version=>void reviewItVersion(version)}
+              onReview={version=>{const item=itVersions.find(it=>it.id===version.id);if(item)void reviewItVersion(item)}}
             />
           </Suspense>
           </>)}
