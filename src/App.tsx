@@ -8,6 +8,7 @@ import InventoryPanel from './stock/InventoryPanel'
 import BlindInventoryUnified from './stock/BlindInventoryUnified'
 import BlindInventoryReconciliation from './stock/BlindInventoryReconciliation'
 import BlindInventoryStatus from './stock/BlindInventoryStatus'
+import StockWorkspaceNav from './stock/StockWorkspaceNav'
 import InspectionsKanban from './components/InspectionsKanban'
 import InspectionJourney from './components/InspectionJourney'
 import ReportReadinessPanel from './components/ReportReadinessPanel'
@@ -4446,13 +4447,16 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
-          <div className="sgq-stock-mode">
-            <button type="button" className={stockMode==='posicoes'?'primary':'secondary'} onClick={()=>setStockMode('posicoes')}>Posições</button>
-            <button type="button" className={stockMode==='inventario'?'primary':'secondary'} onClick={()=>{setStockMode('inventario');setSelectedSample(null)}}>Inventário</button>
-            <button type="button" className={stockMode==='cego'?'primary':'secondary'} onClick={()=>{setStockMode('cego');setSelectedSample(null)}}>Inventário FST · Omie</button>
-            <button type="button" className={stockMode==='status_cegos'?'primary':'secondary'} onClick={()=>{setStockMode('status_cegos');setSelectedSample(null)}}>Status do inventário FST</button>
-            <button type="button" className={stockMode==='conciliacao'?'primary':'secondary'} onClick={()=>{setStockMode('conciliacao');setSelectedSample(null)}}>Conciliação pós-inventário</button>
-          </div>
+          <StockWorkspaceNav
+            active={stockMode}
+            onChange={next=>{setStockMode(next);if(next!=='posicoes')setSelectedSample(null)}}
+          />
+          {['cego','status_cegos','conciliacao'].includes(stockMode) && (
+            <p className="sgq-stock-boundary" role="note">
+              <strong>Referência de quantidade:</strong> controles físicos do SGQ para a mesma localização.
+              A consulta ao Omie confere apenas código e descrição do produto.
+            </p>
+          )}
           {stockMode==='cego'&&<BlindInventoryUnified canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/>}
           {stockMode==='conciliacao'&&<BlindInventoryReconciliation canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/>}
           {stockMode==='status_cegos'&&<BlindInventoryStatus onOpenCount={()=>setStockMode('cego')} onOpenReconciliation={()=>setStockMode('conciliacao')}/>}
