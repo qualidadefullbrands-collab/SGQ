@@ -1,0 +1,37 @@
+name: SGQ · QA/QC Smoke Público
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qc-public-smoke:
+    name: QC publicado · frontend e API (somente leitura)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Testar ambiente publicado sem credenciais
+        env:
+          SGQ_QC_FRONTEND_URL: https://app-sgq.onrender.com
+          SGQ_QC_API_URL: https://app-sgq-api.onrender.com
+        shell: bash
+        run: |
+          set -o pipefail
+          node --test tests/qa/production-smoke.mjs 2>&1 | tee sgq-qc-smoke.log
+      - name: Preservar resultado QC
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgq-qc-public-smoke-${{ github.run_id }}
+          path: sgq-qc-smoke.log
+          if-no-files-found: warn
+          retention-days: 30
