@@ -5,7 +5,7 @@ import ts from 'typescript'
 
 const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8')
 const policySource=read('src/stock/StockQuantityPolicy.ts')
-const migration=read('supabase/migrations/20261114013000_sgq_conciliacao_referencia_local.sql')
+const migration=read('supabase/migrations/20261114003316_sgq_conciliacao_referencia_local.sql')
 const recon=read('src/stock/BlindInventoryReconciliation.tsx')
 const status=read('src/stock/BlindInventoryStatus.tsx')
 const original=read('supabase/migrations/20261113193000_sgq_conciliacao_pos_inventario_fst.sql')
