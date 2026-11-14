@@ -78,6 +78,13 @@
 - Browser E2E/console, WCAG e performance são gates adicionais a construir em ambiente isolado.
 - Render `autoDeploy=off`; não usar resultado de smoke da versão anterior como prova da versão recém-integrada.
 
+### Evidência real — primeira execução do smoke
+
+- Execução [#43536939385](https://github.com/qualidadefullbrands-collab/SGQ/actions/runs/43536939385), 14/11/2026 00:51 UTC: **2 PASS / 3 FAIL / 0 SKIP**. HTML e bundle React passaram; três acessos API retornaram HTTP 503.
+- Logs do Render `app-sgq-api`: processo auxiliar iniciou às 00:51:53 UTC e ASP.NET Core ficou disponível às 00:51:56 UTC, **depois** das requisições 503. Causa provável: inicialização após ociosidade em instância Free; não há evidência de falha de build.
+- Issue [#78](https://github.com/qualidadefullbrands-collab/SGQ/issues/78) acompanha risco de disponibilidade. O script registra 503 transitório e aguarda o endpoint real de prontidão, com limite de 90 segundos; **503 persistente continua FAIL**.
+- Não converter a primeira falha histórica em sucesso. Em caso de recuperação tardia, registrar a latência como **degradação**, mesmo se as demais verificações passarem.
+
 ## 6. Defeitos e release
 - **P0:** segurança/dados críticos comprometidos ou indisponibilidade abrangente → interromper release e responder ao incidente.
 - **P1:** fluxo crítico bloqueado, divergência sem auditoria, foto/Word com risco de perda ou dado incorreto → bloquear GO.
