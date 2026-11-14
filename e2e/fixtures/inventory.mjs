@@ -110,6 +110,20 @@ export const test = isolatedTest.extend({
       return respond(route, 405, { error: 'Função fora do cenário sintético' })
     })
 
+    // O fluxo atual de inventário chama authClient.storage (Supabase Storage
+    // diretamente), embora outras telas utilizem a API .NET. Este mock
+    // reproduz o comportamento sem tráfego externo; divergência arquitetural
+    // acompanhada separadamente em QC.
+    await page.route(AUTH + '/storage/v1/**', async route => {
+      const req = route.request()
+      if (req.method() !== 'POST') {
+        db.requestsOutsideFixture.push(req.method() + ' ' + new URL(req.url()).pathname)
+        return respond(route, 405, { message: 'Storage não simulado para este método' })
+      }
+      db.writes.push({ table: 'photo_storage', body: 'arquivo sintético no mock Supabase' })
+      return respond(route, 200, { Key: 'sgq-inventario-cego/qc/foto-sintetica.png', Id: 'qc-storage-1' })
+    })
+
     await page.route(API + '/api/estoque/validar-sku', async route => {
       const req = route.request()
       if (req.method() !== 'POST') {
