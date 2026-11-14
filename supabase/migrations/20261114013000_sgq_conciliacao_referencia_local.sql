@@ -75,10 +75,13 @@ execute function public.sgq_recon_validar_origens_ao_concluir();
 -- select inventario_id, item_id, referencia_fonte, status
 -- from public.sgq_inventario_conciliacao_itens
 -- where quantidade_referencia is not null
---   and referencia_fonte is distinct from all(
---     array['sgq_contagem_fisica_local',
---           'sgq_inventario_anterior_local',
---           'sgq_posicao_local_documentada']
+--   and (
+--     referencia_fonte is null
+--     or referencia_fonte not in (
+--       'sgq_contagem_fisica_local',
+--       'sgq_inventario_anterior_local',
+--       'sgq_posicao_local_documentada'
+--     )
 --   );
 --
 -- Apos regularizar todos os registros legados, validar em janela aprovada:
