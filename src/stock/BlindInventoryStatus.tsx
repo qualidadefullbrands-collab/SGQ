@@ -166,7 +166,8 @@ export default function BlindInventoryStatus({onOpenCount,onOpenReconciliation}:
    <div><small>Diferenças físicas confirmáveis</small><b>{stats.quantityDifferences}</b></div>
   </div>
   <p className="sgq-inventory-status-explain">Itens contados representam registros realizados, não percentual de cobertura.
-   O saldo esperado da mesma localização é exibido quando registrado na conciliação. Saldo global do Omie não substitui essa referência, e nenhum saldo é movimentado nesta tela.</p>
+   A referência de quantidade é física e local ao SGQ. O Omie é utilizado somente para conferir código e descrição do produto.
+   Nenhum saldo é movimentado nesta tela.</p>
   {truncated&&<p className="sgq-inventory-status-warning">Exibindo as 300 sessões mais recentes. Para um período anterior, será necessária consulta ao histórico completo.</p>}
   {error&&<div role="alert" className="sgq-single-alert">{error}</div>}
   <section className="sgq-inventory-status-panel">
@@ -241,7 +242,7 @@ export default function BlindInventoryStatus({onOpenCount,onOpenReconciliation}:
             <Camera size={13}/> {photoLabel(photo?.status)}
             {photo?.erro&&<small title={photo.erro}> · {photo.erro}</small>}
            </span>
-           <div className="sgq-inventory-status-audit"><InventoryOmieComparison sku={c.codigo_omie} descricao={c.descricao_omie}/></div>
+           <div className="sgq-inventory-status-audit" role="group" aria-label="Conferência de código e descrição no Omie"><InventoryOmieComparison sku={c.codigo_omie} descricao={c.descricao_omie}/></div>
           </div>
          })}
         </div>}
