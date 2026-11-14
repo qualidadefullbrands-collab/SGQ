@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 const load=file=>readFileSync(new URL('../'+file,import.meta.url),'utf8')
 const app=load('src/App.tsx')
+const navigation=load('src/stock/StockWorkspaceNav.tsx')
 const blind=load('src/stock/BlindInventoryPage.tsx')
 const existing=load('src/stock/InventoryPanel.tsx')
 const sql=load('supabase/migrations/20261113080000_sgq_inventario_cego_omie_fotos.sql')
@@ -11,7 +12,7 @@ const edge=load('supabase/functions/sgq-inventario-omie/index.ts')
 test('stock preserves previous inventory and adds a separate blind Omie mode',()=>{
  assert.match(app,/import BlindInventoryUnified from '\.\/stock\/BlindInventoryUnified'/)
  assert.match(app,/stockMode==='cego'&&<BlindInventoryUnified/)
- assert.match(app,/Inventário FST · Omie/)
+ assert.match(navigation,/Contagem FST/)
  assert.match(app,/stockMode==='inventario'&&<InventoryPanel/)
  assert.match(existing,/saldo_sistema/)
 })
