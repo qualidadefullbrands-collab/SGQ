@@ -1,5 +1,10 @@
 \set ON_ERROR_STOP on
 
+-- psql executes bootstrap, migrations and assertions in separate connections.
+-- Explicitly set synthetic request identity in this assertion session.
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
+select set_config('sgq_test.role', 'gestor', false);
+
 -- Run after BOTH committed SGQ migrations have been applied to the ephemeral DB.
 create function public.qa_assert(p_ok boolean, p_context text) returns void
 language plpgsql as $$
