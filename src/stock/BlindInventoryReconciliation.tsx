@@ -25,6 +25,10 @@ type Event={id:number;item_id:string|null;acao:string;registrado_por:string;cria
 type Draft={reference:string;source:string;evidence:string;recount:string;recountNote:string;reviewNote:string}
 const blank=():Draft=>({reference:'',source:'',evidence:'',recount:'',recountNote:'',reviewNote:''})
 const num=(value:number)=>Number(value).toLocaleString('pt-BR',{maximumFractionDigits:3})
+// Quantidade de referência: somente registro físico local do SGQ.
+// A consulta Omie é cadastral (SKU/descrição) e nunca fornece saldo para conciliação.
+export const invalidQuantityReferenceSource=(value:string|null|undefined)=>
+ /\bomie\b|\bsaldo\s+(?:do\s+)?erp\b/i.test(String(value||''))
 const when=(value:string)=>new Date(value).toLocaleString('pt-BR')
 const reviewed=(status:string)=>status==='conciliado'||status==='divergencia_aprovada'
 const statusName:Record<string,string>={
@@ -67,8 +71,9 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
    if(row&&reviewed(row.status))complete++
    else pending++
   }
-  return {pending,different,complete,needsCount}
- },[items,byItem])
+  const invalidSources=revisions.filter(row=>invalidQuantityReferenceSource(row.referencia_fonte)).length
+  return {pending,different,complete,needsCount,invalidSources}
+ },[items,byItem,revisions])
  const canEdit=!!selected&&selected.status==='fechado'&&header?.status==='em_analise'
  const visible=items.filter(item=>{
   const row=byItem.get(item.id)
@@ -150,6 +155,15 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
  }
  async function operate(action:string,itemId?:string,qty?:number|null,source?:string|null,note?:string|null){
   if(!selectedId||busy)return
+  if(action==='referencia'&&invalidQuantityReferenceSource(source)){
+   setError('A referência de quantidade deve ser um registro físico da localização no SGQ, não um saldo do Omie.');return
+  }
+  if(action==='revisar'&&revisions.some(row=>row.item_id===itemId&&invalidQuantityReferenceSource(row.referencia_fonte))){
+   setError('Atualize a origem da quantidade esperada para um controle físico do SGQ antes de aprovar.');return
+  }
+  if(action==='finalizar'&&revisions.some(row=>invalidQuantityReferenceSource(row.referencia_fonte))){
+   setError('Existem referências de quantidade vinculadas ao Omie. Corrija a origem no SGQ antes de concluir.');return
+  }
   if(action==='encerrar'&&!window.confirm('Encerrar a contagem física? A conciliação será iniciada e os itens não poderão mais ser editados.'))return
   if(action==='finalizar'&&!window.confirm('Concluir a conciliação de todos os itens? As decisões ficarão bloqueadas. Nenhum saldo do Omie será alterado.'))return
   setBusy(true);setError('');setMessage('')
@@ -183,8 +197,8 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
   </header>
   <p className="sgq-recon-intro"><ShieldAlert size={16}/>
    A quantidade esperada deve corresponder ao mesmo SKU e à mesma localização da contagem.
-   O saldo global do Omie não é automaticamente comparável a um armário ou rua.
-   A aprovação registra uma decisão auditável, mas não ajusta saldos.</p>
+   A referência deve vir de controle físico documentado no SGQ, para o mesmo endereço.
+   O Omie é consultado somente para código e descrição. A aprovação registra uma decisão auditável, sem ajustar saldos.</p>
   {error&&<div className="sgq-single-alert" role="alert">{error}</div>}
   {message&&<div className="sgq-single-success" role="status"><CheckCircle2 size={16}/>{message}</div>}
 
@@ -222,9 +236,9 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
      {!canApprove&&<p className="sgq-recon-muted">Aguardando encerramento pelo responsável pela aprovação.</p>}
     </div>}
     {canEdit&&canApprove&&<div className="sgq-recon-actions">
-     <button type="button" className="primary" disabled={busy||!items.length||stats.pending>0||stats.needsCount>0}
+     <button type="button" className="primary" disabled={busy||!items.length||stats.pending>0||stats.needsCount>0||stats.invalidSources>0}
       onClick={()=>void operate('finalizar')}><CheckCircle2 size={16}/> Concluir conciliação</button>
-     {(stats.pending>0||stats.needsCount>0)&&<small>Revise todas as referências e divergências antes de concluir.</small>}
+     {(stats.pending>0||stats.needsCount>0||stats.invalidSources>0)&&<small>Revise todas as referências locais e divergências antes de concluir.</small>}
     </div>}
     {header?.status==='concluida'&&<p className="sgq-recon-complete">
      <CheckCircle2 size={16}/> Conciliação registrada em {header.concluido_em?when(header.concluido_em):'data não informada'}. Análise bloqueada; saldos não alterados.</p>}
@@ -260,8 +274,9 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
         <div><small>Diferença</small><b className={delta!==null&&delta!==0?'sgq-recon-different':''}>{delta===null?'—':(delta>0?'+':'')+num(delta)}</b></div>
        </div>
        <div className="sgq-recon-notes">
-        <InventoryOmieComparison sku={item.codigo_omie} descricao={item.descricao_omie}/>
-        {row?.referencia_fonte&&<p><b>Origem:</b> {row.referencia_fonte} · {row.referencia_evidencia}</p>}
+        <div role="group" aria-label="Conferência cadastral do produto no Omie, sem quantidades"><InventoryOmieComparison sku={item.codigo_omie} descricao={item.descricao_omie}/></div>
+        {row?.referencia_fonte&&<p><b>Origem da referência física:</b> {row.referencia_fonte} · {row.referencia_evidencia}</p>}
+        {invalidQuantityReferenceSource(row?.referencia_fonte)&&<p className="sgq-single-alert" role="alert">Referência de quantidade inválida: escolha um controle físico do SGQ para esta localização.</p>}
         {row?.recontagem_justificativa&&<p><b>Recontagem:</b> {row.recontagem_justificativa}</p>}
         {row?.justificativa_analise&&<p><b>Decisão:</b> {row.justificativa_analise}</p>}
         {photos.some(p=>p.item_id===item.id)&&<button className="secondary small" type="button" onClick={()=>void openPhoto(item.id)}>
@@ -272,14 +287,15 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
         <div className="sgq-recon-fields">
          <label>Quantidade esperada<input type="number" min="0" step="0.001" inputMode="decimal"
           value={draft.reference} onChange={e=>patch(item.id,{reference:e.target.value})}/></label>
-         <label>Origem da referência<input maxLength={240} value={draft.source}
-          placeholder="Ex.: relatório de posição do endereço"
+         <label>Origem da referência física (SGQ)<input maxLength={240} value={draft.source}
+          placeholder="Ex.: contagem anterior deste endereço no SGQ"
           onChange={e=>patch(item.id,{source:e.target.value})}/></label>
-         <label>Evidência / documento<input maxLength={500} value={draft.evidence}
+         <label>Evidência / documento físico<input maxLength={500} value={draft.evidence}
           placeholder="Ex.: relatório, data e localização conferida"
           onChange={e=>patch(item.id,{evidence:e.target.value})}/></label>
         </div>
-        <button className="secondary small" disabled={busy||parseQty(draft.reference)===null||draft.source.trim().length<5||draft.evidence.trim().length<5}
+        {invalidQuantityReferenceSource(draft.source)&&<p className="sgq-single-alert" role="alert">O saldo do Omie não é uma referência válida de quantidade. Informe um registro físico local do SGQ.</p>}
+        <button type="button" className="secondary small" disabled={busy||parseQty(draft.reference)===null||draft.source.trim().length<5||draft.evidence.trim().length<5||invalidQuantityReferenceSource(draft.source)}
          onClick={()=>void operate('referencia',item.id,parseQty(draft.reference),draft.source.trim(),draft.evidence.trim())}>
          Salvar referência</button>
        </div>}
@@ -294,7 +310,7 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
            <button className="secondary small" disabled={busy||draft.reviewNote.trim().length<5}
             onClick={()=>void operate('solicitar_recontagem',item.id,null,null,draft.reviewNote.trim())}>
             Solicitar recontagem</button>
-           <button className="primary" disabled={busy||(delta!==0&&draft.reviewNote.trim().length<5)}
+           <button type="button" className="primary" disabled={busy||invalidQuantityReferenceSource(row.referencia_fonte)||(delta!==0&&draft.reviewNote.trim().length<5)}
             onClick={()=>void operate('revisar',item.id,null,null,draft.reviewNote.trim())}>
             {delta===0?'Confirmar conciliação':'Aprovar divergência'}</button>
           </div>
