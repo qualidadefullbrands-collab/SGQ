@@ -3,6 +3,7 @@ import {ArrowRight,CheckCircle2,ClipboardCheck,FileSearch,RefreshCw,ShieldAlert}
 import {authClient} from '../lib/supabase'
 import {blindInventoryError as explain} from './blindInventoryErrors'
 import InventoryOmieComparison from './InventoryOmieComparison'
+import {invalidQuantityReferenceSource,localQuantityReference} from './StockQuantityPolicy'
 import './BlindInventoryReconciliation.css'
 
 type Session={
@@ -25,10 +26,7 @@ type Event={id:number;item_id:string|null;acao:string;registrado_por:string;cria
 type Draft={reference:string;source:string;evidence:string;recount:string;recountNote:string;reviewNote:string}
 const blank=():Draft=>({reference:'',source:'',evidence:'',recount:'',recountNote:'',reviewNote:''})
 const num=(value:number)=>Number(value).toLocaleString('pt-BR',{maximumFractionDigits:3})
-// Quantidade de referência: somente registro físico local do SGQ.
-// A consulta Omie é cadastral (SKU/descrição) e nunca fornece saldo para conciliação.
-export const invalidQuantityReferenceSource=(value:string|null|undefined)=>
- /\bomie\b|\bsaldo\s+(?:do\s+)?erp\b/i.test(String(value||''))
+
 const when=(value:string)=>new Date(value).toLocaleString('pt-BR')
 const reviewed=(status:string)=>status==='conciliado'||status==='divergencia_aprovada'
 const statusName:Record<string,string>={
@@ -65,9 +63,10 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
   let pending=0,different=0,complete=0,needsCount=0
   for(const item of items){
    const row=byItem.get(item.id)
-   if(!row||row.quantidade_referencia===null)needsCount++
+   const expected=localQuantityReference(row)
+   if(expected===null)needsCount++
    const q=row?.quantidade_recontagem??item.quantidade_contada
-   if(row?.quantidade_referencia!==null&&row?.quantidade_referencia!==undefined&&Number(q)!==Number(row.quantidade_referencia))different++
+   if(expected!==null&&Number(q)!==expected)different++
    if(row&&reviewed(row.status))complete++
    else pending++
   }
@@ -78,8 +77,10 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
  const visible=items.filter(item=>{
   const row=byItem.get(item.id)
   if(filter==='pendentes')return !row||!reviewed(row.status)
-  if(filter==='divergentes')return row?.quantidade_referencia!==null&&row?.quantidade_referencia!==undefined
-   &&Number(row.quantidade_recontagem??item.quantidade_contada)!==Number(row.quantidade_referencia)
+  if(filter==='divergentes'){
+   const expected=localQuantityReference(row)
+   return expected!==null&&Number(row?.quantidade_recontagem??item.quantidade_contada)!==expected
+  }
   return true
  })
 
@@ -258,7 +259,7 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
       const draft=drafts[item.id]||blank()
       const original=Number(item.quantidade_contada)
       const counted=Number(row?.quantidade_recontagem??original)
-      const ref=row?.quantidade_referencia
+      const ref=localQuantityReference(row)
       const delta=ref===null||ref===undefined?null:counted-Number(ref)
       const isPending=row?.status==='recontagem_solicitada'
       return <article key={item.id} className="sgq-recon-item">
@@ -299,7 +300,7 @@ export default function BlindInventoryReconciliation({canWrite,canApprove}:{
          onClick={()=>void operate('referencia',item.id,parseQty(draft.reference),draft.source.trim(),draft.evidence.trim())}>
          Salvar referência</button>
        </div>}
-       {canEdit&&row?.quantidade_referencia!==null&&row?.quantidade_referencia!==undefined&&
+       {canEdit&&localQuantityReference(row)!==null&&
         <div className="sgq-recon-edit">
          {canApprove&&!reviewed(row.status)&&row.status!=='recontagem_solicitada'&&<>
           <label>Justificativa da análise ou pedido de recontagem
