@@ -1,0 +1,182 @@
+/* SGQ · Jornada de inspeção (UI/UX Pro Max)
+   Componente de apresentação; sem regras de negócio ou persistência. */
+.sgq-operational-shell .sgq-journey {
+  --journey-text: var(--sgq-ui-ink, #112d50);
+  --journey-muted: var(--sgq-ui-subtle, #526d8f);
+  --journey-line: var(--sgq-ui-border, #dbe5f1);
+  --journey-accent: var(--sgq-ui-blue, #0875bd);
+  min-width: 0;
+}
+.sgq-operational-shell .sgq-journey-context {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(220px, .9fr);
+  gap: 20px;
+  align-items: center;
+  padding: 18px 22px;
+  margin-bottom: 14px;
+  border: 1px solid var(--journey-line);
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 3px 14px rgba(18, 53, 92, .045);
+  color: var(--journey-text);
+}
+.sgq-operational-shell .sgq-journey-identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4px;
+}
+.sgq-operational-shell .sgq-journey-kicker {
+  font-size: 12px;
+  line-height: 1.3;
+  letter-spacing: .04em;
+  font-weight: 750;
+  color: #365b77;
+}
+.sgq-operational-shell .sgq-journey-identity > strong {
+  font-size: 23px;
+  line-height: 1.2;
+  letter-spacing: -.02em;
+  overflow-wrap: anywhere;
+}
+.sgq-operational-shell .sgq-journey-client {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--journey-muted);
+  overflow-wrap: anywhere;
+}
+.sgq-operational-shell .sgq-journey-meta {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0 0 0 20px;
+  border-left: 1px solid var(--journey-line);
+}
+.sgq-operational-shell .sgq-journey-meta > div { min-width: 0; }
+.sgq-operational-shell .sgq-journey-meta dt,
+.sgq-operational-shell .sgq-journey-progress-title > span {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--journey-muted);
+}
+.sgq-operational-shell .sgq-journey-meta dd {
+  margin: 3px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 750;
+  color: var(--journey-text);
+  overflow-wrap: anywhere;
+}
+.sgq-operational-shell .sgq-journey-progress-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.sgq-operational-shell .sgq-journey-progress-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+.sgq-operational-shell .sgq-journey-progress-title > strong {
+  font-size: 15px;
+  color: var(--journey-text);
+  white-space: nowrap;
+}
+.sgq-operational-shell .sgq-journey-progress-track {
+  height: 9px;
+  border-radius: 10px;
+  background: #e5eef6;
+  overflow: hidden;
+}
+.sgq-operational-shell .sgq-journey-progress-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #0875bd;
+  transition: width .18s ease-out;
+}
+.sgq-operational-shell .sgq-journey-progress-group > small {
+  color: var(--journey-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.sgq-operational-shell .sgq-journey-nav {
+  scroll-margin-top: 88px;
+}
+.sgq-operational-shell .sgq-journey-nav .inspection-stage-tab {
+  gap: 7px;
+  min-width: max-content;
+}
+.sgq-operational-shell .sgq-journey-optional {
+  color: #526d8f;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.sgq-operational-shell .sgq-journey-nav .inspection-stage-tab.active .sgq-journey-optional {
+  color: #1d537a;
+}
+.sgq-operational-shell .sgq-journey-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -3px 0 17px;
+  min-width: 0;
+}
+.sgq-operational-shell .sgq-journey-controls > button {
+  min-height: 44px;
+  min-width: 130px;
+}
+.sgq-operational-shell .sgq-journey-position {
+  margin: 0;
+  color: var(--journey-muted);
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+}
+.sgq-operational-shell .sgq-journey-position strong {
+  color: var(--journey-text);
+}
+@media (max-width: 1080px) {
+  .sgq-operational-shell .sgq-journey-context {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 16px;
+  }
+  .sgq-operational-shell .sgq-journey-progress-group {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 680px) {
+  .sgq-operational-shell .sgq-journey-context {
+    grid-template-columns: 1fr;
+    gap: 13px;
+    padding: 15px;
+  }
+  .sgq-operational-shell .sgq-journey-identity > strong { font-size: 20px; }
+  .sgq-operational-shell .sgq-journey-meta {
+    grid-template-columns: 1fr 1fr;
+    padding: 12px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--journey-line);
+  }
+  .sgq-operational-shell .sgq-journey-progress-group { grid-column: auto; }
+  .sgq-operational-shell .sgq-journey-controls {
+    flex-wrap: wrap;
+    gap: 9px;
+  }
+  .sgq-operational-shell .sgq-journey-position {
+    width: 100%;
+    flex: 1 0 100%;
+    order: -1;
+  }
+  .sgq-operational-shell .sgq-journey-controls > button {
+    flex: 1;
+    min-width: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sgq-operational-shell .sgq-journey-progress-track > span { transition: none; }
+}

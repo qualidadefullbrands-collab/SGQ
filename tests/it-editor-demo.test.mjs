@@ -5,6 +5,7 @@ import {readFileSync} from 'node:fs'
 const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8')
 const app=read('src/App.tsx')
 const editor=read('src/its/ItEditorDemo.tsx')
+const library=read('src/its/ItLibrary.tsx')
 const css=read('src/its/ItEditorDemo.css')
 
 test('Nova IT editor is opt-in alongside the existing IT library',()=>{
@@ -14,7 +15,10 @@ test('Nova IT editor is opt-in alongside the existing IT library',()=>{
  assert.match(app,/itDemoOpen \? \(/)
  assert.match(app,/<ItEditorDemo officialVersions=\{itVersions\.filter/)
  assert.match(app,/onSubmit=\{uploadIt\}/)
- assert.match(app,/itVersions\.map/)
+ assert.match(app,/<ItLibrary/)
+ assert.match(library,/filtered\.map/)
+ assert.match(library,/itLifecycle/)
+ assert.match(library,/onReview\(version\)/)
 })
 test('editor has document identity and separate Word and editable structure views',()=>{
  for(const part of ['cabecalho','caderno','criterios','rodape']){

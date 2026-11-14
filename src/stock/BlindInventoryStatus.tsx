@@ -3,6 +3,7 @@ import {AlertTriangle,Camera,CheckCircle2,ClipboardList,RefreshCw,Search,Trendin
 import {authClient} from '../lib/supabase'
 import {blindInventoryError as explain} from './blindInventoryErrors'
 import InventoryOmieComparison from './InventoryOmieComparison'
+import {invalidQuantityReferenceSource,localQuantityReference} from './StockQuantityPolicy'
 import './BlindInventoryStatus.css'
 
 type Session={
@@ -68,7 +69,7 @@ export default function BlindInventoryStatus({onOpenCount,onOpenReconciliation}:
    reconciled:current.filter(s=>reconBySession.get(s.id)?.status==='concluida').length,
    skuCount:counts.filter(c=>sessions.some(s=>s.id===c.inventario_id&&s.status!=='cancelado')).length,
    photoErrors:photos.filter(p=>p.status==='erro').length,
-   quantityDifferences:counts.filter(c=>{const review=reviewsByItem.get(c.id);return review?.quantidade_referencia!==null&&review?.quantidade_referencia!==undefined&&Number(review.quantidade_recontagem??c.quantidade_contada)!==Number(review.quantidade_referencia)}).length,
+   quantityDifferences:counts.filter(c=>{const review=reviewsByItem.get(c.id);const expected=localQuantityReference(review);return expected!==null&&Number(review?.quantidade_recontagem??c.quantidade_contada)!==expected}).length,
    photoPending:photos.filter(p=>p.status==='pendente'||p.status==='enviando').length
   }
  },[sessions,counts,photos,reconBySession,reviewsByItem])
@@ -166,7 +167,8 @@ export default function BlindInventoryStatus({onOpenCount,onOpenReconciliation}:
    <div><small>Diferenças físicas confirmáveis</small><b>{stats.quantityDifferences}</b></div>
   </div>
   <p className="sgq-inventory-status-explain">Itens contados representam registros realizados, não percentual de cobertura.
-   O saldo esperado da mesma localização é exibido quando registrado na conciliação. Saldo global do Omie não substitui essa referência, e nenhum saldo é movimentado nesta tela.</p>
+   A referência de quantidade é física e local ao SGQ. O Omie é utilizado somente para conferir código e descrição do produto.
+   Nenhum saldo é movimentado nesta tela.</p>
   {truncated&&<p className="sgq-inventory-status-warning">Exibindo as 300 sessões mais recentes. Para um período anterior, será necessária consulta ao histórico completo.</p>}
   {error&&<div role="alert" className="sgq-single-alert">{error}</div>}
   <section className="sgq-inventory-status-panel">
@@ -224,24 +226,25 @@ export default function BlindInventoryStatus({onOpenCount,onOpenReconciliation}:
          {entries.map(c=>{
           const photo=photoByItem.get(c.id)
           const review=reviewsByItem.get(c.id)
-          const expected=review?.quantidade_referencia
+          const expected=localQuantityReference(review)
           const counted=Number(review?.quantidade_recontagem??c.quantidade_contada)
           const difference=expected===null||expected===undefined?null:counted-Number(expected)
           return <div key={c.id} className="sgq-inventory-status-item">
            <div><b>{c.codigo_omie}</b><span>{c.descricao_omie}</span><small>{c.endereco}</small></div>
            <div className="sgq-inventory-status-quantity">
-            <span>Esperado no local: <b>{expected===null||expected===undefined?'Não informado':fnum(Number(expected))}</b></span>
+            <span>Referência física SGQ: <b>{expected===null?'Não verificada':fnum(expected)}</b></span>
             <span>Contado: <b>{fnum(counted)}</b></span>
             <span className={difference!==null&&difference!==0?'sgq-inventory-status-critical':''}>
              Diferença: <b>{difference===null?'—':(difference>0?'+':'')+fnum(difference)}</b>
             </span>
-            {review?.referencia_fonte&&<small>Fonte: {review.referencia_fonte}</small>}
+            {review?.referencia_fonte&&<small>Fonte informada: {review.referencia_fonte}</small>}
+            {invalidQuantityReferenceSource(review?.referencia_fonte)&&<small className="sgq-inventory-status-critical" role="alert">A origem de quantidade vinculada ao Omie não é válida; registre uma referência física do SGQ na conciliação.</small>}
            </div>
            <span className={photo?.status==='erro'?'sgq-inventory-status-critical':''}>
             <Camera size={13}/> {photoLabel(photo?.status)}
             {photo?.erro&&<small title={photo.erro}> · {photo.erro}</small>}
            </span>
-           <div className="sgq-inventory-status-audit"><InventoryOmieComparison sku={c.codigo_omie} descricao={c.descricao_omie}/></div>
+           <div className="sgq-inventory-status-audit" role="group" aria-label="Conferência de código e descrição no Omie"><InventoryOmieComparison sku={c.codigo_omie} descricao={c.descricao_omie}/></div>
           </div>
          })}
         </div>}

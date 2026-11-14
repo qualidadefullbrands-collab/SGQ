@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8')
 const app=read('src/App.tsx')
+const wordPanel=read('src/components/ReportReadinessPanel.tsx')
 const api=read('backend/Sgq.Api/Program.cs')
 const sql=read('supabase/migrations/20261111145000_sgq_reinicio_inspecao_troca_it.sql')
 const word=read('server/app.py')
@@ -13,7 +14,10 @@ test('completed inspection can be edited without automatic Word-pendency request
  const wordClick=app.split('async function downloadInspectionWord()')[1]?.split('if (!sessionReady)')[0]||''
  assert.match(open,/setWordStatus\(null\)/)
  assert.match(edit,/setWordStatus\(null\)/)
- assert.match(app,/wordStatus && !wordStatus.ready/)
+ assert.match(app,/<ReportReadinessPanel/)
+ assert.match(wordPanel,/status\?\.pending\.length/)
+ assert.match(wordPanel,/onCheck: \(\) => void/)
+ assert.match(app,/onCheck=\{\(\)=>void refreshWordStatus\(\)\}/)
  assert.doesNotMatch(app,/if\(!wordStatus\?\.ready\)/)
  assert.match(wordClick,/const response=await fetch\(url/)
  assert.match(wordClick,/if\(response.status===409\)void refreshWordStatus\(\)/)

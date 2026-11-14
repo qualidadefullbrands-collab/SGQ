@@ -1,0 +1,36 @@
+/* UI/UX Pro Max — feedback documental separado de resultados técnicos. */
+.sgq-operational-shell .sgq-report-panel{
+  display:grid;gap:15px;padding:21px 23px;margin:0 0 19px;
+  border:1px solid #cfdfee;border-radius:15px;background:#fff;
+  box-shadow:0 3px 14px rgba(18,55,87,.045);color:#112d50;
+}
+.sgq-operational-shell .sgq-report-header{display:flex;align-items:flex-start;gap:13px;min-width:0}
+.sgq-operational-shell .sgq-report-icon{
+  display:grid;place-items:center;flex:0 0 43px;width:43px;height:43px;
+  border-radius:11px;background:#eaf4fb;color:#086ca9;
+}
+.sgq-operational-shell .sgq-report-header h2{margin:0;font-size:19px;line-height:1.35;font-weight:850;color:#173a5a}
+.sgq-operational-shell .sgq-report-header p{margin:5px 0 0;font-size:14px;line-height:1.5;color:#526d8f}
+.sgq-operational-shell .sgq-report-state{
+  display:flex;gap:11px;align-items:flex-start;padding:13px 15px;
+  border:1px solid #dbe5f1;background:#f7fafc;border-radius:11px;
+  color:#385873;
+}
+.sgq-operational-shell .sgq-report-state>svg{flex:0 0 19px;margin-top:1px}
+.sgq-operational-shell .sgq-report-state strong{display:block;font-size:14px;font-weight:800;line-height:1.35}
+.sgq-operational-shell .sgq-report-state p{margin:5px 0 0;font-size:13px;line-height:1.5;color:inherit}
+.sgq-operational-shell .sgq-report-state-pronto{background:#eff9f3;border-color:#b5e2c6;color:#08654d}
+.sgq-operational-shell .sgq-report-state-pendencias{background:#fff9ed;border-color:#ebd9ad;color:#795211}
+.sgq-operational-shell .sgq-report-state-erro{background:#fff2f1;border-color:#e7b8b4;color:#9c281e}
+.sgq-operational-shell .sgq-report-error{margin:0;color:#9c281e;font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-report-pendencies{border:1px solid #ecd8a9;border-radius:10px;background:#fffcf5;padding:14px;color:#664718}
+.sgq-operational-shell .sgq-report-pendencies>strong{font-size:14px}
+.sgq-operational-shell .sgq-report-pendencies ul{padding-left:21px;margin:9px 0 0;display:grid;gap:6px}
+.sgq-operational-shell .sgq-report-pendencies li{font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.sgq-operational-shell .sgq-report-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.sgq-operational-shell .sgq-report-actions button{min-height:44px;font-size:14px}
+@media(max-width:640px){
+  .sgq-operational-shell .sgq-report-panel{padding:16px}
+  .sgq-operational-shell .sgq-report-actions{flex-direction:column}
+  .sgq-operational-shell .sgq-report-actions button{width:100%}
+}

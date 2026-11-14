@@ -4,21 +4,23 @@ import {readFileSync} from 'node:fs'
 const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8')
 const app=read('src/App.tsx')
 const ui=read('src/stock/BlindInventoryReconciliation.tsx')
+const navigation=read('src/stock/StockWorkspaceNav.tsx')
 const sql=read('supabase/migrations/20261113193000_sgq_conciliacao_pos_inventario_fst.sql')
 
 test('post-inventory reconciliation is visible as a separate SGQ stock tab',()=>{
  assert.match(app,/import BlindInventoryReconciliation/)
  assert.match(app,/stockMode==='conciliacao'&&<BlindInventoryReconciliation/)
- assert.match(app,/Conciliação pós-inventário/)
+ assert.match(navigation,/Conciliação SGQ/)
+ assert.match(ui,/Conciliação pós-inventário/)
  assert.match(app,/canApprove=\{!!profile&&\['administrador','gestor'\]\.includes\(profile\.perfil\)\}/)
 })
 
 test('blind counts remain independent from manual reconciliation and Omie stock movements',()=>{
  assert.match(sql,/All stock adjustments remain OUTSIDE this module/)
- assert.match(ui,/A aprovação registra uma decisão auditável, mas não ajusta saldos/)
+ assert.match(ui,/A aprovação registra uma decisão auditável, sem ajustar saldos/)
  assert.doesNotMatch(ui,/\/api\/estoque\/moviment|incluir_ajuste|AlterarProduto|AjustarEstoque/)
  assert.doesNotMatch(sql,/update public\.amostras|update public\.estoque|omie_/)
- assert.match(ui,/O saldo global do Omie não é automaticamente comparável/)
+ assert.match(ui,/O Omie é consultado somente para código e descrição/)
 })
 
 test('reconciliation has audited closure, local references, recount and approval',()=>{

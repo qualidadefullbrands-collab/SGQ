@@ -8,7 +8,11 @@ import InventoryPanel from './stock/InventoryPanel'
 import BlindInventoryUnified from './stock/BlindInventoryUnified'
 import BlindInventoryReconciliation from './stock/BlindInventoryReconciliation'
 import BlindInventoryStatus from './stock/BlindInventoryStatus'
+import StockWorkspaceNav from './stock/StockWorkspaceNav'
 import InspectionsKanban from './components/InspectionsKanban'
+import InspectionJourney from './components/InspectionJourney'
+import ReportReadinessPanel from './components/ReportReadinessPanel'
+import NewInspectionGuide from './components/NewInspectionGuide'
 import SgqDashboard from './components/SgqDashboard'
 import './SgqOperationsTheme.css'
 import './config/SettingsPage.css'
@@ -18,6 +22,7 @@ const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
 // Canonical production target: password emails must never redirect to localhost.
 const RECOVERY_REDIRECT_URL = 'https://app-sgq.onrender.com/?auth=recovery'
 const ItEditorDemo=lazy(()=>import('./its/ItEditorDemo'))
+const ItLibrary=lazy(()=>import('./its/ItLibrary'))
 const MobileFotos=lazy(()=>import('./mobile/MobileFotos'))
 const InsightsPage=lazy(()=>import('./insights/InsightsPage'))
 const SettingsPage=lazy(()=>import('./config/SettingsPage'))
@@ -3396,20 +3401,21 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
   return (
     <main className="app-shell sgq-operational-shell" data-sgq-screen={tab}>
-      <aside className="sgq-side-nav">
+      <a href="#sgq-primary-content" className="sgq-skip-link">Pular para o conteúdo</a>
+      <aside className="sgq-side-nav" aria-label="Navegação principal do SGQ">
         <div className="sgq-side-brand"><span className="sgq-brand-symbol"><Boxes size={31}/></span><div><b>SGQ</b><small>Qualidade · Operações</small></div></div>
         <div className="sgq-side-caption">OPERAÇÃO</div>
-        <button className={tab==='painel'?'selected':''} onClick={()=>setTab('painel')}><LayoutDashboard size={19}/> Painel</button>
-        <button className={tab==='inspecoes'||tab==='execucao'?'selected':''} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
-        <button className={tab==='quadro'?'selected':''} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Inspeções</button>
-        <button className={tab==='estoque'?'selected':''} onClick={()=>setTab('estoque')}><Boxes size={19}/> Estoque</button>
-        <button onClick={()=>setTab('fotos-mobile')}><Camera size={19}/> Modo Fotos</button>
-        <button className={tab==='auditorias'?'selected':''} onClick={()=>{setTab('auditorias');setError('')}}><Warehouse size={19}/> Inspeções Armazém</button>
+        <button type="button" className={tab==='painel'||tab==='insights'?'selected':''} aria-current={tab==='painel'||tab==='insights'?'page':undefined} onClick={()=>setTab('painel')}><LayoutDashboard size={19}/> Painel</button>
+        <button type="button" className={tab==='inspecoes'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='inspecoes'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
+        <button type="button" className={tab==='quadro'?'selected':''} aria-current={tab==='quadro'?'page':undefined} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Inspeções</button>
+        <button type="button" className={tab==='estoque'?'selected':''} aria-current={tab==='estoque'?'page':undefined} onClick={()=>setTab('estoque')}><Boxes size={19}/> Estoque</button>
+        <button type="button" onClick={()=>setTab('fotos-mobile')}><Camera size={19}/> Modo Fotos</button>
+        <button type="button" className={tab==='auditorias'?'selected':''} aria-current={tab==='auditorias'?'page':undefined} onClick={()=>{setTab('auditorias');setError('')}}><Warehouse size={19}/> Inspeções Armazém</button>
         <div className="sgq-side-caption">QUALIDADE</div>
-        <button className={tab==='its'?'selected':''} onClick={()=>setTab('its')}><FileText size={19}/> Instruções técnicas</button>
-        <button className={tab==='equipamentos'?'selected':''} onClick={()=>{setTab('equipamentos');void refreshEquipments()}}><Wrench size={19}/> Equipamentos</button>
+        <button type="button" className={tab==='its'?'selected':''} aria-current={tab==='its'?'page':undefined} onClick={()=>setTab('its')}><FileText size={19}/> Instruções técnicas</button>
+        <button type="button" className={tab==='equipamentos'?'selected':''} aria-current={tab==='equipamentos'?'page':undefined} onClick={()=>{setTab('equipamentos');void refreshEquipments()}}><Wrench size={19}/> Equipamentos</button>
         <div className="sgq-side-caption">ADMINISTRAÇÃO</div>
-        <button className={tab==='configuracoes'?'selected':''} onClick={()=>{setError('');setTab('configuracoes')}}><Settings2 size={19}/> Configurações</button>
+        <button type="button" className={tab==='configuracoes'?'selected':''} aria-current={tab==='configuracoes'?'page':undefined} onClick={()=>{setError('');setTab('configuracoes')}}><Settings2 size={19}/> Configurações</button>
         <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button type="button" onClick={()=>void supabase.auth.signOut()}><LogOut size={14}/> Sair</button></div>
       </aside>
       <header className="topbar" aria-label="Cabeçalho do SGQ">
@@ -3447,7 +3453,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </div>
       </header>
 
-      {error && <div className="alert error">{error}</div>}
+      {error && <div className="alert error" role="alert">{error}</div>}
+      <div id="sgq-primary-content" className="sgq-primary-content-anchor" tabIndex={-1} />
       {wordDownloading&&<div className="sgq-dialog-backdrop sgq-word-loading" role="dialog"
         aria-modal="true" aria-label="Gerando Word" aria-live="polite">
         <div className="sgq-dialog sgq-word-loading-content">
@@ -3462,7 +3469,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <p>{popupMessage}</p><button className="primary" type="button" autoFocus onClick={()=>setPopupMessage('')}>Entendi</button>
         </div>
       </div>}
-      {message && <div className="alert success">{message}</div>}
+      {message && <div className="alert success" role="status">{message}</div>}
       {offlineError && <div className="alert error" role="alert">{offlineError}</div>}
 
       {tab==='insights' && <Suspense fallback={<div className="center-screen">Carregando Insights…</div>}>
@@ -3606,8 +3613,13 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </div>
 
           {offlineDraftStatus && <span className="sgq-offline-indicator"><CloudUpload size={14}/>{offlineDraftStatus}</span>}
+          <NewInspectionGuide
+            processCode={inspection.codigo ? formatFst(inspection.codigo) : ''}
+            skuCount={skuRows.filter(skuRowHasData).length}
+            hasInstruction={Boolean(inspection.itVersionId)}
+          />
           <form onSubmit={(e)=>void createInspection(e,(e.nativeEvent as SubmitEvent).submitter?.getAttribute('value')==='iniciar')} className="inspection-form">
-            <section className="panel section-card">
+            <section id="sgq-new-inspection-general" className="panel section-card">
               <div className="section-title">
                 <h2>Dados gerais</h2>
                 {inspection.processoId && <span className="pill">Processo existente</span>}
@@ -3692,7 +3704,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
             </section>
 
-            <section className="panel section-card">
+            <section id="sgq-new-inspection-products" className="panel section-card">
               <div className="section-title">
                 <h2>Produtos / componentes</h2>
                 <div className="row-actions">
@@ -3790,7 +3802,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
             </section>
 
-            <section className="panel section-card inspection-it-choice">
+            <section id="sgq-new-inspection-instruction" className="panel section-card inspection-it-choice">
               <div className="section-title"><h2>IT aplicável</h2><button className="secondary small" type="button" disabled={itSuggestBusy} onClick={()=>void suggestApplicableIt(true)}><Sparkles size={16}/>{itSuggestBusy?'Analisando…':'Sugerir com IA'}</button></div>
               <label className="sgq-ai-context-label">Contexto adicional para a IA (opcional)
                 <textarea value={aiItExtraContext} onChange={e=>setAiItExtraContext(e.target.value)} rows={2} maxLength={1600} placeholder="Ex.: especificação do produto, finalidade, condição de recebimento ou requisito adicional."/>
@@ -3852,33 +3864,37 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
-          {detail.status==='concluida' && wordStatus && !wordStatus.ready && <div id="sgq-word-pendencias" className="alert" role="status">
-            <strong>{wordStatus?.error?'Falha ao consultar o laudo':wordStatus
-              ?'O laudo ainda possui '+wordStatus.pending.length+' pendência(s)':'Não foi possível gerar o Word.'}</strong>
-            {wordStatus?.error && <p>{wordStatus.error} A validação falhou; isso não significa que os dados da inspeção estejam incompletos.</p>}
-            {!!wordStatus?.pending.length && <ul>
-              {wordStatus.pending.map((reason,index)=><li key={index}>{reason}</li>)}
-            </ul>}
-            <button className="secondary small" type="button" disabled={wordCheckBusy} onClick={()=>void refreshWordStatus()}>
-              <RefreshCw size={14}/>{wordCheckBusy?'Verificando…':'Verificar novamente'}
-            </button>
-          </div>}
           {detail.status==='concluida' && allowDimensionalRectification && <div className="alert">Modo de retificação: as alterações são auditadas e entram no próximo laudo gerado.</div>}
-          <nav id="inspection-stage-nav" className="inspection-stage-tabs" role="tablist" aria-label="Etapas da inspeção">
-            {([
-              ['dados','Dados',true],['amostragem','Amostragem',samplingDone],
-              ['verificacoes','Verificações',checklistDone],['dimensionais','Dimensionais',dimsDone],
-              ['testes','Testes',testsDone],['fotos','Fotos',Boolean(detail.photos?.length)],
-              ['resultado','Resultado',detail.status==='concluida'],
-              ['retencao','Retenção (opcional)',detail.retencao_decisao!=null],
-            ] as Array<[typeof activeStage,string,boolean]>).map(([key,label,done])=>(
-              <button key={key} type="button" role="tab" aria-selected={activeStage===key}
-                className={'inspection-stage-tab'+(activeStage===key?' active':'')+(done?' done':'')}
-                onClick={()=>selectInspectionStage(key)}>
-                <span className="inspection-stage-dot">{done?'✓':'·'}</span>{label}
-              </button>
-            ))}
-          </nav>
+          {detail.status==='concluida' && (
+            <ReportReadinessPanel
+              status={wordStatus}
+              checking={wordCheckBusy}
+              generating={wordDownloading}
+              consolidated={Boolean(detail.grupos_inspecao?.processo_id && detail.grupos_inspecao?.subprocesso_codigo)}
+              onCheck={()=>void refreshWordStatus()}
+              onGenerate={()=>void downloadInspectionWord()}
+            />
+          )}
+          <InspectionJourney
+            activeStage={activeStage}
+            onSelectStage={selectInspectionStage}
+            inspectionNumber={detail.numero}
+            processCode={formatFst(detail.grupos_inspecao?.processos?.codigo) +
+              (detail.grupos_inspecao?.subprocesso_codigo ? '-' + detail.grupos_inspecao.subprocesso_codigo : '')}
+            client={detail.grupos_inspecao?.processos?.cliente}
+            nf={detail.grupos_inspecao?.nota_fiscal}
+            instruction={detail.it_versoes?.instrucoes_trabalho?.codigo
+              ? detail.it_versoes.instrucoes_trabalho.codigo + ' · ' + (detail.it_versoes.versao || 'sem versão')
+              : null}
+            instructionSelected={Boolean(detail.it_versao_id)}
+            inspectionStatus={detail.status}
+            samplingDone={samplingDone && Number(detail.tamanho_amostra) > 0}
+            checklistDone={checklistDone}
+            dimensionsDone={dimsDone}
+            testsDone={testsDone}
+            photoCount={detail.photos?.length ?? 0}
+            retentionDone={detail.retencao_decisao != null}
+          />
           {detail.status==='aberta' && activeStage!=='dados' && activeStage!=='fotos' && (
             <div className="inspection-not-started-hint">Esta inspeção ainda não foi iniciada. Revise os dados, selecione uma IT e clique em <strong>Iniciar inspeção</strong> antes de registrar verificações.</div>
           )}
@@ -3905,7 +3921,6 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               ))}
             </div>
 
-            <div className="section-title"><h3>Observação interna</h3></div>
             <div className="section-title"><h2>Observação interna</h2></div>
             <textarea
               value={internalObservation}
@@ -4349,7 +4364,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </Suspense>
           ) : (<>
           {canManageIts && (
-            <form className="panel section-card" onSubmit={uploadIt}>
+            <details className="sgq-it-upload-panel">
+              <summary>Importar IT existente (Word ou PDF)</summary>
+              <div className="sgq-it-upload-content">
+                <p>Cadastre um documento para leitura e revisão da estrutura antes da publicação.</p>
+                <form className="panel section-card" onSubmit={uploadIt}>
               <h2>Nova IT</h2>
               <div className="form-grid">
                 <label>Código<input value={itForm.codigo} onChange={(e)=>setItForm({...itForm,codigo:e.target.value})} placeholder="IT 015"/></label>
@@ -4359,31 +4378,19 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 <label className="span-2">Word ou PDF<input type="file" accept=".docx,.pdf" onChange={(e)=>setItFile(e.target.files?.[0] ?? null)}/></label>
               </div>
               <div className="actions"><button className="primary" type="submit" disabled={!itFile}><Upload size={17}/> Enviar para leitura</button></div>
-            </form>
+                </form>
+              </div>
+            </details>
           )}
-          <div className="list">
-            {itVersions.map((it)=>(
-              <article className="row-card it-row" key={it.id}>
-                <div>
-                  <strong>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo}</strong>
-                  <span>Versão {it.versao}{it.arquivo_nome?' · '+it.arquivo_nome:''}</span>
-                </div>
-                <div className="row-actions">
-                  <span className="pill">{it.leitura_ia_status.replaceAll('_',' ')}</span>
-                  {canManageIts && ['nao_iniciada','aguardando','erro'].includes(it.leitura_ia_status) && (
-                    <button className="secondary small" disabled={itBusyId===it.id} onClick={()=>structureItVersion(it.id)}>
-                      {itBusyId===it.id?'Lendo…':'Estruturar com IA'}
-                    </button>
-                  )}
-                  {['revisao','publicada'].includes(it.leitura_ia_status) && (
-                    <button className="secondary small" disabled={itBusyId===it.id} onClick={()=>reviewItVersion(it)}>
-                      Revisar estrutura
-                    </button>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
+          <Suspense fallback={<div className="panel section-card" role="status">Carregando biblioteca de ITs…</div>}>
+            <ItLibrary
+              versions={itVersions}
+              canManage={!!canManageIts}
+              busyId={itBusyId}
+              onStructure={id=>void structureItVersion(id)}
+              onReview={version=>{const item=itVersions.find(it=>it.id===version.id);if(item)void reviewItVersion(item)}}
+            />
+          </Suspense>
           </>)}
         </section>
       )}
@@ -4440,13 +4447,16 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
-          <div className="sgq-stock-mode">
-            <button type="button" className={stockMode==='posicoes'?'primary':'secondary'} onClick={()=>setStockMode('posicoes')}>Posições</button>
-            <button type="button" className={stockMode==='inventario'?'primary':'secondary'} onClick={()=>{setStockMode('inventario');setSelectedSample(null)}}>Inventário</button>
-            <button type="button" className={stockMode==='cego'?'primary':'secondary'} onClick={()=>{setStockMode('cego');setSelectedSample(null)}}>Inventário FST · Omie</button>
-            <button type="button" className={stockMode==='status_cegos'?'primary':'secondary'} onClick={()=>{setStockMode('status_cegos');setSelectedSample(null)}}>Status do inventário FST</button>
-            <button type="button" className={stockMode==='conciliacao'?'primary':'secondary'} onClick={()=>{setStockMode('conciliacao');setSelectedSample(null)}}>Conciliação pós-inventário</button>
-          </div>
+          <StockWorkspaceNav
+            active={stockMode}
+            onChange={next=>{setStockMode(next);if(next!=='posicoes')setSelectedSample(null)}}
+          />
+          {['cego','status_cegos','conciliacao'].includes(stockMode) && (
+            <p className="sgq-stock-boundary" role="note">
+              <strong>Referência de quantidade:</strong> controles físicos do SGQ para a mesma localização.
+              A consulta ao Omie confere apenas código e descrição do produto.
+            </p>
+          )}
           {stockMode==='cego'&&<BlindInventoryUnified canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/>}
           {stockMode==='conciliacao'&&<BlindInventoryReconciliation canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/>}
           {stockMode==='status_cegos'&&<BlindInventoryStatus onOpenCount={()=>setStockMode('cego')} onOpenReconciliation={()=>setStockMode('conciliacao')}/>}
