@@ -97,3 +97,19 @@ Em cada issue: versão/ambiente, passos, esperado/obtido, evidência sanitizada,
 - `README.md`, `package.json`, `.github/workflows/sgq-validation.yml`, `tests/http-smoke.test.mjs` e suites de domínio do repositório.
 - QA Skills (MIT): https://github.com/petrkindlmann/qa-skills — `risk-based-testing`, `release-readiness`, `ai-qa-review`.
 - Nenhuma ferramenta externa de QA foi instalada na máquina do usuário por este documento.
+
+
+## 8. Testes E2E do React — ambiente sintético isolado
+
+### Implementação e execução
+- `npm run test:e2e`, `playwright.config.mjs`, `e2e/fixtures/isolated.mjs`.
+- GitHub Actions `.github/workflows/sgq-e2e-isolated.yml`: Chromium desktop e emulação móvel Pixel 7; evidências HTML, trace e screenshots de falha.
+- Inicia Vite **local** em `http://127.0.0.1:4178`, com `VITE_API_URL=https://sgq-api.qa.invalid` e `VITE_SUPABASE_URL=https://sgq-auth.qa.invalid`. O mock intercepta toda rede externa, permite autenticação **apenas sintética** e **não** permite gravações operacionais.
+- Fluxos: login inválido, login sintético, navegação IT, pesquisa/filtros, estoque/conciliação física, senha expirada, visualização mobile, axe em login/recuperação.
+- Não criar credenciais reais, acessar dados da empresa, alterar Supabase nem enviar conteúdo ao Omie por esses testes.
+- A emulação mobile comprova responsividade do navegador, **não** comportamento em iPhone/Android físicos.
+
+### Status de cobertura
+- Testes de UI isolada: implementados, sujeitos a evidências da execução CI da PR específica; não contam como testes reais de autenticação Supabase, integrações Omie, persistência de fotos, banco/RPC, Word ou tratamento de falhas de dados.
+- Para concluir a issue #79 integralmente ainda é necessário preparar um projeto SGQ de homologação com dados e papéis sintéticos, migrar schema, habilitar API/Storage/Edge de sandbox, e executar fluxos autenticados de gravação com rollback/limpeza.
+- Falhas de axe-core sérias/críticas devem gerar correção de acessibilidade, sem permitir filtros silenciosos ou saltar testes.

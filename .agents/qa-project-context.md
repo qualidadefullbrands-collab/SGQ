@@ -29,7 +29,7 @@ Ferramenta interna de Sistema de Gestão da Qualidade (SGQ) para inspeções, IT
 - **Word:** `python -m unittest discover -s server/tests -v`.
 - **Edge:** `deno check --node-modules-dir=auto supabase/functions/sgq-inventario-omie/index.ts`.
 - **HTTP:** `tests/http-smoke.test.mjs` contém testes reais, mas usa `skip` quando `SGQ_TEST_API_URL` não existe. Na execução #519, 314 casos Node, 309 aprovados, 5 ignorados. O total **não é medida de cobertura de linhas**.
-- **E2E navegador, visual, acessibilidade automática:** não foi identificado Playwright/Cypress configurado no `package.json`; **não afirmar executados**.
+- **E2E navegador sintético:** Playwright 1.65.0 (Chromium desktop/Pixel 7), `e2e/*.spec.mjs` e `playwright.config.mjs`; API e Supabase Auth simulados por interceptação de rede. Testes de login, navegação, recuperação e auditoria automatizada com axe-core. **Não são integração real de Supabase/Omie ou ensaios com dispositivos físicos.**
 - **QC de publicação:** workflow separado de smoke público sem credenciais, no caminho `tests/qa/production-smoke.mjs` (a partir desta implementação).
 
 ## CI/CD

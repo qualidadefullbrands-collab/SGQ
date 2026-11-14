@@ -6,3 +6,9 @@ dist
 .DS_Store
 .vscode
 .idea
+
+# QA/QC Playwright: artefatos e sessões nunca são versionados
+playwright-report/
+test-results/
+playwright/.auth/
+e2e/.auth/
