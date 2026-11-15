@@ -379,7 +379,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
  async function save(goToNext:boolean){
   if(!canWrite||busy||!confirmed||!session||!selected)return
   const qty=quantity.trim()
-  if(!/^\\d+(?:[.,]\\d{1,3})?$/.test(qty)){setError('Informe uma quantidade válida (zero permitido).');return}
+  if(!/^\d+(?:[.,]\d{1,3})?$/.test(qty)){setError('Informe uma quantidade válida (zero permitido).');return}
   if(!location||session.endereco!==location){setError('Confirme novamente a localização.');return}
   if(!photo){setError('Anexe uma foto do produto antes de salvar.');return}
   if(!['image/jpeg','image/png'].includes(photo.type)||photo.size<=0||photo.size>8*1024*1024){
