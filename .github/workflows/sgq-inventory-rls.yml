@@ -1,0 +1,58 @@
+name: SGQ · QC RLS de Inventário FST
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventario-rls-postgres:
+    name: RLS real PostgreSQL · vínculo item e sessão FST
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: sgq-fixture-local-only
+          POSTGRES_DB: sgq_rls_qc
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sgq_rls_qc"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: sgq-fixture-local-only
+      PGDATABASE: sgq_rls_qc
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar cliente PostgreSQL
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+      - name: Fixture + migration original #95 + testes SQL reais
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "PostgreSQL efêmero, dados 100% sintéticos, sem conexão Supabase hosted/Omie"
+            psql -X -v ON_ERROR_STOP=1 -f tests/integration/inventory_rls/bootstrap.sql
+            psql -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261115104500_sgq_inventario_item_contexto_rls.sql
+            psql -X -v ON_ERROR_STOP=1 -f tests/integration/inventory_rls/verify.sql
+          } 2>&1 | tee sgq-inventario-rls.log
+      - name: Preservar evidência de QC
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgq-inventario-rls-${{ github.run_id }}
+          path: sgq-inventario-rls.log
+          retention-days: 30
+          if-no-files-found: warn
