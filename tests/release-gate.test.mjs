@@ -59,24 +59,24 @@ test('NO-GO se check está ignorado',()=>{
 
 test('NO-GO sem revisão independente',()=>{
   const v=base();v.prReviews=[]
-  assert.match(assessRelease(v).blockers.join(' '),/aprovação independente/)
+  assert.match(assessRelease(v).blockers.join(' '),/revisão independente ou dispensa/)
 })
 test('NO-GO com autoaprovação pelo autor',()=>{
   const v=base();v.prReviews=[{user:{login:'sgq-author'},state:'APPROVED',author_association:'COLLABORATOR',commit_id:HEAD,submitted_at:'2026-11-15T09:30:00Z'}]
-  assert.match(assessRelease(v).blockers.join(' '),/aprovação independente/)
+  assert.match(assessRelease(v).blockers.join(' '),/revisão independente ou dispensa/)
 })
 test('NO-GO se aprovação pertence a SHA anterior',()=>{
   const v=base();v.prReviews[0].commit_id=SHA
-  assert.match(assessRelease(v).blockers.join(' '),/aprovação independente/)
+  assert.match(assessRelease(v).blockers.join(' '),/revisão independente ou dispensa/)
 })
 test('NO-GO com nova revisão solicitando alterações',()=>{
   const v=base();v.prReviews.push({user:{login:'sgq-reviewer'},state:'CHANGES_REQUESTED',author_association:'COLLABORATOR',commit_id:HEAD,submitted_at:'2026-11-15T10:00:00Z'})
-  assert.match(assessRelease(v).blockers.join(' '),/aprovação independente/)
+  assert.match(assessRelease(v).blockers.join(' '),/revisão independente ou dispensa/)
 })
 
 test('NO-GO quando usuário externo não colaborador tenta aprovar',()=>{
   const v=base();v.prReviews[0].author_association='NONE'
-  assert.match(assessRelease(v).blockers.join(' '),/aprovação independente/)
+  assert.match(assessRelease(v).blockers.join(' '),/revisão independente ou dispensa/)
 })
 
 test('dispensa autorizada, documentada, substitui revisão, sem simular aprovação',()=>{
