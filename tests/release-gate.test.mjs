@@ -6,7 +6,7 @@ function passedChecks(names) { return names.map(name=>({name,status:'completed',
 function base() { return {
   candidateSha:SHA, mainSha:SHA,
   mergedPr:{number:92,merged_at:'2026-11-15T01:48:06Z',merge_commit_sha:SHA,base:{ref:'main'},head:{sha:HEAD},user:{login:'sgq-author'}},
-  prReviews:[{user:{login:'sgq-reviewer'},state:'APPROVED',commit_id:HEAD,submitted_at:'2026-11-15T09:30:00Z'}],
+  prReviews:[{user:{login:'sgq-reviewer'},state:'APPROVED',author_association:'COLLABORATOR',commit_id:HEAD,submitted_at:'2026-11-15T09:30:00Z'}],
   mainChecks:passedChecks(REQUIRED_MAIN_CHECKS),prChecks:passedChecks(REQUIRED_PR_CHECKS),
   frontendDeploy:{status:'live',commit:{id:SHA}},apiDeploy:{status:'live',commit:{id:SHA}},
   smokePassed:true,operationalApproved:true,homologationReference:'SGQ-QUAL-2026-11-15',
@@ -62,7 +62,7 @@ test('NO-GO sem revisão independente',()=>{
   assert.match(assessRelease(v).blockers.join(' '),/aprovação independente/)
 })
 test('NO-GO com autoaprovação pelo autor',()=>{
-  const v=base();v.prReviews=[{user:{login:'sgq-author'},state:'APPROVED',commit_id:HEAD,submitted_at:'2026-11-15T09:30:00Z'}]
+  const v=base();v.prReviews=[{user:{login:'sgq-author'},state:'APPROVED',author_association:'COLLABORATOR',commit_id:HEAD,submitted_at:'2026-11-15T09:30:00Z'}]
   assert.match(assessRelease(v).blockers.join(' '),/aprovação independente/)
 })
 test('NO-GO se aprovação pertence a SHA anterior',()=>{
@@ -70,6 +70,11 @@ test('NO-GO se aprovação pertence a SHA anterior',()=>{
   assert.match(assessRelease(v).blockers.join(' '),/aprovação independente/)
 })
 test('NO-GO com nova revisão solicitando alterações',()=>{
-  const v=base();v.prReviews.push({user:{login:'sgq-reviewer'},state:'CHANGES_REQUESTED',commit_id:HEAD,submitted_at:'2026-11-15T10:00:00Z'})
+  const v=base();v.prReviews.push({user:{login:'sgq-reviewer'},state:'CHANGES_REQUESTED',author_association:'COLLABORATOR',commit_id:HEAD,submitted_at:'2026-11-15T10:00:00Z'})
+  assert.match(assessRelease(v).blockers.join(' '),/aprovação independente/)
+})
+
+test('NO-GO quando usuário externo não colaborador tenta aprovar',()=>{
+  const v=base();v.prReviews[0].author_association='NONE'
   assert.match(assessRelease(v).blockers.join(' '),/aprovação independente/)
 })
