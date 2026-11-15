@@ -20,6 +20,19 @@ export const REQUIRED_PR_CHECKS = [
   'Chromium desktop e mobile · dados sintéticos',
 ]
 
+export function hasIndependentApproval(mergedPr, reviews) {
+  if (!mergedPr?.user?.login || !mergedPr?.head?.sha || !Array.isArray(reviews)) return false
+  const lastByReviewer = new Map()
+  const submitted = reviews.filter((r) => r?.user?.login && r.submitted_at)
+    .sort((a, b) => a.submitted_at.localeCompare(b.submitted_at))
+  for (const review of submitted) lastByReviewer.set(review.user.login.toLowerCase(), review)
+  return [...lastByReviewer.values()].some((r) =>
+    r.user.login.toLowerCase() !== mergedPr.user.login.toLowerCase() &&
+    r.state === 'APPROVED' &&
+    r.commit_id === mergedPr.head.sha
+  )
+}
+
 function successfulChecks(runs, required, label, blockers) {
   if (!Array.isArray(runs)) {
     blockers.push(label+': lista de verificações indisponível')
@@ -34,7 +47,7 @@ function successfulChecks(runs, required, label, blockers) {
 }
 
 /** Pure decision function. Its output is safe to save as CI evidence. */
-export function assessRelease({ candidateSha, mainSha, mergedPr, mainChecks, prChecks, frontendDeploy, apiDeploy, smokePassed, operationalApproved, homologationReference }) {
+export function assessRelease({ candidateSha, mainSha, mergedPr, prReviews, mainChecks, prChecks, frontendDeploy, apiDeploy, smokePassed, operationalApproved, homologationReference }) {
   const blockers = []
   const shaIsValid = /^[0-9a-f]{40}$/i.test(candidateSha ?? '')
   if (!shaIsValid) blockers.push('SHA candidato inválido (exige 40 caracteres hexadecimais)')
@@ -42,6 +55,7 @@ export function assessRelease({ candidateSha, mainSha, mergedPr, mainChecks, prC
   if (!mergedPr || !mergedPr.merged_at || mergedPr.base?.ref !== 'main' || mergedPr.merge_commit_sha !== candidateSha || !/^[0-9a-f]{40}$/i.test(mergedPr.head?.sha ?? '')) {
     blockers.push('PR revisável integrado em main não localizado para o SHA candidato')
   }
+  if (!hasIndependentApproval(mergedPr, prReviews)) blockers.push('PR não possui aprovação independente válida no commit revisado')
   successfulChecks(mainChecks, REQUIRED_MAIN_CHECKS, 'main', blockers)
   successfulChecks(prChecks, REQUIRED_PR_CHECKS, 'PR original', blockers)
   if (!frontendDeploy || frontendDeploy.status !== 'live' || frontendDeploy.commit?.id !== candidateSha) blockers.push('Frontend Render não está LIVE no SHA candidato')
@@ -53,6 +67,7 @@ export function assessRelease({ candidateSha, mainSha, mergedPr, mainChecks, prC
     candidateSha: shaIsValid ? candidateSha : '(inválido)',
     githubMainSha: mainSha ?? null,
     prNumber: mergedPr?.number ?? null,
+    independentReviewApproved: hasIndependentApproval(mergedPr, prReviews),
     prHeadSha: mergedPr?.head?.sha ?? null,
     renderFrontendSha: frontendDeploy?.commit?.id ?? null,
     renderApiSha: apiDeploy?.commit?.id ?? null,
@@ -95,7 +110,7 @@ async function main() {
   const candidateSha = (process.env.SGQ_CANDIDATE_SHA ?? '').trim()
   const homologationReference = (process.env.SGQ_HOMOLOGATION_REF ?? '').trim()
   const operationalApproved = process.env.SGQ_OPERATIONAL_APPROVED === 'true'
-  let mainSha = null, mergedPr = null, mainChecks = [], prChecks = [], frontendDeploy = null, apiDeploy = null
+  let mainSha = null, mergedPr = null, prReviews = [], mainChecks = [], prChecks = [], frontendDeploy = null, apiDeploy = null
   const preliminaryErrors = []
   try {
     if (!/^[0-9a-f]{40}$/i.test(candidateSha)) throw new Error('SHA inválido')
@@ -111,8 +126,12 @@ async function main() {
     mergedPr = Array.isArray(associated) ? associated.find((p) => p.merged_at && p.merge_commit_sha === candidateSha) : null
     mainChecks = mainResult?.check_runs ?? []
     if (mergedPr?.head?.sha) {
-      const prResult = await readJson(base+'/commits/'+mergedPr.head.sha+'/check-runs?per_page=100', githubToken, 'GitHub')
+      const [prResult, reviews] = await Promise.all([
+        readJson(base+'/commits/'+mergedPr.head.sha+'/check-runs?per_page=100', githubToken, 'GitHub'),
+        readJson(base+'/pulls/'+mergedPr.number+'/reviews?per_page=100', githubToken, 'GitHub'),
+      ])
       prChecks = prResult?.check_runs ?? []
+      prReviews = reviews
     }
     const renderBase = 'https://api.render.com/v1/services'
     const [front, api] = await Promise.all([
@@ -126,7 +145,7 @@ async function main() {
   }
   // Always run public smoke, even when prior evidence is missing, so no failure is hidden.
   const smokePassed = smoke()
-  const verdict = assessRelease({ candidateSha, mainSha, mergedPr, mainChecks, prChecks, frontendDeploy, apiDeploy, smokePassed, operationalApproved, homologationReference })
+  const verdict = assessRelease({ candidateSha, mainSha, mergedPr, prReviews, mainChecks, prChecks, frontendDeploy, apiDeploy, smokePassed, operationalApproved, homologationReference })
   verdict.blockers.unshift(...preliminaryErrors)
   if (preliminaryErrors.length) verdict.decision = 'NO-GO'
   const output = JSON.stringify(verdict, null, 2)+'\n'
