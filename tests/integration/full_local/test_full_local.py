@@ -48,6 +48,7 @@ class FullLocalIntegration(unittest.TestCase):
         cls.service=os.environ["SGQ_QC_SERVICE_KEY"]
         cls.http=httpx.Client(timeout=95,follow_redirects=False)
         cls.owner,cls.owner_token=cls.create_user("owner")
+        cls.inv_path=f"{cls.owner}/{INV_OPEN}/{INV_ITEM}/00000000-0000-4000-8000-000000000099.png"
         cls.other,cls.other_token=cls.create_user("other")
         fixture=(ROOT/"tests/integration/full_local/fixture.sql").read_text()
         assert fixture.count("__OWNER_UUID__")>10
@@ -296,7 +297,6 @@ class FullLocalIntegration(unittest.TestCase):
             "photo replacement must persist its audit event")
 
     def test_09e_inventory_missing_photo_does_not_mutate_physical_count(self):
-        self.inv_path=f"{self.owner}/{INV_OPEN}/{INV_ITEM}/00000000-0000-4000-8000-000000000099.png"
         endpoint=self.api+f"/api/inventario/cego/itens/{INV_ITEM}/foto/registrar"
         r=self.http.post(endpoint,headers=self.headers(self.owner_token),
                          json={"storagePath":self.inv_path})
