@@ -29,6 +29,7 @@ export function hasIndependentApproval(mergedPr, reviews) {
   return [...lastByReviewer.values()].some((r) =>
     r.user.login.toLowerCase() !== mergedPr.user.login.toLowerCase() &&
     r.state === 'APPROVED' &&
+    ['OWNER','MEMBER','COLLABORATOR'].includes(r.author_association) &&
     r.commit_id === mergedPr.head.sha
   )
 }
