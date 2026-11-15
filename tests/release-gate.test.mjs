@@ -78,3 +78,20 @@ test('NO-GO quando usuário externo não colaborador tenta aprovar',()=>{
   const v=base();v.prReviews[0].author_association='NONE'
   assert.match(assessRelease(v).blockers.join(' '),/aprovação independente/)
 })
+
+test('dispensa autorizada, documentada, substitui revisão, sem simular aprovação',()=>{
+  const v=base();v.prReviews=[];v.reviewWaiverAuthorized=true;
+  v.reviewWaiverReason='Dispensa registrada pelo proprietário do fluxo SGQ em 2026-11-15'
+  const result=assessRelease(v)
+  assert.equal(result.decision,'GO_TECNICO_COM_ATESTADO')
+  assert.equal(result.independentReviewApproved,false)
+  assert.equal(result.independentReviewWaived,true)
+})
+test('dispensa sem justificativa válida permanece NO-GO',()=>{
+  const v=base();v.prReviews=[];v.reviewWaiverAuthorized=true;v.reviewWaiverReason='sim'
+  assert.equal(assessRelease(v).decision,'NO-GO')
+})
+test('justificativa sozinha não dispensa revisão',()=>{
+  const v=base();v.prReviews=[];v.reviewWaiverReason='Dispensa apenas informada sem autorização explícita'
+  assert.equal(assessRelease(v).decision,'NO-GO')
+})
