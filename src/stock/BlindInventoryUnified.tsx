@@ -1,6 +1,8 @@
 import {useEffect,useMemo,useRef,useState} from 'react'
 import {Camera,CheckCircle2,ImagePlus,MapPin,Plus,RefreshCw,Search,ShieldAlert,Upload} from 'lucide-react'
 import {authClient,apiPost} from '../lib/supabase'
+import {enqueueOfflineOperation,offlineOperations,retryOfflinePhotoOperation,type OfflineOperation} from '../lib/offline'
+import {replayOfflineOperations} from '../lib/offlineSync'
 import {blindInventoryError as explain} from './blindInventoryErrors'
 import './BlindInventoryUnified.css'
 
@@ -47,6 +49,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
  const [session,setSession]=useState<Session|null>(null)
  const [counts,setCounts]=useState<CountRow[]>([])
  const [photoRows,setPhotoRows]=useState<PhotoRow[]>([])
+ const [photoQueue,setPhotoQueue]=useState<OfflineOperation[]>([])
  const [selectedSku,setSelectedSku]=useState('')
  const [quantity,setQuantity]=useState('')
  const [photo,setPhoto]=useState<File|null>(null)
@@ -74,6 +77,8 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
  const selectedCounts=countedBySku.get(selectedSku)||[]
  const photosForSelected=photoRows.filter(p=>selectedCounts.some(c=>c.id===p.item_id))
  const alreadyPhotographed=!!counts.find(c=>c.inventario_id===session?.id&&skuOf(c.codigo_omie)===selectedSku&&photoRows.some(p=>p.item_id===c.id))
+ const currentCount=counts.find(c=>c.inventario_id===session?.id&&skuOf(c.codigo_omie)===selectedSku)
+ const pendingPhoto=currentCount&&photoQueue.find(p=>p.body?.itemId===currentCount.id&&p.kind==='inventory-photo')
 
  useEffect(()=>{
   if(!photo){setPreview('');return}
@@ -81,6 +86,23 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   setPreview(objectUrl)
   return()=>URL.revokeObjectURL(objectUrl)
  },[photo])
+
+ // IndexedDB is the durable source of evidence still waiting for upload
+ // or database linkage. Refresh it whenever the shared offline replay changes.
+ useEffect(()=>{
+  let active=true
+  const refresh=async()=>{
+   const {data}=await authClient.auth.getSession()
+   const uid=data.session?.user?.id
+   if(!uid){if(active)setPhotoQueue([]);return}
+   const operations=await offlineOperations(uid)
+   if(active)setPhotoQueue(operations.filter(x=>x.kind==='inventory-photo'))
+  }
+  const changed=()=>{void refresh();if(processCode)void loadCounts(processCode)}
+  window.addEventListener('sgq-offline-queue-changed',changed)
+  void refresh()
+  return()=>{active=false;window.removeEventListener('sgq-offline-queue-changed',changed)}
+ },[processCode])
 
  async function loadLocations(){
   const [registered,samples]=await Promise.all([
@@ -310,7 +332,9 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
  }
 
  function chooseSku(code:string){
-  setSelectedSku(code);setQuantity('');setPhoto(null);setError('');setMessage('')
+  const existing=counts.find(c=>c.inventario_id===session?.id&&skuOf(c.codigo_omie)===code)
+  setSelectedSku(code);setQuantity(existing?String(existing.quantidade_contada):'')
+  setPhoto(null);setError('');setMessage('')
  }
  async function syncPhoto(photoId:string){
   setSyncing(photoId)
