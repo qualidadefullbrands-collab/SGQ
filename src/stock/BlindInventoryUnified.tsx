@@ -584,6 +584,13 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
     </div>
     {photo&&<div className="sgq-single-preview">{preview&&<img src={preview} alt={'Foto do SKU '+selected.sku}/>}<span>{photo.name}</span><button type="button" className="secondary small" onClick={()=>setPhoto(null)}>Trocar</button></div>}
     {alreadyPhotographed&&<p className="sgq-single-note">Este produto já possui foto nesta contagem. Você pode selecioná-lo para consultar o registro; evite duplicar a foto.</p>}
+    {pendingPhoto&&<div className="sgq-single-status" role="status">
+     <p><strong>Contagem preservada · foto pendente no dispositivo</strong></p>
+     <p>A quantidade física já foi salva. O envio será recuperado sem criar outra contagem.</p>
+     {pendingPhoto.state==='conflict'&&<p role="alert">{pendingPhoto.error||'O envio exige revisão.'}</p>}
+     <button type="button" className="secondary small" disabled={busy||!!syncing}
+      onClick={()=>void retryPhotoFromDevice(pendingPhoto)}><RefreshCw size={15}/> Reenviar foto pendente</button>
+    </div>}
     {photosForSelected.length>0&&<div className="sgq-single-status">
      {photosForSelected.map(p=><p key={p.id}>
       Foto: <strong>{p.status==='sincronizada'?'Enviada ao Omie':p.status==='erro'?'Falha no Omie':p.status==='enviando'?'Enviando':'Pendente'}</strong>
@@ -593,9 +600,9 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
      </p>)}
     </div>}
     <div className="sgq-single-save-actions">
-     <button type="button" className="secondary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!quantity.trim()||!photo}
+     <button type="button" className="secondary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!!pendingPhoto||!quantity.trim()||!photo}
       onClick={()=>void save(false)}><Upload size={16}/>{busy?'Salvando…':'Salvar'}</button>
-     <button type="button" className="primary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!quantity.trim()||!photo}
+     <button type="button" className="primary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!!pendingPhoto||!quantity.trim()||!photo}
       onClick={()=>void save(true)}><Upload size={16}/>{busy?'Salvando…':'Salvar e próximo item'}</button>
     </div>
    </section>}
