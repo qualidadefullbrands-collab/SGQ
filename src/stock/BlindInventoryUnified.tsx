@@ -1,6 +1,8 @@
 import {useEffect,useMemo,useRef,useState} from 'react'
 import {Camera,CheckCircle2,ImagePlus,MapPin,Plus,RefreshCw,Search,ShieldAlert,Upload} from 'lucide-react'
 import {authClient,apiPost} from '../lib/supabase'
+import {enqueueOfflineOperation,offlineOperations,retryOfflinePhotoOperation,type OfflineOperation} from '../lib/offline'
+import {replayOfflineOperations} from '../lib/offlineSync'
 import {blindInventoryError as explain} from './blindInventoryErrors'
 import './BlindInventoryUnified.css'
 
@@ -47,6 +49,7 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
  const [session,setSession]=useState<Session|null>(null)
  const [counts,setCounts]=useState<CountRow[]>([])
  const [photoRows,setPhotoRows]=useState<PhotoRow[]>([])
+ const [photoQueue,setPhotoQueue]=useState<OfflineOperation[]>([])
  const [selectedSku,setSelectedSku]=useState('')
  const [quantity,setQuantity]=useState('')
  const [photo,setPhoto]=useState<File|null>(null)
@@ -74,6 +77,8 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
  const selectedCounts=countedBySku.get(selectedSku)||[]
  const photosForSelected=photoRows.filter(p=>selectedCounts.some(c=>c.id===p.item_id))
  const alreadyPhotographed=!!counts.find(c=>c.inventario_id===session?.id&&skuOf(c.codigo_omie)===selectedSku&&photoRows.some(p=>p.item_id===c.id))
+ const currentCount=counts.find(c=>c.inventario_id===session?.id&&skuOf(c.codigo_omie)===selectedSku)
+ const pendingPhoto=currentCount&&photoQueue.find(p=>p.body?.itemId===currentCount.id&&p.kind==='inventory-photo')
 
  useEffect(()=>{
   if(!photo){setPreview('');return}
@@ -81,6 +86,23 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   setPreview(objectUrl)
   return()=>URL.revokeObjectURL(objectUrl)
  },[photo])
+
+ // IndexedDB is the durable source of evidence still waiting for upload
+ // or database linkage. Refresh it whenever the shared offline replay changes.
+ useEffect(()=>{
+  let active=true
+  const refresh=async()=>{
+   const {data}=await authClient.auth.getSession()
+   const uid=data.session?.user?.id
+   if(!uid){if(active)setPhotoQueue([]);return}
+   const operations=await offlineOperations(uid)
+   if(active)setPhotoQueue(operations.filter(x=>x.kind==='inventory-photo'))
+  }
+  const changed=()=>{void refresh();if(processCode)void loadCounts(processCode)}
+  window.addEventListener('sgq-offline-queue-changed',changed)
+  void refresh()
+  return()=>{active=false;window.removeEventListener('sgq-offline-queue-changed',changed)}
+ },[processCode])
 
  async function loadLocations(){
   const [registered,samples]=await Promise.all([
@@ -310,7 +332,9 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
  }
 
  function chooseSku(code:string){
-  setSelectedSku(code);setQuantity('');setPhoto(null);setError('');setMessage('')
+  const existing=counts.find(c=>c.inventario_id===session?.id&&skuOf(c.codigo_omie)===code)
+  setSelectedSku(code);setQuantity(existing?String(existing.quantidade_contada):'')
+  setPhoto(null);setError('');setMessage('')
  }
  async function syncPhoto(photoId:string){
   setSyncing(photoId)
@@ -335,6 +359,23 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   }catch(e){setError('Contagem salva, mas o envio da foto ao Omie não foi concluído: '+explain(e));return false}
   finally{setSyncing('')}
  }
+ async function retryPhotoFromDevice(operation:OfflineOperation){
+  if(busy||!operation.userId || operation.kind!=='inventory-photo')return
+  if(!navigator.onLine){setError('Sem conexão. A foto continua protegida neste dispositivo.');return}
+  setBusy(true);setError('')
+  try{
+   if(operation.state==='conflict')await retryOfflinePhotoOperation(operation.userId,operation.id)
+   await replayOfflineOperations(operation.userId)
+   const still=(await offlineOperations(operation.userId)).find(x=>x.id===operation.id)
+   await loadCounts(processCode)
+   if(still)setError(still.state==='conflict'
+    ?'Não foi possível vincular a foto: '+(still.error||'revise a sessão de inventário.')
+    :'A foto continua na fila para reenvio automático. Não repita a contagem.')
+   else setMessage('Foto do inventário recuperada e vinculada ao SKU. Confira o status de publicação no Omie.')
+  }catch(e){setError('Não foi possível sincronizar a foto: '+explain(e))}
+  finally{setBusy(false)}
+ }
+
  async function save(goToNext:boolean){
   if(!canWrite||busy||!confirmed||!session||!selected)return
   const qty=quantity.trim()
@@ -346,15 +387,24 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
   }
   const current=counts.find(r=>r.inventario_id===session.id&&skuOf(r.codigo_omie)===selected.sku)
   const existingPhoto=current&&photoRows.find(p=>p.item_id===current.id)
-  if(existingPhoto){setError('Esse item já possui uma foto. Abra o histórico para conferir o envio ao Omie.');return}
-  if(current&&!window.confirm('Este SKU já foi contado nesta localização. Deseja corrigir a quantidade e incluir a foto?'))return
+  if(existingPhoto){setError('Esse item já possui uma foto. Confira o envio ao Omie no histórico.');return}
+  if(current&&photoQueue.some(p=>p.kind==='inventory-photo'&&p.body?.itemId===current.id)){
+   setError('Há uma foto desta contagem salva no dispositivo. Use Reenviar foto pendente em vez de contar novamente.');return
+  }
+  const counted=Number(qty.replace(',','.'))
+  if(current&&Number(current.quantidade_contada)!==counted &&
+     !window.confirm('A quantidade deste SKU já foi contada. Confirmar correção da quantidade física?'))return
   setBusy(true);setError('');setMessage('')
   let saved=false
   try{
    const {data:{user},error:authError}=await authClient.auth.getUser()
    if(authError||!user)throw new Error('Sessão expirada.')
-   const product=await apiPost<{found:boolean;descricao:string}>('/api/estoque/validar-sku',{codigo:selected.sku})
-   if(product.error||!product.data?.found)throw new Error('O SKU não foi confirmado no cadastro Omie: '+(product.error?.message||selected.sku))
+   if(current&&current.criado_por!==user.id)
+    throw new Error('Esta contagem pertence a outro conferente. Solicite ao responsável que envie a foto pendente.')
+   if(!current){
+    const product=await apiPost<{found:boolean;descricao:string}>('/api/estoque/validar-sku',{codigo:selected.sku})
+    if(product.error||!product.data?.found)throw new Error('O SKU não foi confirmado no cadastro Omie: '+(product.error?.message||selected.sku))
+   }
    const itemId=current?.id||crypto.randomUUID()
    const payload={
     codigo_omie:selected.sku,descricao_omie:selected.descricao,endereco:location,endereco_armario:location,
@@ -362,12 +412,16 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
     verificacao_cadastro:{modo:'processo_omie',processo:processCode,sku:selected.sku,
      cliente_omie:omie?.cliente||null,nf_entrada:nfNumber,data_nf:nfDate,fonte:'omie_projeto_inventario',
      consultadoEm:new Date().toISOString()},
-    quantidade_contada:Number(qty.replace(',','.')),observacao:'',atualizado_em:new Date().toISOString()
+    quantidade_contada:counted,observacao:'',atualizado_em:new Date().toISOString()
    }
    if(current){
-    const {error:writeError}=await authClient.from('sgq_inventario_cego_itens')
-     .update(payload).eq('id',itemId)
-    if(writeError)throw writeError
+    // Attaching the missing photo must not re-count or change the already
+    // confirmed physical quantity. Only an explicit quantity change writes it.
+    if(Number(current.quantidade_contada)!==counted){
+     const {error:writeError}=await authClient.from('sgq_inventario_cego_itens')
+      .update(payload).eq('id',itemId)
+     if(writeError)throw writeError
+    }
    }else{
     const {error:writeError}=await authClient.from('sgq_inventario_cego_itens')
      .insert({...payload,id:itemId,inventario_id:session.id,criado_por:user.id})
@@ -376,27 +430,48 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
    saved=true
    const ext=photo.type==='image/png'?'png':'jpg'
    const path=[user.id,session.id,itemId,crypto.randomUUID()+'.'+ext].join('/')
-   const {error:uploadError}=await authClient.storage.from('sgq-inventario-cego')
-    .upload(path,photo,{upsert:false,contentType:photo.type})
-   if(uploadError)throw new Error('Contagem salva, mas o upload da foto falhou: '+explain(uploadError))
-   const {data:photoRecord,error:recordError}=await authClient.from('sgq_inventario_cego_imagens')
-    .insert({item_id:itemId,codigo_omie:selected.sku,storage_path:path,criado_por:user.id})
-    .select('id').single()
-   if(recordError||!photoRecord)throw new Error('Contagem salva, mas falhou o registro de foto: '+explain(recordError))
-   // Send now, not when the inventory is closed. Keep record if API fails.
-   const delivered=await syncPhoto(photoRecord.id)
+   const operationId=user.id+':inventory-photo:'+itemId
+   // Save the original image and immutable path in IndexedDB BEFORE network
+   // upload. If a response is lost, retry will reuse the very same path.
+   await enqueueOfflineOperation({
+    id:operationId,userId:user.id,kind:'inventory-photo',
+    path:'/api/inventario/cego/itens/'+itemId+'/foto/registrar',
+    body:{sessionId:session.id,itemId,sku:selected.sku,path,file:photo},
+    createdAt:Date.now()
+   })
+   await replayOfflineOperations(user.id)
+   let remaining=(await offlineOperations(user.id)).find(x=>x.id===operationId)
+   // A reconnect replay may have started just before this operation was
+   // enqueued, so its snapshot would not include the new photo. Drain once
+   // more with the same immutable path when still connected.
+   if(remaining?.state==='pending'&&navigator.onLine){
+    await replayOfflineOperations(user.id)
+    remaining=(await offlineOperations(user.id)).find(x=>x.id===operationId)
+   }
    await loadCounts(processCode)
-   if(delivered)setMessage('Contagem salva e foto enviada ao Omie: '+selected.sku)
+   if(remaining){
+    if(remaining.state==='conflict')setError('Contagem preservada. Revise a foto: '+(remaining.error||'vínculo não confirmado.'))
+    else setMessage('Contagem preservada. A foto está salva neste dispositivo e será reenviada automaticamente.')
+    if(goToNext)resetItem(false)
+    else setPhoto(null)
+    return
+   }
+   const {data:record}=await authClient.from('sgq_inventario_cego_imagens')
+    .select('id,status').eq('item_id',itemId).maybeSingle()
+   const delivered=record?.status==='sincronizada'
    if(goToNext){
     resetItem(delivered)
-    if(delivered)setMessage('Contagem salva e foto confirmada no Omie. Selecione o próximo item do processo.')
-    else setMessage('Contagem salva. A foto está pendente no Omie; selecione o próximo item.')
+    setMessage(delivered?'Contagem e foto confirmadas no Omie. Selecione o próximo item.':
+     'Contagem e foto salvas no SGQ. Selecione o próximo item; a publicação no Omie pode ser conferida no histórico.')
    }else{
     setPhoto(null)
-    if(delivered)setMessage('Contagem salva e foto confirmada no SKU '+selected.sku+' do Omie.')
-    else setMessage('Contagem salva. A foto está pendente no Omie e poderá ser reenviada.')
+    setMessage(delivered?'Foto confirmada no SKU '+selected.sku+' do Omie.':
+     'Foto vinculada à contagem, sem duplicação. Confira o status de envio ao Omie.')
    }
-  }catch(e){setError((saved?'Contagem registrada parcialmente. ':'')+explain(e));await loadCounts(processCode)}
+  }catch(e){
+   setError((saved?'Contagem preservada. A foto pode estar pendente no dispositivo. ':'')+explain(e))
+   await loadCounts(processCode)
+  }
   finally{setBusy(false)}
  }
 
@@ -516,6 +591,13 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
     </div>
     {photo&&<div className="sgq-single-preview">{preview&&<img src={preview} alt={'Foto do SKU '+selected.sku}/>}<span>{photo.name}</span><button type="button" className="secondary small" onClick={()=>setPhoto(null)}>Trocar</button></div>}
     {alreadyPhotographed&&<p className="sgq-single-note">Este produto já possui foto nesta contagem. Você pode selecioná-lo para consultar o registro; evite duplicar a foto.</p>}
+    {pendingPhoto&&<div className="sgq-single-status" role="status">
+     <p><strong>Contagem preservada · foto pendente no dispositivo</strong></p>
+     <p>A quantidade física já foi salva. O envio será recuperado sem criar outra contagem.</p>
+     {pendingPhoto.state==='conflict'&&<p role="alert">{pendingPhoto.error||'O envio exige revisão.'}</p>}
+     <button type="button" className="secondary small" disabled={busy||!!syncing}
+      onClick={()=>void retryPhotoFromDevice(pendingPhoto)}><RefreshCw size={15}/> Reenviar foto pendente</button>
+    </div>}
     {photosForSelected.length>0&&<div className="sgq-single-status">
      {photosForSelected.map(p=><p key={p.id}>
       Foto: <strong>{p.status==='sincronizada'?'Enviada ao Omie':p.status==='erro'?'Falha no Omie':p.status==='enviando'?'Enviando':'Pendente'}</strong>
@@ -525,9 +607,9 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
      </p>)}
     </div>}
     <div className="sgq-single-save-actions">
-     <button type="button" className="secondary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!quantity.trim()||!photo}
+     <button type="button" className="secondary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!!pendingPhoto||!quantity.trim()||!photo}
       onClick={()=>void save(false)}><Upload size={16}/>{busy?'Salvando…':'Salvar'}</button>
-     <button type="button" className="primary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!quantity.trim()||!photo}
+     <button type="button" className="primary" disabled={!canWrite||busy||!!syncing||alreadyPhotographed||!!pendingPhoto||!quantity.trim()||!photo}
       onClick={()=>void save(true)}><Upload size={16}/>{busy?'Salvando…':'Salvar e próximo item'}</button>
     </div>
    </section>}

@@ -36,11 +36,25 @@ test('contagem física persiste após falha Omie e foto pode ser reenviada sem d
   await expect(page.getByRole('button', { name: 'Salvar e próximo item' })).toBeEnabled()
   await page.getByRole('button', { name: 'Salvar e próximo item' }).click()
 
-  await expect(page.getByText(/Contagem salva\. A foto está pendente no Omie/)).toBeVisible()
+  try {
+    await expect(page.getByText(/Contagem e foto salvas no SGQ/)).toBeVisible()
+  } catch (error) {
+    const texts=await page.locator('[role="alert"], [role="status"], .alert, .sgq-single-note, .sgq-single-status').allTextContents()
+    console.log('SGQ_QC_INVENTORY_DIAGNOSTIC',JSON.stringify({
+      texts:texts.map(x=>x.slice(0,350)),
+      counts:db.counts.length,photos:db.photos.map(x=>({id:x.id,item_id:x.item_id,status:x.status})),
+      syncAttempts:db.photoSyncAttempts,
+      writes:db.writes.map(x=>x.table),
+      unexpected:db.requestsOutsideFixture
+    }))
+    throw error
+  }
   expect(db.counts).toHaveLength(1)
   expect(db.counts[0].quantidade_contada).toBe(12.5)
   expect(db.counts[0].endereco).toBe('RUA 01')
   expect(db.writes.filter(w => w.table === 'sgq_inventario_cego_itens')).toHaveLength(1)
+  expect(db.writes.filter(w => w.table === 'photo_registration_api')).toHaveLength(1)
+  expect(db.writes.filter(w => w.table === 'sgq_inventario_cego_imagens')).toHaveLength(0)
   expect(db.photoSyncAttempts).toBe(1)
 
   await page.getByRole('button', { name: /QA0001.*Produto simulado para inventário/ }).click()

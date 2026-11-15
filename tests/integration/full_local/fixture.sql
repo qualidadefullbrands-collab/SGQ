@@ -82,6 +82,27 @@ create policy qa_audit_read on public.audit_log for select to authenticated
   using (usuario_id=(select auth.uid()));
 create policy qa_audit_insert on public.audit_log for insert to authenticated
   with check (usuario_id=(select auth.uid()));
+-- Synthetic inventory tables for real HTTP registration/replay. Quantities
+-- remain immutable under the test API; no Omie endpoint is connected.
+create table public.sgq_inventarios_cegos (
+ id uuid primary key, owner_id uuid not null references auth.users(id),
+ status text not null default 'aberto' check(status in ('aberto','fechado','cancelado'))
+);
+create table public.sgq_inventario_cego_itens (
+ id uuid primary key, owner_id uuid not null references auth.users(id),
+ inventario_id uuid not null references public.sgq_inventarios_cegos(id),
+ codigo_omie text not null, criado_por uuid not null references auth.users(id),
+ quantidade_contada numeric not null check(quantidade_contada>=0)
+);
+create table public.sgq_inventario_cego_imagens (
+ id uuid primary key default gen_random_uuid(),
+ owner_id uuid not null default auth.uid() references auth.users(id),
+ item_id uuid not null unique references public.sgq_inventario_cego_itens(id),
+ codigo_omie text not null,
+ criado_por uuid not null references auth.users(id),
+ storage_path text not null unique,
+ status text not null default 'pendente'
+);
 create table public.it_checklist (
   id uuid primary key, owner_id uuid not null references auth.users(id),
   it_versao_id uuid references public.it_versoes(id),
@@ -136,7 +157,9 @@ begin
     'grupo_inspecao_itens','inspecao_fotos','it_checklist',
     'inspecao_checklist_resultados','it_parametros_dimensionais',
     'inspecao_dimensional_configuracoes','inspecao_dimensionais',
-    'it_testes_especiais','inspecao_testes_resultados'
+    'it_testes_especiais','inspecao_testes_resultados',
+    'sgq_inventarios_cegos','sgq_inventario_cego_itens',
+    'sgq_inventario_cego_imagens'
   ] loop
     execute format('alter table public.%I enable row level security',tbl);
     execute format('revoke all on public.%I from public, anon, authenticated',tbl);
@@ -156,6 +179,14 @@ create policy qa_photo_insert on public.inspecao_fotos for insert to authenticat
 create policy qa_photo_update on public.inspecao_fotos for update to authenticated
   using (owner_id=(select auth.uid()))
   with check (owner_id=(select auth.uid()));
+grant insert on public.sgq_inventario_cego_imagens to authenticated;
+create policy qa_inventory_photo_insert on public.sgq_inventario_cego_imagens
+ for insert to authenticated
+ with check(owner_id=(select auth.uid()) and criado_por=(select auth.uid())
+  and exists(select 1 from public.sgq_inventario_cego_itens i
+    join public.sgq_inventarios_cegos s on s.id=i.inventario_id
+    where i.id=item_id and i.owner_id=(select auth.uid())
+     and i.codigo_omie=codigo_omie and s.status='aberto'));
 grant update on public.inspecoes to authenticated;
 create policy qa_inspection_update on public.inspecoes for update to authenticated
   using (owner_id=(select auth.uid()))
@@ -221,6 +252,17 @@ insert into public.inspecao_fotos(id,owner_id,inspecao_id,storage_path,legenda) 
   '55555555-5555-4555-8555-555555555555',
   '__OWNER_UUID__/55555555-5555-4555-8555-555555555555/evidence-b.png','FOTO QA B');
 
+insert into public.sgq_inventarios_cegos(id,owner_id,status) values
+ ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','__OWNER_UUID__','aberto'),
+ ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','__OWNER_UUID__','fechado');
+insert into public.sgq_inventario_cego_itens(
+ id,owner_id,inventario_id,codigo_omie,criado_por,quantidade_contada
+) values
+ ('cccccccc-cccc-4ccc-8ccc-cccccccccccc','__OWNER_UUID__',
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','QA-SKU-INVENTARIO','__OWNER_UUID__',37),
+ ('dddddddd-dddd-4ddd-8ddd-dddddddddddd','__OWNER_UUID__',
+  'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','QA-SKU-FECHADO','__OWNER_UUID__',12);
+
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
 values ('inspecao-fotos','inspecao-fotos',false,8388608,array['image/png','image/jpeg'])
 on conflict(id) do update set public=false,file_size_limit=8388608,
@@ -260,6 +302,24 @@ create policy qa_inspection_photos_select on storage.objects
            and i.owner_id=(select auth.uid())))
     )
   );
+
+insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
+ values ('sgq-inventario-cego','sgq-inventario-cego',false,8388608,array['image/jpeg','image/png'])
+ on conflict(id) do update set public=false,file_size_limit=8388608,
+ allowed_mime_types=excluded.allowed_mime_types;
+create policy qa_inventory_storage_insert on storage.objects
+ for insert to authenticated with check (
+  bucket_id='sgq-inventario-cego'
+  and split_part(name,'/',1)=(select auth.uid())::text
+  and exists(select 1 from public.sgq_inventarios_cegos s
+    where s.id::text=split_part(name,'/',2) and s.owner_id=(select auth.uid())
+      and s.status='aberto')
+ );
+create policy qa_inventory_storage_select on storage.objects
+ for select to authenticated using(
+  bucket_id='sgq-inventario-cego'
+  and split_part(name,'/',1)=(select auth.uid())::text
+ );
 
 notify pgrst, 'reload schema';
 select pg_sleep(1);

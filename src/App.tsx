@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, Boxes, Camera, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Copy, Edit3, RefreshCw, FileDown, FileText, LogOut, PackageSearch, Play, Plus, QrCode, Search, ShieldCheck, Sparkles, Trash2, Upload, Warehouse, Wrench, LayoutDashboard, BarChart3, Settings2, CloudOff, CloudUpload, X } from 'lucide-react'
 import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/supabase'
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
-import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure} from './lib/offline'
+import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure,retryOfflinePhotoOperation,type OfflineOperation} from './lib/offline'
 import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSync'
 import InventoryPanel from './stock/InventoryPanel'
 import BlindInventoryUnified from './stock/BlindInventoryUnified'
@@ -754,6 +754,8 @@ export default function App() {
   const [offlineDraftReady,setOfflineDraftReady]=useState(false)
   const [offlineDraftStatus,setOfflineDraftStatus]=useState('')
   const [offlineError,setOfflineError]=useState('')
+  const [offlineReviewOpen,setOfflineReviewOpen]=useState(false)
+  const [offlineReviewItems,setOfflineReviewItems]=useState<OfflineOperation[]>([])
   const editingBaseline=useRef<string|null>(null)
   const [editingProcess, setEditingProcess] = useState<ProcessRow | null>(null)
   const [processEditSaving,setProcessEditSaving]=useState(false)
@@ -993,11 +995,13 @@ export default function App() {
       const operations=await offlineOperations(uid)
       setOfflinePending(operations.filter(x=>x.state!=='conflict').length)
       setOfflineConflicts(operations.filter(x=>x.state==='conflict').length)
+      setOfflineReviewItems(operations)
     }catch(e:any){setOfflineError('Armazenamento local: '+String(e?.message||'indisponível'))}
   }
   async function syncOfflineNow(uid:string){
     if(!navigator.onLine||!uid)return
     try{
+      setOfflineError('')
       const result=await replayOfflineOperations(uid)
       setOfflinePending(result.pending)
       setOfflineConflicts(result.conflicts)
@@ -1007,6 +1011,21 @@ export default function App() {
       }
     }catch(e:any){setOfflineError('Sincronização: '+String(e?.message||'indisponível'))}
   }
+  async function openOfflineReview(){
+    if(!userId)return
+    await refreshOfflineCounts(userId)
+    setOfflineReviewOpen(true)
+  }
+  async function retryPhotoFromReview(item:OfflineOperation){
+    if(!userId || item.userId!==userId)return
+    if(!navigator.onLine){setPopupMessage('Conecte-se para reenviar a foto preservada no dispositivo.');return}
+    try{
+      await retryOfflinePhotoOperation(userId,item.id)
+      await syncOfflineNow(userId)
+      await refreshOfflineCounts(userId)
+    }catch(e:any){setOfflineError('Reenvio da foto: '+String(e?.message||'indisponível'))}
+  }
+
   useEffect(()=>{
     if(!userId){setOfflinePending(0);setOfflineConflicts(0);return}
     let active=true
@@ -1017,12 +1036,20 @@ export default function App() {
       else void refreshOfflineCounts(userId)
     }
     const onVisible=()=>{if(document.visibilityState==='visible')check()}
+    const queueChanged=()=>{if(active)void refreshOfflineCounts(userId)}
     window.addEventListener('online',check)
     window.addEventListener('offline',check)
+    window.addEventListener('sgq-offline-queue-changed',queueChanged)
     document.addEventListener('visibilitychange',onVisible)
+    // Some devices reconnect without an online event. Retry pending immutable
+    // photo operations while the app is visible, without a tight retry loop.
+    const heartbeat=window.setInterval(()=>{
+      if(active&&document.visibilityState==='visible'&&navigator.onLine)
+       void syncOfflineNow(userId)
+    },45000)
     void refreshOfflineCounts(userId)
     if(navigator.onLine)void syncOfflineNow(userId)
-    return ()=>{active=false;window.removeEventListener('online',check);window.removeEventListener('offline',check);document.removeEventListener('visibilitychange',onVisible)}
+    return ()=>{active=false;window.clearInterval(heartbeat);window.removeEventListener('online',check);window.removeEventListener('offline',check);window.removeEventListener('sgq-offline-queue-changed',queueChanged);document.removeEventListener('visibilitychange',onVisible)}
   },[userId])
   useEffect(()=>{
     if(!userId||tab!=='nova'||editingInspectionId||editingProcessId){setOfflineDraftReady(false);return}
@@ -3445,7 +3472,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <span className="sgq-user-avatar" aria-hidden="true">{(profile.nome||'SGQ').trim().split(/\s+/).slice(0,2).map(word=>word[0]?.toUpperCase()).join('')}</span>
           <span className="sgq-user-identity"><strong>{profile.nome || 'Usuário'}</strong><small>{profile.perfil}</small></span>
           <button type="button" className="sgq-offline-indicator" data-pending={offlinePending>0||offlineConflicts>0} title={offlineError||'Sincronização do dispositivo'}
-            onClick={()=>{if(isOnline&&userId)void syncOfflineNow(userId);else setPopupMessage(offlineConflicts?'Existem registros com conflito. Seus dados permanecem salvos neste dispositivo.':'Os registros pendentes estão salvos neste dispositivo.')}}>
+            onClick={()=>{if(offlinePending||offlineConflicts)void openOfflineReview();else if(isOnline&&userId)void syncOfflineNow(userId);else setPopupMessage('Os registros locais serão sincronizados quando houver conexão.')}}>
             {isOnline?<CloudUpload size={15}/>:<CloudOff size={15}/>}
             <span>{offlineConflicts?'Revisar '+offlineConflicts:offlinePending?offlinePending+' pendente(s)':!isOnline?'Salvo offline':'Sincronizado'}</span>
           </button>
@@ -3461,6 +3488,27 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <div className="sgq-word-spinner" aria-hidden="true"/>
           <h2>Gerando laudo…</h2>
           <p>Preparando arquivo para download</p>
+        </div>
+      </div>}
+      {offlineReviewOpen && <div className="sgq-dialog-backdrop" role="presentation" onClick={()=>setOfflineReviewOpen(false)}>
+        <div className="sgq-dialog" role="dialog" aria-modal="true" aria-label="Sincronização do dispositivo"
+          style={{maxWidth:640,maxHeight:'82vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+          <h2>Sincronização do dispositivo</h2>
+          <p>Arquivos e alterações aguardando envio permanecem salvos localmente. Uma foto pode ser reenviada sem repetir a contagem ou inspeção.</p>
+          {offlineReviewItems.length===0?<p>Sem registros pendentes.</p>:
+            <ul style={{textAlign:'left',paddingInlineStart:20}}>
+             {offlineReviewItems.map(item=><li key={item.id} style={{marginBottom:12}}>
+              <strong>{item.kind==='inventory-photo'?'Foto de inventário':item.kind==='inspection-photo'?'Foto de inspeção':'Alteração offline'}</strong>
+              <div><small>{item.kind==='inventory-photo'?String(item.body?.sku||'SKU não informado'):
+                item.kind==='inspection-photo'?'Inspeção '+String(item.body?.inspectionId||''):item.path}</small></div>
+              <div><small>{item.state==='conflict'?'Requer revisão':'Aguardando reenvio'}</small></div>
+              {item.error&&<p role="alert">{item.error}</p>}
+              {['inventory-photo','inspection-photo'].includes(item.kind)&&
+               <button type="button" className="secondary small" disabled={!isOnline}
+                onClick={()=>void retryPhotoFromReview(item)}>Tentar novamente</button>}
+             </li>)}
+            </ul>}
+          <button className="primary" type="button" onClick={()=>setOfflineReviewOpen(false)}>Fechar</button>
         </div>
       </div>}
       {popupMessage && <div className="sgq-dialog-backdrop" role="presentation" onClick={()=>setPopupMessage('')}>

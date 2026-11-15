@@ -7,7 +7,7 @@ const OPERATIONS = 'operations'
 export type OfflineOperation = {
   id:string
   userId:string
-  kind:'inspection-create'|'inspection-update'|'audit-answer'|'inspection-checklist'|'inspection-note'|'inspection-photo'
+  kind:'inspection-create'|'inspection-update'|'audit-answer'|'inspection-checklist'|'inspection-note'|'inspection-photo'|'inventory-photo'
   path:string
   body:any
   createdAt:number
@@ -74,9 +74,13 @@ export async function readOfflineDraft<T=any>(userId:string,scope:string):Promis
 export async function clearOfflineDraft(userId:string,scope:string){
   if(userId)await storeDelete(DRAFTS,userId+':'+scope)
 }
+function notifyOfflineQueueChange(){
+  if(typeof window!=='undefined')window.dispatchEvent(new Event('sgq-offline-queue-changed'))
+}
 export async function enqueueOfflineOperation(item:OfflineOperation){
   if(!item.userId||!item.id.startsWith(item.userId+':'))throw new Error('Operação offline sem usuário válido.')
   await storeWrite(OPERATIONS,{...item,state:item.state||'pending'})
+  notifyOfflineQueueChange()
 }
 export async function offlineOperations(userId:string):Promise<OfflineOperation[]>{
   if(!userId)return []
@@ -86,6 +90,13 @@ export async function offlineOperations(userId:string):Promise<OfflineOperation[
 }
 export async function clearOfflineOperation(id:string){
   await storeDelete(OPERATIONS,id)
+  notifyOfflineQueueChange()
+}
+export async function retryOfflinePhotoOperation(userId:string,id:string){
+  const item=(await offlineOperations(userId)).find(x=>x.id===id)
+  if(!item||!['inspection-photo','inventory-photo'].includes(item.kind))
+    throw new Error('Apenas fotos do usuário atual podem ser reenviadas.')
+  await enqueueOfflineOperation({...item,state:'pending',error:undefined})
 }
 export async function markOfflineConflict(item:OfflineOperation,message:string){
   await enqueueOfflineOperation({...item,state:'conflict',error:message})

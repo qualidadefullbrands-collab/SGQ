@@ -32,7 +32,7 @@ async function apiRequest(path:string, init:RequestInit={}) {
     try { payload=text?JSON.parse(text):null } catch { payload=text }
     if (!response.ok) {
       const message=payload?.error?.message || payload?.message || payload?.detail || text || ('HTTP '+response.status)
-      return {data:null,error:{message:String(message),details:payload?.error?.details || ''},count:null}
+      return {data:null,error:{message:String(message),details:payload?.error?.details || '',status:response.status},count:null}
     }
     return payload ?? {data:null,error:null,count:null}
   } catch (e:any) {

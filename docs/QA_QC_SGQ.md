@@ -190,3 +190,28 @@ Em 14/11/2026, foram consultados **somente metadados** do PostgreSQL hospedado, 
 **Validação no E2E integrado** `tests/integration/full_local/test_full_local.py` (Supabase Auth/PostgREST/Storage reais locais e API .NET + Word reais): lote com objeto válido + ausente não cria registros parciais; registro positivo com reenvio idempotente; substituição ausente preserva original; substituição válida preserva histórico de arquivo e `audit_log`. A fixture local passou a contemplar `inspecao_fotos` e auditoria de modo compatível com esses endpoints.
 
 **Limites:** confirmação HEAD não transforma Storage e Postgres em uma única transação atômica; se o objeto for removido **depois** do registro, o gerador Word deve continuar falhando em vez de produzir documento sem evidência (já testado). O esquema de testes é sintético; não há mudança de policy, permissões, UI, dados ou infraestrutura em produção. A revisão de vínculo e compartilhamento por perfil permanece na issue #89; o fluxo de sincronização e tratamento de órfãos na issue #81.
+
+
+## 15. Recuperação offline de fotos, vinculação idempotente e inventário sem recontagem
+
+### Controle de evidência do dispositivo
+A fila IndexedDB `src/lib/offline.ts` guarda registros com ID estável, caminho de Storage, arquivo `File` e usuário, sem credenciais ou JWT. Suporta operações `inspection-photo` e `inventory-photo`, com distinção de erro temporário versus conflito. O aplicativo apresenta pendências no indicador superior, permite reenvio de foto em conflito e dispara reconciliação ao retornar à rede ou focar a aba. A captura móvel tem um botão de recuperação dentro da inspeção original.
+
+### Inventário físico
+Em `src/stock/BlindInventoryUnified.tsx`, o primeiro salvamento registra a quantidade física e cria o registro de fila local da foto **antes** da transferência ao Storage. Se houver perda da resposta, o reenvio usa **o mesmo caminho** `userId/sessionId/itemId/<uuid>.jpg|png`. Quando o SKU já foi contado, o modo de recuperação **não grava novamente** a quantidade. Se a fotografia já estiver vinculada, o operador vê o status de sincronização ao Omie, com opção de novo envio pela Edge Function já existente.
+
+### API de confirmação
+A rota .NET `POST /api/inventario/cego/itens/{itemId}/foto/registrar` recebe somente `storagePath`: verifica identidade do usuário, perfil ativo, vínculo entre autor e item, sessão de inventário aberta, caminho e presença física por `HEAD` autenticado no bucket privado `sgq-inventario-cego`, então registra `sgq_inventario_cego_imagens` com restrição única por item. Uma repetição idêntica retorna o mesmo ID, inclusive depois de o inventário ter sido fechado; uma segunda fotografia diferente não sobrescreve a anterior. A rota **não altera a quantidade** e não envia foto diretamente ao Omie.
+
+### Publicação do catálogo Omie
+Após o vínculo seguro da foto, o replay tenta a Edge Function `sgq-inventario-foto-direta`, que mantém sua própria auditoria e idempotência. Erro externo Omie não regrava contagem nem apaga a evidência SGQ. A verificação de catálogo real não é feita com dados sintéticos no ambiente produtivo.
+
+### Testes e limites
+- `tests/offline-queue.test.mjs`: reconexão, arquivo/caminho estável, duplicidade, 409 que não indica duplicata, HEAD temporariamente indisponível, fila preservada em IndexedDB e recuperação de inspeção.
+- `tests/integration/full_local/test_full_local.py` com fixture PostgreSQL/Storage: ausência de arquivo, nova foto real, duas chamadas idempotentes, autor cruzado e sessão fechada, segundo caminho inválido, quantidade preservada.
+- `e2e/sgq-inventory.desktop.spec.mjs`: fluxo de contagem e Omie simulado sem repetir SKU ou gravar em produção.
+- **Não há exclusão automática de objetos órfãos.** A verificação de metadados de produção (consulta somente leitura, 14/11) identificou 8 fotos de inventário e 75 objetos de inspeção, sem objetos sem vínculo; 67 fotos ativas de inspeção também tinham arquivo físico. Não se realizou reparação destrutiva.
+- Snapshot e permissões de produção podem mudar; a integração CI usa Auth/Storage/PostgREST reais localmente, mas dados de teste. Não é um teste do Omie real, nem substitui homologação humana.
+
+### Release no Render
+Confirmar 8/8 workflows da PR, guardar SHA e IDs dos deploys anteriores, publicar API `app-sgq-api` primeiro e validar `/health` + `/health/word`; depois publicar frontend `app-sgq` e conferir carga/smoke de caminhos públicos e versão. Auto-deploy do SGQ está desativado. Em caso de regressão crítica, reverter para o deploy anterior pela operação de rollback no dashboard Render, pois o conector atual só dispõe de `trigger_deploy`. Não atualizar banco ou ajustar policy sem revisão separada (#89). Não criar registros sintéticos na produção para teste.

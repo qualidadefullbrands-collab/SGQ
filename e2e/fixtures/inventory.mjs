@@ -66,14 +66,8 @@ export const test = isolatedTest.extend({
         db.counts.push({ ...body, criado_em: new Date().toISOString() })
         return respond(route, 201, [])
       }
-      if (method === 'POST' && table === 'sgq_inventario_cego_imagens') {
-        const body = req.postDataJSON()
-        db.writes.push({ table, body })
-        const row = { ...body, id: '44444444-4444-4444-8444-444444444444',
-          status: 'erro', erro: 'Indisponibilidade sintética do serviço Omie' }
-        db.photos.push(row)
-        return respond(route, 201, { id: row.id })
-      }
+      // Photos are registered through the authenticated API, never by a
+      // direct browser INSERT into the Supabase inventory image table.
       db.requestsOutsideFixture.push(method + ' /rest/v1/' + table)
       return respond(route, 405, { message: 'Operação não simulada no inventário QC' })
     })
@@ -110,18 +104,36 @@ export const test = isolatedTest.extend({
       return respond(route, 405, { error: 'Função fora do cenário sintético' })
     })
 
-    // O fluxo atual de inventário chama authClient.storage (Supabase Storage
-    // diretamente), embora outras telas utilizem a API .NET. Este mock
-    // reproduz o comportamento sem tráfego externo; divergência arquitetural
-    // acompanhada separadamente em QC.
+    // Inventory photos now travel through /api/storage on the ASP.NET API.
+    // Any direct storage call from the browser would violate the test fixture.
     await page.route(AUTH + '/storage/v1/**', async route => {
-      const req = route.request()
-      if (req.method() !== 'POST') {
-        db.requestsOutsideFixture.push(req.method() + ' ' + new URL(req.url()).pathname)
-        return respond(route, 405, { message: 'Storage não simulado para este método' })
+      db.requestsOutsideFixture.push(route.request().method() + ' direct Supabase Storage')
+      return respond(route, 405, { message: 'Use o proxy autenticado de Storage do SGQ' })
+    })
+
+    await page.route(API + '/api/inventario/cego/itens/*/foto/registrar', async route => {
+      const req=route.request()
+      if(req.method()!=='POST'){
+        db.requestsOutsideFixture.push(req.method()+' inventory photo registration')
+        return respond(route,405,{error:{message:'Método fora do contrato'}})
       }
-      db.writes.push({ table: 'photo_storage', body: 'arquivo sintético no mock Supabase' })
-      return respond(route, 200, { Key: 'sgq-inventario-cego/qc/foto-sintetica.png', Id: 'qc-storage-1' })
+      const id=new URL(req.url()).pathname.split('/').at(-3)
+      const {storagePath}=req.postDataJSON()
+      const counted=db.counts.find(c=>c.id===id)
+      if(!counted || !storagePath || !storagePath.includes('/'+id+'/'))
+        return respond(route,409,{data:null,error:{message:'Foto inválida para esta contagem'}})
+      const existing=db.photos.find(p=>p.item_id===id)
+      if(existing){
+        if(existing.storage_path!==storagePath)
+          return respond(route,409,{data:null,error:{message:'Foto diferente já cadastrada'}})
+        return respond(route,200,{data:{id:existing.id,status:existing.status,alreadyRegistered:true},error:null})
+      }
+      const row={item_id:id,storage_path:storagePath,codigo_omie:counted.codigo_omie,
+        id:'44444444-4444-4444-8444-444444444444',status:'erro',
+        erro:'Indisponibilidade sintética do serviço Omie'}
+      db.photos.push(row)
+      db.writes.push({table:'photo_registration_api',body:{item_id:id}})
+      return respond(route,200,{data:{id:row.id,status:row.status,alreadyRegistered:false},error:null})
     })
 
     await page.route(API + '/api/estoque/validar-sku', async route => {
