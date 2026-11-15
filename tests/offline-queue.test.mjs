@@ -11,7 +11,7 @@ function runtime(initial,options={}){
  const apiGet=async()=>({data:{inspecao:{status:'aberta'},items:[]},error:null})
  const apiPost=async(path)=> {
   sent++
-  if(path.includes('/foto/registrar')&&registerError)
+  if((path.includes('/foto/registrar')||path.includes('/fotos/registrar'))&&registerError)
    return {data:null,error:{message:registerError}}
   return {data:{id:'photo-registered',status:'pendente',salvas:1},error:null}
  }
