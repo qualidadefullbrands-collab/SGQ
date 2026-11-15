@@ -440,7 +440,14 @@ export default function BlindInventoryUnified({canWrite}:{canWrite:boolean;canAp
     createdAt:Date.now()
    })
    await replayOfflineOperations(user.id)
-   const remaining=(await offlineOperations(user.id)).find(x=>x.id===operationId)
+   let remaining=(await offlineOperations(user.id)).find(x=>x.id===operationId)
+   // A reconnect replay may have started just before this operation was
+   // enqueued, so its snapshot would not include the new photo. Drain once
+   // more with the same immutable path when still connected.
+   if(remaining?.state==='pending'&&navigator.onLine){
+    await replayOfflineOperations(user.id)
+    remaining=(await offlineOperations(user.id)).find(x=>x.id===operationId)
+   }
    await loadCounts(processCode)
    if(remaining){
     if(remaining.state==='conflict')setError('Contagem preservada. Revise a foto: '+(remaining.error||'vínculo não confirmado.'))
