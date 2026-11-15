@@ -1,7 +1,8 @@
 import {useEffect,useMemo,useRef,useState} from 'react'
 import {ArrowLeft,Camera,CheckCircle2,ImagePlus,RefreshCw,ShieldCheck,Trash2,Upload,X} from 'lucide-react'
 import {apiGet,apiPost,supabase} from '../lib/supabase'
-import {readOfflineDraft,saveOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,connectionFailure} from '../lib/offline'
+import {readOfflineDraft,saveOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,connectionFailure,offlineOperations,retryOfflinePhotoOperation,type OfflineOperation} from '../lib/offline'
+import {replayOfflineOperations} from '../lib/offlineSync'
 import './MobileFotos.css'
 
 type Process={id:string;codigo:string;cliente:string|null}
@@ -41,6 +42,7 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
  const [message,setMessage]=useState('')
  const busyRef=useRef(false),sequence=useRef(0),pendingRef=useRef<Pending[]>([])
  const [photoDraftLoaded,setPhotoDraftLoaded]=useState(false)
+ const [queuedPhotos,setQueuedPhotos]=useState<OfflineOperation[]>([])
  useEffect(()=>{pendingRef.current=pending},[pending])
  useEffect(()=>()=>{sequence.current++;pendingRef.current.forEach(p=>URL.revokeObjectURL(p.preview))},[])
  useEffect(()=>{
@@ -64,6 +66,35 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
   },350)
   return()=>window.clearTimeout(timer)
  },[userId,inspectionId,pending,photoDraftLoaded])
+ useEffect(()=>{
+  if(!userId||!inspectionId){setQueuedPhotos([]);return}
+  let active=true
+  const refresh=async()=>{
+   const items=await offlineOperations(userId)
+   if(active)setQueuedPhotos(items.filter(i=>i.kind==='inspection-photo'&&i.body?.inspectionId===inspectionId))
+  }
+  const changed=()=>{void refresh()}
+  window.addEventListener('sgq-offline-queue-changed',changed)
+  void refresh()
+  return()=>{active=false;window.removeEventListener('sgq-offline-queue-changed',changed)}
+ },[userId,inspectionId])
+ async function resendQueuedPhotos(){
+  if(!inspectionId||!userId||busyRef.current)return
+  if(!navigator.onLine){setError('As fotos estão no dispositivo. Conecte-se para sincronizar.');return}
+  busyRef.current=true;setBusy(true);setError('')
+  try{
+   for(const item of queuedPhotos.filter(i=>i.state==='conflict'))
+    await retryOfflinePhotoOperation(userId,item.id)
+   await replayOfflineOperations(userId)
+   const left=(await offlineOperations(userId))
+    .filter(i=>i.kind==='inspection-photo'&&i.body?.inspectionId===inspectionId)
+   setQueuedPhotos(left)
+   if(left.length)setError(left.length+' foto(s) continuam aguardando envio. Os arquivos permanecem no dispositivo.')
+   else setMessage('Fotos sincronizadas no SGQ sem duplicação. Confira a galeria.')
+   await load(inspectionId)
+  }catch(e:any){setError('Falha ao recuperar fotos: '+String(e?.message||'indisponível'))}
+  finally{busyRef.current=false;setBusy(false)}
+ }
  async function queuePhotoOffline(photo:Pending,selectedInspectionId:string){
   if(!userId)throw new Error('Usuário não identificado para fotos offline.')
   const file=await compressed(photo.file)
@@ -284,6 +315,12 @@ export default function MobileFotos({processes,inspections,canWrite,userId,onRef
    </>}
    {inspectionId&&<><p className="sgq-mobile-description">{fst(selected?.codigo||'')} · {selected?.cliente||'Cliente não informado'}</p>
     {loading&&!context&&<div className="sgq-mobile-empty">Carregando fotos…</div>}
+    {!!queuedPhotos.length&&<div className="sgq-mobile-notice" role="status">
+     <strong>{queuedPhotos.length} foto(s) protegida(s) no dispositivo aguardando sincronização.</strong>
+     {queuedPhotos.some(i=>i.state==='conflict')&&<p>Há fotos que exigem nova tentativa. Os originais não foram descartados.</p>}
+     <button type="button" className="secondary small" disabled={busy}
+       onClick={()=>void resendQueuedPhotos()}><RefreshCw size={15}/> Sincronizar fotos pendentes</button>
+    </div>}
     {context&&<section className="sgq-mobile-panel">
      <div className="sgq-mobile-section-head"><strong>Adicionar evidências</strong><small>{context.photos.length} salva(s)</small></div>
      {canWrite?<div className="sgq-mobile-capture">
