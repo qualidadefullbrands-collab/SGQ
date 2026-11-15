@@ -36,11 +36,13 @@ test('contagem física persiste após falha Omie e foto pode ser reenviada sem d
   await expect(page.getByRole('button', { name: 'Salvar e próximo item' })).toBeEnabled()
   await page.getByRole('button', { name: 'Salvar e próximo item' }).click()
 
-  await expect(page.getByText(/Contagem salva\. A foto está pendente no Omie/)).toBeVisible()
+  await expect(page.getByText(/Contagem e foto salvas no SGQ/)).toBeVisible()
   expect(db.counts).toHaveLength(1)
   expect(db.counts[0].quantidade_contada).toBe(12.5)
   expect(db.counts[0].endereco).toBe('RUA 01')
   expect(db.writes.filter(w => w.table === 'sgq_inventario_cego_itens')).toHaveLength(1)
+  expect(db.writes.filter(w => w.table === 'photo_registration_api')).toHaveLength(1)
+  expect(db.writes.filter(w => w.table === 'sgq_inventario_cego_imagens')).toHaveLength(0)
   expect(db.photoSyncAttempts).toBe(1)
 
   await page.getByRole('button', { name: /QA0001.*Produto simulado para inventário/ }).click()
