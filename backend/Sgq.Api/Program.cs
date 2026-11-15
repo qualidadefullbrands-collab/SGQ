@@ -4179,6 +4179,99 @@ app.MapPost("/api/its/{id}/publicar", async (string id,HttpRequest request,IHttp
 });
 
 
+// Inventory photo recovery is independent from physical counting: a retry
+// must never update quantidade_contada or create another counted item.
+app.MapPost("/api/inventario/cego/itens/{itemId}/foto/registrar", async (
+    string itemId, InventoryPhotoRegisterRequest input,HttpRequest request,IHttpClientFactory factory) =>
+{
+    try
+    {
+        if(!Guid.TryParse(itemId,out _))
+            return Results.Json(Error("Item de inventário inválido."),statusCode:400);
+        var path=(input.StoragePath??"").Trim();
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var userId=await CurrentUserId(client,token);
+        var profiles=await RestAsync(client,token,HttpMethod.Get,"profiles",
+            $"select=perfil,ativo&id=eq.{Uri.EscapeDataString(userId)}&ativo=is.true&limit=1");
+        var (profile,authorized)=FirstRow(profiles);
+        if(!authorized || profile!.Value.GetProperty("perfil").GetString() is not ("administrador" or "gestor" or "inspetor"))
+            return Results.Json(Error("Sem permissão para registrar fotos de inventário."),statusCode:403);
+        var itemRows=await RestAsync(client,token,HttpMethod.Get,"sgq_inventario_cego_itens",
+            $"select=id,inventario_id,codigo_omie,criado_por&id=eq.{Uri.EscapeDataString(itemId)}&limit=1");
+        var (item,found)=FirstRow(itemRows);
+        if(!found)return Results.Json(Error("Contagem não encontrada."),statusCode:404);
+        var inventoryId=item!.Value.GetProperty("inventario_id").GetString()??"";
+        var createdBy=item.Value.GetProperty("criado_por").GetString()??"";
+        if(createdBy!=userId)
+            return Results.Json(Error("A foto pertence à contagem de outro conferente."),statusCode:403);
+        var parts=path.Split('/',StringSplitOptions.None);
+        if(parts.Length!=4 || parts[0]!=userId || parts[1]!=inventoryId || parts[2]!=itemId ||
+            !Regex.IsMatch(parts[3],@"^[0-9a-fA-F-]{36}\.(png|jpg)$",RegexOptions.CultureInvariant|RegexOptions.IgnoreCase))
+            return Results.Json(Error("Caminho da foto não corresponde ao usuário e à contagem."),statusCode:400);
+
+        // An existing matching row is an idempotent success even if a network
+        // response was lost or the inventory has meanwhile been closed.
+        async Task<(string? Id,string? Status,string? Path)> ExistingPhoto()
+        {
+            var rows=await RestAsync(client,token,HttpMethod.Get,"sgq_inventario_cego_imagens",
+                $"select=id,status,storage_path&item_id=eq.{Uri.EscapeDataString(itemId)}&limit=1");
+            var (row,exists)=FirstRow(rows);
+            return !exists?(null,null,null):(
+                row!.Value.GetProperty("id").GetString(),
+                row.Value.GetProperty("status").GetString(),
+                row.Value.GetProperty("storage_path").GetString());
+        }
+        var previous=await ExistingPhoto();
+        if(previous.Id is not null)
+            return previous.Path==path
+                ?Results.Ok(new{data=new{id=previous.Id,status=previous.Status,alreadyRegistered=true},error=(object?)null})
+                :Results.Json(Error("Esta contagem já possui outra fotografia registrada. Não refaça a contagem."),statusCode:409);
+
+        var inventories=await RestAsync(client,token,HttpMethod.Get,"sgq_inventarios_cegos",
+            $"select=id,status&id=eq.{Uri.EscapeDataString(inventoryId)}&limit=1");
+        var (inventory,validInventory)=FirstRow(inventories);
+        if(!validInventory || inventory!.Value.GetProperty("status").GetString()!="aberto")
+            return Results.Json(Error("O inventário foi encerrado. Revise a foto pendente antes de reenviar."),statusCode:409);
+
+        using(var head=new HttpRequestMessage(HttpMethod.Head,
+            $"{supabaseUrl}/storage/v1/object/authenticated/sgq-inventario-cego/{EncodedPath(path)}"))
+        {
+            ApplyAuth(head,token);
+            using var response=await client.SendAsync(head,HttpCompletionOption.ResponseHeadersRead);
+            var status=(int)response.StatusCode;
+            if(status==401||status==403)return Results.Json(Error("Sem permissão para acessar a foto enviada."),statusCode:403);
+            if(status==429||status>=500)return Results.Json(Error("Armazenamento temporariamente indisponível. A contagem foi preservada."),statusCode:503);
+            if(!response.IsSuccessStatusCode || response.Content.Headers.ContentLength is 0)
+                return Results.Json(Error("Foto ainda não está disponível no armazenamento. A contagem foi preservada."),statusCode:409);
+        }
+        var productCode=item.Value.GetProperty("codigo_omie").GetString()??"";
+        try
+        {
+            var registered=await RestAsync(client,token,HttpMethod.Post,"sgq_inventario_cego_imagens",
+                "select=id,status",new{item_id=itemId,codigo_omie=productCode,
+                    storage_path=path,criado_por=userId},"return=representation");
+            var (photo,created)=FirstRow(registered);
+            if(created)
+                return Results.Ok(new{data=new{id=photo!.Value.GetProperty("id").GetString(),
+                    status=photo.Value.GetProperty("status").GetString(),alreadyRegistered=false},
+                    error=(object?)null});
+        }
+        catch(InvalidOperationException e) when(e.Message.Contains("HTTP 409",StringComparison.Ordinal))
+        {
+            // Concurrent retries may have won the unique (item_id) index.
+            var concurrent=await ExistingPhoto();
+            if(concurrent.Id is not null && concurrent.Path==path)
+                return Results.Ok(new{data=new{id=concurrent.Id,status=concurrent.Status,alreadyRegistered=true},
+                    error=(object?)null});
+        }
+        return Results.Json(Error("Não foi possível vincular a foto. Confira o registro existente."),statusCode:409);
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){app.Logger.LogWarning(e,"Inventory photo registration failure {ItemId}",itemId);
+        return Results.Json(Error("Não foi possível confirmar a foto do inventário."),statusCode:503);}
+});
+
 app.MapPost("/api/storage/{bucket}/upload", async (string bucket, HttpRequest request, IHttpClientFactory factory) =>
 {
     try
@@ -4365,6 +4458,11 @@ public sealed class AuditMessageRequest
     public string? PhotoMime { get; set; }
     public bool FixedChecklist { get; set; }
     public int CriteriaCount { get; set; }
+}
+
+public sealed class InventoryPhotoRegisterRequest
+{
+    public string StoragePath { get; set; } = "";
 }
 
 public sealed class AuditTemplateRequest
