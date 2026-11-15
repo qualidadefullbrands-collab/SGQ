@@ -45,7 +45,7 @@ jobs:
           {
             echo "PostgreSQL efêmero, dados 100% sintéticos, sem conexão Supabase hosted/Omie"
             psql -X -v ON_ERROR_STOP=1 -f tests/integration/inventory_rls/bootstrap.sql
-            psql -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261115104500_sgq_inventario_item_contexto_rls.sql
+            psql -X -v ON_ERROR_STOP=1 -f supabase/migrations/20261115113449_sgq_inventario_item_contexto_rls.sql
             psql -X -v ON_ERROR_STOP=1 -f tests/integration/inventory_rls/verify.sql
           } 2>&1 | tee sgq-inventario-rls.log
       - name: Preservar evidência de QC
