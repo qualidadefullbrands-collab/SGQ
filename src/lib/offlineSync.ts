@@ -1,4 +1,4 @@
-import {apiGet,apiPost,apiPut,supabase} from './supabase'
+import {apiGet,apiPost,apiPut,supabase,authClient} from './supabase'
 import {clearOfflineOperation,markOfflineConflict,offlineOperations,connectionFailure,type OfflineOperation} from './offline'
 
 let running:Promise<{synced:number;pending:number;conflicts:number}>|null=null
@@ -90,6 +90,15 @@ async function send(operation:OfflineOperation){
       '/api/inventario/cego/itens/'+encodeURIComponent(photo.itemId)+'/foto/registrar',
       {storagePath:photo.path})
     if(r.error||!r.data?.id)throw new Error(r.error?.message||'Foto de inventário ainda não vinculada à contagem.')
+    // Once evidence is safely attached to SGQ, attempt the Omie catalogue
+    // publication once. Its Edge Function owns idempotency and logs errors.
+    // A failure in external Omie must NOT leave the immutable SGQ photo stuck
+    // in the offline queue: status 'erro' remains visible for manual retry.
+    try {
+      await authClient.functions.invoke('sgq-inventario-foto-direta',{
+        body:{foto_id:r.data.id}
+      })
+    } catch { /* Preserve the registered photo and let the UI display retry. */ }
     return
   }
   const body=operation.kind==='audit-answer'?{
