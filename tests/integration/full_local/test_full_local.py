@@ -21,6 +21,10 @@ PROCESS="11111111-1111-4111-8111-111111111111"
 INSP_A="44444444-4444-4444-8444-444444444444"
 INSP_B="55555555-5555-4555-8555-555555555555"
 REPORT_MIME="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+INV_OPEN="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+INV_CLOSED="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+INV_ITEM="cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+INV_CLOSED_ITEM="dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 
 def local_url(key):
     from urllib.parse import urlparse
@@ -290,6 +294,81 @@ class FullLocalIntegration(unittest.TestCase):
         self.assertEqual(audit.status_code,200,fail_text(audit))
         self.assertTrue(any(x["acao"]=="substituicao_foto" for x in audit.json()),
             "photo replacement must persist its audit event")
+
+    def test_09e_inventory_missing_photo_does_not_mutate_physical_count(self):
+        self.inv_path=f"{self.owner}/{INV_OPEN}/{INV_ITEM}/00000000-0000-4000-8000-000000000099.png"
+        endpoint=self.api+f"/api/inventario/cego/itens/{INV_ITEM}/foto/registrar"
+        r=self.http.post(endpoint,headers=self.headers(self.owner_token),
+                         json={"storagePath":self.inv_path})
+        self.assertEqual(r.status_code,409,fail_text(r))
+        check=self.http.get(self.sb+"/rest/v1/sgq_inventario_cego_imagens",
+            headers=self.headers(self.owner_token),params={"select":"id","item_id":f"eq.{INV_ITEM}"})
+        self.assertEqual(check.status_code,200,fail_text(check))
+        self.assertEqual(check.json(),[],"Missing Storage object cannot create evidence")
+        count=self.http.get(self.sb+"/rest/v1/sgq_inventario_cego_itens",
+            headers=self.headers(self.owner_token),params={"select":"quantidade_contada","id":f"eq.{INV_ITEM}"})
+        self.assertEqual(count.status_code,200,fail_text(count))
+        self.assertEqual(int(count.json()[0]["quantidade_contada"]),37)
+
+    def test_09f_inventory_retry_same_upload_path_is_idempotent(self):
+        # Same path from prior rejected HEAD; no second physical count.
+        path=self.inv_path
+        upload=self.http.post(
+            self.sb+"/storage/v1/object/sgq-inventario-cego/"+path,
+            headers={**self.headers(self.owner_token),"Content-Type":"image/png"},
+            content=self.image)
+        self.assertIn(upload.status_code,(200,201),fail_text(upload))
+        endpoint=self.api+f"/api/inventario/cego/itens/{INV_ITEM}/foto/registrar"
+        ids=[]
+        for attempt in range(2):
+            r=self.http.post(endpoint,headers=self.headers(self.owner_token),
+                json={"storagePath":path})
+            self.assertEqual(r.status_code,200,fail_text(r))
+            ids.append(r.json()["data"]["id"])
+            self.assertEqual(r.json()["data"]["alreadyRegistered"],bool(attempt))
+        self.assertEqual(ids[0],ids[1])
+        photo=self.http.get(self.sb+"/rest/v1/sgq_inventario_cego_imagens",
+            headers=self.headers(self.owner_token),params={"select":"id,storage_path,item_id",
+                 "item_id":f"eq.{INV_ITEM}"})
+        self.assertEqual(photo.status_code,200,fail_text(photo))
+        self.assertEqual(len(photo.json()),1)
+        self.assertEqual(photo.json()[0]["storage_path"],path)
+        count=self.http.get(self.sb+"/rest/v1/sgq_inventario_cego_itens",
+            headers=self.headers(self.owner_token),params={"select":"quantidade_contada",
+                "id":f"eq.{INV_ITEM}"})
+        self.assertEqual(count.status_code,200,fail_text(count))
+        self.assertEqual(int(count.json()[0]["quantidade_contada"]),37)
+
+    def test_09g_inventory_profile_and_owner_enforced(self):
+        endpoint=self.api+f"/api/inventario/cego/itens/{INV_ITEM}/foto/registrar"
+        another=self.http.post(endpoint,headers=self.headers(self.other_token),
+            json={"storagePath":self.inv_path})
+        self.assertEqual(another.status_code,403,fail_text(another))
+        wrong=self.http.post(endpoint,headers=self.headers(self.owner_token),
+            json={"storagePath":f"{self.other}/{INV_OPEN}/{INV_ITEM}/00000000-0000-4000-8000-000000000098.png"})
+        self.assertEqual(wrong.status_code,400,fail_text(wrong))
+
+    def test_09h_inventory_closed_session_does_not_accept_new_photo(self):
+        closed=f"{self.owner}/{INV_CLOSED}/{INV_CLOSED_ITEM}/00000000-0000-4000-8000-000000000097.png"
+        endpoint=self.api+f"/api/inventario/cego/itens/{INV_CLOSED_ITEM}/foto/registrar"
+        r=self.http.post(endpoint,headers=self.headers(self.owner_token),
+            json={"storagePath":closed})
+        self.assertEqual(r.status_code,409,fail_text(r))
+        check=self.http.get(self.sb+"/rest/v1/sgq_inventario_cego_imagens",
+            headers=self.headers(self.owner_token),params={"select":"id","item_id":f"eq.{INV_CLOSED_ITEM}"})
+        self.assertEqual(check.status_code,200,fail_text(check))
+        self.assertEqual(check.json(),[])
+
+    def test_09i_inventory_second_file_cannot_replace_first(self):
+        newpath=f"{self.owner}/{INV_OPEN}/{INV_ITEM}/00000000-0000-4000-8000-000000000096.png"
+        r=self.http.post(self.api+f"/api/inventario/cego/itens/{INV_ITEM}/foto/registrar",
+             headers=self.headers(self.owner_token),json={"storagePath":newpath})
+        self.assertEqual(r.status_code,409,fail_text(r))
+        photo=self.http.get(self.sb+"/rest/v1/sgq_inventario_cego_imagens",
+            headers=self.headers(self.owner_token),params={"select":"storage_path",
+                "item_id":f"eq.{INV_ITEM}"})
+        self.assertEqual(photo.status_code,200,fail_text(photo))
+        self.assertEqual(photo.json(),[{"storage_path":self.inv_path}])
 
     def test_10_another_user_cannot_mutate_evidence(self):
         r=self.http.patch(self.sb+"/rest/v1/inspecao_fotos",
