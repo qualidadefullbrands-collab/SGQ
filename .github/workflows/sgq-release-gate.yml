@@ -1,0 +1,58 @@
+name: SGQ · Gate de Release (verificação pós-publicação)
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: 'SHA completo (40 caracteres) do commit candidato em main'
+        type: string
+        required: true
+      operational_approved:
+        description: 'Homologação funcional registrada pela equipe de Qualidade'
+        type: boolean
+        required: true
+        default: false
+      homologation_reference:
+        description: 'Referência rastreável da homologação (ex.: ticket ou ata)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+jobs:
+  release-gate:
+    name: GO / NO-GO · SHA Render + CI + smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout do validador aprovado em main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate somente leitura e smoke público (falha fechada)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          SGQ_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          SGQ_OPERATIONAL_APPROVED: ${{ inputs.operational_approved }}
+          SGQ_HOMOLOGATION_REF: ${{ inputs.homologation_reference }}
+        run: |
+          set -o pipefail
+          node tests/qa/release-gate.mjs 2>&1 | tee sgq-release-gate.log
+      - name: Preservar evidências mesmo em NO-GO
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgq-gate-${{ github.run_id }}
+          path: |
+            sgq-release-gate.log
+            sgq-release-evidence.json
+          if-no-files-found: warn
+          retention-days: 90
