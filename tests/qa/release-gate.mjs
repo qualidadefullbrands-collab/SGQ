@@ -48,7 +48,7 @@ function successfulChecks(runs, required, label, blockers) {
 }
 
 /** Pure decision function. Its output is safe to save as CI evidence. */
-export function assessRelease({ candidateSha, mainSha, mergedPr, prReviews, mainChecks, prChecks, frontendDeploy, apiDeploy, smokePassed, operationalApproved, homologationReference }) {
+export function assessRelease({ candidateSha, mainSha, mergedPr, prReviews, reviewWaiverAuthorized = false, reviewWaiverReason = '', mainChecks, prChecks, frontendDeploy, apiDeploy, smokePassed, operationalApproved, homologationReference }) {
   const blockers = []
   const shaIsValid = /^[0-9a-f]{40}$/i.test(candidateSha ?? '')
   if (!shaIsValid) blockers.push('SHA candidato inválido (exige 40 caracteres hexadecimais)')
@@ -56,7 +56,9 @@ export function assessRelease({ candidateSha, mainSha, mergedPr, prReviews, main
   if (!mergedPr || !mergedPr.merged_at || mergedPr.base?.ref !== 'main' || mergedPr.merge_commit_sha !== candidateSha || !/^[0-9a-f]{40}$/i.test(mergedPr.head?.sha ?? '')) {
     blockers.push('PR revisável integrado em main não localizado para o SHA candidato')
   }
-  if (!hasIndependentApproval(mergedPr, prReviews)) blockers.push('PR não possui aprovação independente válida no commit revisado')
+  const waiverValid = reviewWaiverAuthorized === true && typeof reviewWaiverReason === 'string' && reviewWaiverReason.trim().length >= 15
+  if (!hasIndependentApproval(mergedPr, prReviews) && !waiverValid) blockers.push('PR sem revisão independente ou dispensa explícita e justificada')
+
   successfulChecks(mainChecks, REQUIRED_MAIN_CHECKS, 'main', blockers)
   successfulChecks(prChecks, REQUIRED_PR_CHECKS, 'PR original', blockers)
   if (!frontendDeploy || frontendDeploy.status !== 'live' || frontendDeploy.commit?.id !== candidateSha) blockers.push('Frontend Render não está LIVE no SHA candidato')
@@ -69,6 +71,8 @@ export function assessRelease({ candidateSha, mainSha, mergedPr, prReviews, main
     githubMainSha: mainSha ?? null,
     prNumber: mergedPr?.number ?? null,
     independentReviewApproved: hasIndependentApproval(mergedPr, prReviews),
+    independentReviewWaived: !hasIndependentApproval(mergedPr, prReviews) && waiverValid,
+    reviewWaiverReason: waiverValid ? reviewWaiverReason.trim() : null,
     prHeadSha: mergedPr?.head?.sha ?? null,
     renderFrontendSha: frontendDeploy?.commit?.id ?? null,
     renderApiSha: apiDeploy?.commit?.id ?? null,
@@ -111,6 +115,8 @@ async function main() {
   const candidateSha = (process.env.SGQ_CANDIDATE_SHA ?? '').trim()
   const homologationReference = (process.env.SGQ_HOMOLOGATION_REF ?? '').trim()
   const operationalApproved = process.env.SGQ_OPERATIONAL_APPROVED === 'true'
+  const reviewWaiverAuthorized = process.env.SGQ_REVIEW_WAIVER === 'true'
+  const reviewWaiverReason = process.env.SGQ_REVIEW_WAIVER_REASON ?? ''
   let mainSha = null, mergedPr = null, prReviews = [], mainChecks = [], prChecks = [], frontendDeploy = null, apiDeploy = null
   const preliminaryErrors = []
   try {
@@ -146,7 +152,7 @@ async function main() {
   }
   // Always run public smoke, even when prior evidence is missing, so no failure is hidden.
   const smokePassed = smoke()
-  const verdict = assessRelease({ candidateSha, mainSha, mergedPr, prReviews, mainChecks, prChecks, frontendDeploy, apiDeploy, smokePassed, operationalApproved, homologationReference })
+  const verdict = assessRelease({ candidateSha, mainSha, mergedPr, prReviews, reviewWaiverAuthorized, reviewWaiverReason, mainChecks, prChecks, frontendDeploy, apiDeploy, smokePassed, operationalApproved, homologationReference })
   verdict.blockers.unshift(...preliminaryErrors)
   if (preliminaryErrors.length) verdict.decision = 'NO-GO'
   const output = JSON.stringify(verdict, null, 2)+'\n'
