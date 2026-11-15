@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { fetchWithApiWarmup } from './sgqApiWarmup.mjs'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
@@ -26,13 +27,20 @@ async function apiRequest(path:string, init:RequestInit={}) {
     headers.set('Content-Type','application/json')
   }
   try {
-    const response=await fetch(apiUrl+path,{...init,headers})
+    // Only GET can retry a transient 503; never repeat writes or uploads.
+    const response=await fetchWithApiWarmup(apiUrl+path,{...init,headers})
     const text=await response.text()
     let payload:any=null
     try { payload=text?JSON.parse(text):null } catch { payload=text }
     if (!response.ok) {
       const message=payload?.error?.message || payload?.message || payload?.detail || text || ('HTTP '+response.status)
-      return {data:null,error:{message:String(message),details:payload?.error?.details || '',status:response.status},count:null}
+      const method=(init.method || 'GET').toUpperCase()
+      const hint=response.status===503
+        ? (method==='GET'
+            ? ' A API pode estar inicializando. Atualize a consulta em instantes.'
+            : ' Verifique se a operação foi registrada antes de tentar novamente.')
+        : ''
+      return {data:null,error:{message:String(message)+hint,details:payload?.error?.details || '',status:response.status},count:null}
     }
     return payload ?? {data:null,error:null,count:null}
   } catch (e:any) {
