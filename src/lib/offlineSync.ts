@@ -7,6 +7,10 @@ const transient=(message:string)=>connectionFailure(message)||/indisponível|fal
 // return 409 for a missing object or a changed/closed inspection.
 const isAlreadyUploaded=(message:string)=>/already exists|already uploaded|resource already exists|assetalreadyexists|duplicate|já existe/i.test(message)
 const photoNotReady=(message:string)=>/fotos? ainda não estão disponíveis no armazenamento|foto não encontrada no armazenamento|foto ainda não (está|esta) disponível/i.test(message)
+const errorText=(error:any)=>{
+ const status=Number(error?.status)
+ return (status>0?'HTTP '+status+': ':'')+[error?.message,error?.details].filter(Boolean).join(' ')
+}
 const original=(x:any)=>JSON.stringify(x??null)
 export function offlineInspectionVersion(data:any){
   return original({inspection:data?.inspecao??null,items:data?.items??[]})
@@ -58,7 +62,7 @@ async function send(operation:OfflineOperation){
       const folder=String(payload.itens[photo.index]?.sku||'temporario').replace(/[^a-zA-Z0-9._-]/g,'_')
       const path=folder+'/'+payload.requestId+'-'+photo.index+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
       const up=await supabase.storage.from('produto-fotos').upload(path,file,{contentType:file.type||'image/jpeg'})
-      if(up.error&&!isAlreadyUploaded(up.error.message))throw new Error(up.error.message)
+      if(up.error&&!isAlreadyUploaded(errorText(up.error)))throw new Error(errorText(up.error))
       if(payload.itens[photo.index])payload.itens[photo.index].fotoPrincipalPath=path
     }
     const r=await apiPost<any>('/api/inspecoes/criar',payload)
@@ -70,11 +74,11 @@ async function send(operation:OfflineOperation){
     if(!photo.file?.size || !photo.path?.startsWith(photo.inspectionId+'/gerais/'))
       throw new Error('CONFLITO: foto local inválida ou sem vínculo com a inspeção.')
     const up=await supabase.storage.from('inspecao-fotos').upload(photo.path,photo.file,{contentType:photo.file.type||'image/jpeg'})
-    if(up.error&&!isAlreadyUploaded(up.error.message))throw new Error(up.error.message)
+    if(up.error&&!isAlreadyUploaded(errorText(up.error)))throw new Error(errorText(up.error))
     const r=await apiPost<any>('/api/inspecoes/'+encodeURIComponent(photo.inspectionId)+'/fotos/registrar',{
       fotos:[{storagePath:photo.path,legenda:photo.legend}]
     })
-    if(r.error||!r.data?.salvas)throw new Error(r.error?.message||'A foto não foi confirmada pelo servidor.')
+    if(r.error||!r.data?.salvas)throw new Error(r.error?errorText(r.error):'A foto não foi confirmada pelo servidor.')
     return
   }
   if(operation.kind==='inventory-photo'){
@@ -85,11 +89,11 @@ async function send(operation:OfflineOperation){
       throw new Error('CONFLITO: fotografia de inventário sem arquivo ou vínculo válido.')
     const up=await supabase.storage.from('sgq-inventario-cego')
       .upload(photo.path,photo.file,{contentType:photo.file.type,upsert:false})
-    if(up.error&&!isAlreadyUploaded(up.error.message))throw new Error(up.error.message)
+    if(up.error&&!isAlreadyUploaded(errorText(up.error)))throw new Error(errorText(up.error))
     const r=await apiPost<{id:string,status:string}>(
       '/api/inventario/cego/itens/'+encodeURIComponent(photo.itemId)+'/foto/registrar',
       {storagePath:photo.path})
-    if(r.error||!r.data?.id)throw new Error(r.error?.message||'Foto de inventário ainda não vinculada à contagem.')
+    if(r.error||!r.data?.id)throw new Error(r.error?errorText(r.error):'Foto de inventário ainda não vinculada à contagem.')
     // Once evidence is safely attached to SGQ, attempt the Omie catalogue
     // publication once. Its Edge Function owns idempotency and logs errors.
     // A failure in external Omie must NOT leave the immutable SGQ photo stuck
