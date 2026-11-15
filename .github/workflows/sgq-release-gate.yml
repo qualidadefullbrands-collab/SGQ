@@ -15,6 +15,15 @@ on:
         description: 'Referência rastreável da homologação (ex.: ticket ou ata)'
         type: string
         required: true
+      review_waiver:
+        description: 'Dispensar revisão de outra pessoa (autorização explícita e registrada)'
+        type: boolean
+        default: false
+        required: true
+      review_waiver_reason:
+        description: 'Justificativa rastreável da dispensa de revisão'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -43,6 +52,8 @@ jobs:
           SGQ_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
           SGQ_OPERATIONAL_APPROVED: ${{ inputs.operational_approved }}
           SGQ_HOMOLOGATION_REF: ${{ inputs.homologation_reference }}
+          SGQ_REVIEW_WAIVER: ${{ inputs.review_waiver }}
+          SGQ_REVIEW_WAIVER_REASON: ${{ inputs.review_waiver_reason }}
         run: |
           set -o pipefail
           node tests/qa/release-gate.mjs 2>&1 | tee sgq-release-gate.log
