@@ -7,10 +7,7 @@ const app=read('src/App.tsx')
 const css=read('src/SgqOperationsTheme.css')
 const kanban=read('src/components/InspectionsKanban.tsx')
 const audited=read('src/auditorias/AuditoriasPage.tsx')
-const insights=read('src/insights/InsightsPage.tsx')
-const equipment=read('src/equipamentos/EquipmentPage.tsx')
 const photos=read('src/mobile/MobileFotos.tsx')
-const itEditor=read('src/its/ItEditorDemo.tsx')
 
 test('global SGQ style is loaded once and scoped to operational routes',()=>{
  assert.match(app,/import '\.\/SgqOperationsTheme\.css'/)
@@ -20,42 +17,40 @@ test('global SGQ style is loaded once and scoped to operational routes',()=>{
  assert.doesNotMatch(css,/^body\s*\{/m)
 })
 
-test('all SGQ application screens are themed without hiding workflows',()=>{
- for(const name of [
-  'nova','execucao','estoque','inspecoes','quadro','its','equipamentos','insights','auditorias',
- ])assert.match(app,new RegExp("tab==='"+name+"'"))
- for(const part of [
-  'inspection-form','inspection-stage-tabs','stock-summary',
-  'sgq-inventory-table-scroll','sgq-screen-its','it-test-banner',
-  'equipment-summary','sgq-warehouse-workspace','sgq-insights','sgq-mobile-photo',
- ])assert.ok(css.includes(part),part+' is not themed')
- assert.match(app,/tab==='fotos-mobile'/)
+test('the active application shell exposes inspection workflows only',()=>{
+ const start=app.indexOf('<aside className="sgq-side-nav')
+ const end=app.indexOf('</aside>',start)
+ assert.ok(start>=0&&end>start)
+ const nav=app.slice(start,end)
+ for(const label of ['Quadro de inspeções','Processos','Inspeções Armazém'])assert.ok(nav.includes(label))
+ for(const label of ['Estoque','Equipamentos','Instruções técnicas','Configurações','Painel','Insights'])assert.doesNotMatch(nav,new RegExp(label))
+ assert.match(app,/inspectionTabs=\['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile'\]/)
+ for(const name of ['nova','execucao','inspecoes','quadro','auditorias'])assert.match(app,new RegExp("tab==='"+name+"'"))
  assert.match(kanban,/sgq-kanban-board/)
- assert.match(audited,/sgq-warehouse-workspace/)
- assert.match(insights,/sgq-insights/)
- assert.match(equipment,/equipment-page/)
+ assert.match(audited,/audit-form-screen|audit-page/)
  assert.match(photos,/sgq-mobile-photo/)
- assert.match(itEditor,/it-test-tabs/)
 })
 
-test('dashboard shell remains intact and existing inspection actions are present',()=>{
- assert.match(app,/<SgqDashboard/)
+test('inspection execution actions remain present while non-inspection tabs are unreachable',()=>{
  assert.match(app,/async function createInspection\(/)
  assert.match(app,/async function saveDimension\(/)
  assert.match(app,/async function finishInspection\(/)
  assert.match(app,/onClick=\{\(\)=>void downloadInspectionWord\(\)\}/)
  assert.match(app,/onClick=\{startEditingInspectionData\}/)
+ assert.match(app,/if\(!inspectionTabs\.includes\(tab\)\)setTab\('quadro'\)/)
  assert.match(css,/:focus-visible/)
- assert.match(css, /@media\(max-width:760px\)/)
- assert.match(css, /@media\(max-width:520px\)/)
- assert.match(css, /@media\(prefers-reduced-motion:reduce\)/)
+ assert.match(css,/@media\(max-width:760px\)/)
+ assert.match(css,/@media\(max-width:520px\)/)
+ assert.match(css,/@media\(prefers-reduced-motion:reduce\)/)
 })
 
-test('non-dashboard page headings share design system and preserve business context',()=>{
+test('inspection screens retain their shared visual language and business context',()=>{
  assert.match(app,/INSPEÇÃO · \{formatFst/)
  assert.match(app,/Qualidade|QUALIDADE · CONTROLE DOCUMENTAL/)
  assert.match(app,/Identifique o FST, confirme o recebimento/)
  assert.match(app,/Registre cada etapa, confira as evidências/)
  assert.match(css,/--sgq-ui-blue:/)
  assert.match(css,/--sgq-ui-border:/)
+ assert.match(kanban,/sgq-kanban-toolbar/)
+ assert.match(kanban,/sgq-kit-type/)
 })
