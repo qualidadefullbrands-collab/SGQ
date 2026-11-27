@@ -637,23 +637,34 @@ app.MapGet("/api/app/bootstrap", async (HttpRequest request,IHttpClientFactory f
             $"select=nome,perfil&id=eq.{Uri.EscapeDataString(userId)}&limit=1");
         var processesTask=RestAsync(client,token,HttpMethod.Get,"processos",
             "select=id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id&excluido_em=is.null&order=criado_em.desc");
-        var itemLinksTask=RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
-            "select=grupo_inspecao_id,processo_itens(id,codigo_cliente,produtos(sku,nome))&limit=10000");
         var inspectionsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
             "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,concluida_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
-        await Task.WhenAll(profileTask,processesTask,inspectionsTask,itemLinksTask);
+        await Task.WhenAll(profileTask,processesTask,inspectionsTask);
         var (profile,found)=FirstRow(profileTask.Result);
         if(!found)return Results.Json(Error("Usuário sem perfil autorizado no SGQ."),statusCode:403);
         return Results.Ok(new {data=new {
             profile,processes=processesTask.Result,
-            inspections=OperationalInspections(processesTask.Result,inspectionsTask.Result),
-            itemLinks=itemLinksTask.Result
+            inspections=OperationalInspections(processesTask.Result,inspectionsTask.Result)
         },error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao carregar o painel.",e.Message),statusCode:500);}
 });
 
+
+// Product links are loaded only when an inspection board/process view is opened.
+app.MapGet("/api/app/inspection-items",async(HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var itemLinks=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+            "select=grupo_inspecao_id,grupos_inspecao(tipo),processo_itens(id,codigo_cliente,quantidade,produtos(sku,nome))&limit=10000");
+        return Results.Ok(new{data=new{itemLinks},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar os SKUs das inspeções.",e.Message),statusCode:500);}
+});
 
 // Read-only source for the Insights dashboard. All queries use the user's JWT
 // so table RLS applies. Rows without an Omie PV snapshot are not extrapolated.
@@ -719,9 +730,9 @@ app.MapGet("/api/app/listas", async (HttpRequest request,IHttpClientFactory fact
             "select=grupo_inspecao_id,processo_itens(id,codigo_cliente,produtos(sku,nome))&limit=10000");
         var inspections=RestAsync(client,token,HttpMethod.Get,"inspecoes",
             "select=id,numero,status,resultado,parametros_amostragem,tamanho_lote,tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,codigo_amostragem,criado_em,concluida_em,grupos_inspecao(id,nome,tipo,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(id,codigo,cliente,nota_fiscal,origem,transporte,chegada_cd,data_processo,status,criado_em,it_versao_id)),it_versoes(id,versao,instrucoes_trabalho(codigo,titulo))&excluido_em=is.null&order=criado_em.desc");
-        await Task.WhenAll(processes,inspections,itemLinksTask);
+        await Task.WhenAll(processes,inspections);
         return Results.Ok(new{data=new{processes=processes.Result,
-            inspections=OperationalInspections(processes.Result,inspections.Result),itemLinks=itemLinksTask.Result},error=(object?)null});
+            inspections=OperationalInspections(processes.Result,inspections.Result)},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao atualizar as listas.",e.Message),statusCode:500);}
