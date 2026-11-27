@@ -73,7 +73,7 @@ type InspectionRow = {
   codigo_amostragem: string | null
   criado_em: string
   concluida_em?: string | null
-  parametros_amostragem?: {lote_sequencial?:string|null;ordem_produto?:number;total_produtos?:number;produto_codigo?:string}|null
+  parametros_amostragem?: {lote_sequencial?:string|null;ordem_produto?:number;total_produtos?:number;produto_codigo?:string;batch_id?:string|null;batch_sku_set?:string|null;batch_sku_count?:number|null}|null
   grupos_inspecao?: {
     id: string
     nome: string
@@ -172,7 +172,7 @@ function skuRowHasData(row:ReturnType<typeof emptySku>){
     row.capacidade.trim()||row.quantidade.trim()||row.quantidadePorCaixa.trim()||
     row.caixasRecebidas.trim()||row.caixasInspecionadas.trim()||row.caixasPadrao.trim()||
     row.caixasFracionadas.trim()||row.caixasLaboratorio.trim()||row.unidadesLaboratorio.trim()||
-    row.unidadesPadrao.trim()||row.unidadesFracionadas.trim()||row.fotoFile)
+    row.unidadesPadrao.trim()||row.unidadesFracionadas.trim()||row.distribuicaoCaixas.trim()||row.fotoPrincipalPath||row.fotoFile)
 }
 // Review first; only apply the Omie quantities to the inspection after the popup closes.
 function prepareOmieSkuReview(suggestion:OmieSkuImport,rows:ReturnType<typeof emptySku>[]):OmieSkuReview {
@@ -891,6 +891,7 @@ export default function App() {
   const itemLinksLoadedUser=useRef<string|null>(null)
   const equipmentLoadedUser=useRef<string|null>(null)
   const detailRequests=useRef(new Map<string,Promise<void>>())
+  const openDetailTarget=useRef<string|null>(null)
   const detailStageRequests=useRef(new Map<string,Promise<void>>())
   const stockRequest=useRef<Promise<void>|null>(null)
   const photosLinksExpiration=useRef(new Map<string,number>())
@@ -948,6 +949,10 @@ export default function App() {
   }, [skuRows])
 
   const [isComponentSet,setIsComponentSet] = useState<boolean|null>(null)
+  const [itPorSku,setItPorSku]=useState<Record<string,string>>({})
+  const [nivelPorSku,setNivelPorSku]=useState<Record<string,string>>({})
+  const [batchProgress,setBatchProgress]=useState('')
+  const skuKeys=useMemo(()=>[...new Set(skuRows.map(row=>row.sku.trim().toUpperCase()).filter(Boolean))],[skuRows])
   const skuSetFingerprint=useMemo(()=>[...new Set(skuRows.filter(skuRowHasData).map(row=>row.sku.trim().toUpperCase()).filter(Boolean))].sort().join('|'),[skuRows])
   const distinctSkuCount=skuSetFingerprint?skuSetFingerprint.split('|').length:0
   const kitHistoryCount=useMemo(()=>{
@@ -963,6 +968,19 @@ export default function App() {
     }
     return [...groups.values()].filter(group=>group.type==='kit_componentes'&&[...group.skus].sort().join('|')===skuSetFingerprint).length
   },[processItemLinks,skuSetFingerprint])
+  const independentHistoryCount=useMemo(()=>{
+    if(!skuSetFingerprint||distinctSkuCount<2)return 0
+    const confirmed=new Map<string,Set<string>>()
+    for(const row of inspections){
+      const batch=row.parametros_amostragem
+      const groupId=row.grupos_inspecao?.id
+      if(row.status==='cancelada'||row.grupos_inspecao?.tipo!=='individual'||!groupId||!batch?.batch_id||
+        batch.batch_sku_set!==skuSetFingerprint||batch.batch_sku_count!==distinctSkuCount)continue
+      const ids=confirmed.get(batch.batch_id)||new Set<string>()
+      ids.add(groupId);confirmed.set(batch.batch_id,ids)
+    }
+    return [...confirmed.values()].filter(ids=>ids.size===distinctSkuCount).length
+  },[inspections,skuSetFingerprint,distinctSkuCount])
   const priorSkuSetFingerprint=useRef(skuSetFingerprint)
   useEffect(()=>{
     if(priorSkuSetFingerprint.current!==skuSetFingerprint){
@@ -1099,6 +1117,11 @@ export default function App() {
         if(Array.isArray(saved.skuRows))setSkuRows(saved.skuRows.map((row:any)=>({...emptySku(),...row,
           fotoPreview:row.fotoFile?URL.createObjectURL(row.fotoFile):''})))
         if(saved.requestId)createRequestId.current=saved.requestId
+        if(Array.isArray(saved.skuRows)){
+          priorSkuSetFingerprint.current=[...new Set<string>(saved.skuRows.map((row:any)=>String(row.sku||'').trim().toUpperCase()).filter(Boolean))].sort().join('|')
+          setIsComponentSet(typeof saved.isComponentSet==='boolean'?saved.isComponentSet:null)
+          setItPorSku(saved.itPorSku||{});setNivelPorSku(saved.nivelPorSku||{})
+        }
       }
     }).catch(e=>{if(active)setOfflineError('Falha ao restaurar rascunho: '+String(e?.message||''))})
       .finally(()=>{if(active)setOfflineDraftReady(true)})
@@ -1110,13 +1133,13 @@ export default function App() {
       const hasContent=!!inspection.codigo.trim()||!!inspection.cliente.trim()||
         !!inspection.observacaoInterna.trim()||skuRows.some(skuRowHasData)
       const operation=hasContent?saveOfflineDraft(userId,'full:new',{
-        inspection,skuRows,requestId:createRequestId.current
+        inspection,skuRows,requestId:createRequestId.current,isComponentSet,itPorSku,nivelPorSku
       }):clearOfflineDraft(userId,'full:new')
       void operation.then(()=>setOfflineDraftStatus(hasContent?'Salvo neste dispositivo':''))
         .catch(e=>setOfflineError('Não foi possível salvar localmente: '+String(e?.message||'')))
     },450)
     return()=>window.clearTimeout(timer)
-  },[userId,tab,inspection,skuRows,offlineDraftReady,editingInspectionId,editingProcessId])
+  },[userId,tab,inspection,skuRows,offlineDraftReady,editingInspectionId,editingProcessId,isComponentSet,itPorSku,nivelPorSku])
 
   useEffect(() => {
     if (!userId) {
@@ -1135,6 +1158,7 @@ export default function App() {
       setDetailLoading(false)
       setDetailStageLoading(null)
       detailRequests.current.clear()
+      openDetailTarget.current=null
       detailStageRequests.current.clear()
       setSamples([])
       setItVersions([])
@@ -1159,7 +1183,7 @@ export default function App() {
 
   useEffect(()=>{
     if(!userId){equipmentLoadedUser.current=null;return}
-    if(tab==='execucao'&&activeStage==='dimensionais'&&equipmentLoadedUser.current!==userId){
+    if((tab==='equipamentos'||(tab==='execucao'&&activeStage==='dimensionais'))&&equipmentLoadedUser.current!==userId){
       equipmentLoadedUser.current=userId
       void refreshEquipments().then(error=>{
         if(error){equipmentLoadedUser.current=null;setError('Não foi possível carregar os instrumentos dimensionais.')}
@@ -1168,7 +1192,7 @@ export default function App() {
   },[userId,tab,activeStage])
 
   useEffect(()=>{
-    const inspectionTabs=['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile']
+    const inspectionTabs=['quadro','inspecoes','nova','execucao','equipamentos','fotos-mobile']
     if(!inspectionTabs.includes(tab))setTab('quadro')
   },[tab])
 
@@ -1435,7 +1459,7 @@ export default function App() {
         .catch(()=>undefined)
       setProcesses((data.processes ?? []) as ProcessRow[])
       setInspections((data.inspections ?? []) as InspectionRow[])
-      setProcessItemLinks(data.itemLinks??[])
+      if(Array.isArray(data.itemLinks))setProcessItemLinks(data.itemLinks)
       setCounts(old=>({
         ...old,processos:(data.processes??[]).length,inspecoes:(data.inspections??[]).length
       }))
@@ -1542,6 +1566,7 @@ export default function App() {
 
   function resetNewInspection() {
     createRequestId.current=crypto.randomUUID()
+    setItPorSku({});setNivelPorSku({});setBatchProgress('')
     setInheritedReference(null)
     autoNfeRef.current=null
     setEditingInspectionId(null);setEditingProcessId(null);setActiveProductIndex(0);setExpandedSkuIndex(0)
@@ -1636,6 +1661,8 @@ export default function App() {
   }
 
   function reuseProcess(p: ProcessRow) {
+    createRequestId.current=crypto.randomUUID()
+    setItPorSku({});setNivelPorSku({});setBatchProgress('')
     autoNfeRef.current=null
     fstLookupRequest.current++
     setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('')
@@ -1668,7 +1695,7 @@ export default function App() {
       dataInspecao:''
     }))
     if(first){
-      void apiGet<any>('/api/inspecoes/'+encodeURIComponent(first.id)+'/detalhe').then(res=>{
+      void apiGet<any>('/api/inspecoes/'+encodeURIComponent(first.id)+'/resumo').then(res=>{
         if(res.error||!res.data)return
         const items=res.data.items??[]
         const quantity=items.reduce((sum:number,link:any)=>sum+Number(link.processo_itens?.quantidade||0),0)
@@ -1685,7 +1712,7 @@ export default function App() {
 
   async function editInspectionFull(id:string){
     setError('')
-    const res=await apiGet<any>('/api/inspecoes/'+id+'/detalhe')
+    const res=await apiGet<any>('/api/inspecoes/'+id+'/resumo')
     let source=res.data
     if(res.error||!source?.inspecao){
       source=await readOfflineDraft<any>(userId||'','full:detail:'+id).catch(()=>null)
@@ -2175,32 +2202,37 @@ export default function App() {
   async function openInspection(id: string) {
     setError('')
     setWordStatus(null)
+    openDetailTarget.current=id
     if(detail?.id===id){
       setSelectedInspectionId(id)
       setTab('execucao')
       return
     }
     const running=detailRequests.current.get(id)
-    if(running){await running;return}
     if(selectedInspectionId!==id){setActiveStage('dados');setAllowDimensionalRectification(false)}
     setSelectedInspectionId(id)
     setDetail(null)
     setDetailLoading(true)
     setDetailStageLoading(null)
     setTab('execucao')
+    if(running){await running;return}
     const request=(async()=>{
       try{
-        const loaded=await apiGet<any>('/api/inspecoes/'+id+'/resumo')
+        const groupHint=inspections.find(item=>item.id===id)?.grupos_inspecao?.id
+        const loaded=await apiGet<any>('/api/inspecoes/'+id+'/resumo'+(groupHint?'?grupo='+encodeURIComponent(groupHint):''))
         let data=loaded.data
+        if(openDetailTarget.current!==id)return
         if(loaded.error||!data?.inspecao){
           data=await readOfflineDraft<any>(userId||'','full:detail:'+id).catch(()=>null)
           if(!data?.inspecao)data=await readOfflineDraft<any>(userId||'','full:summary:'+id).catch(()=>null)
           if(!data?.inspecao){
+            if(openDetailTarget.current!==id)return
             setError(loaded.error?.message??'Inspeção não disponível offline.')
             setTab('quadro')
             return
           }
         }else void saveOfflineDraft(userId||'','full:summary:'+id,data).catch(()=>undefined)
+        if(openDetailTarget.current!==id)return
         editingBaseline.current=offlineInspectionVersion(data)
         const photoUrls=data.photoUrls??{}
         const photosWithUrls=(data.photos??[]).map((p:any)=>({...p,signed_url:photoUrls[p.storage_path]??null}))
@@ -2216,6 +2248,7 @@ export default function App() {
         }
         photosLinksExpiration.current.delete(id)
         setDetail(next)
+        if(next.status==='em_andamento'&&Number(next.total_inspecionado||0)<Number(next.tamanho_amostra||0))setActiveStage('amostragem')
         setSampleNcDraft(String(next.total_nao_conforme??0))
         setFinalObservation(next.observacoes??'')
         setInternalObservation(next.observacao_interna??'')
@@ -2231,7 +2264,7 @@ export default function App() {
           for(const key of Object.keys(retention))retention[key].qty=String(suggestedQty)
         }else setRetentionSuggestion({quantidade:null,fonte:null})
         setRetentionRows(retention)
-      }finally{setDetailLoading(false)}
+      }finally{if(openDetailTarget.current===id)setDetailLoading(false)}
     })()
     detailRequests.current.set(id,request)
     try{await request}finally{
@@ -2540,6 +2573,9 @@ export default function App() {
     const payload={
       codigo:parentFstCode(inspection.codigo),processoId:inspection.processoId||null,
       subprocessoCodigo:inspection.subprocessoCodigo,ehConjunto:isComponentSet===true,
+      criarIndependentes:distinctSkuCount>1&&isComponentSet===false,
+      itPorSku:Object.fromEntries(skuKeys.filter(sku=>itPorSku[sku]).map(sku=>[sku,itPorSku[sku]])),
+      nivelPorSku:Object.fromEntries(skuKeys.filter(sku=>nivelPorSku[sku]).map(sku=>[sku,nivelPorSku[sku]])),
       requestId:createRequestId.current,
       cliente:inspection.cliente.trim()||null,notaFiscal:inspection.notaFiscal.trim()||null,
       origem:inspection.origem.trim()||null,transporte:inspection.transporte.trim()||null,
@@ -2572,7 +2608,10 @@ export default function App() {
     const quantityError=operationalQuantityError(skuRows)
     if(quantityError){setPopupMessage(quantityError);return}
     if(distinctSkuCount>1&&isComponentSet===null){setPopupMessage('Defina se os SKUs formam um mesmo kit ou se são produtos independentes.');return}
-    if(distinctSkuCount>1&&isComponentSet===false){setPopupMessage('Os SKUs são produtos independentes. Mantenha um único SKU nesta entrada e crie uma nova entrada para cada outro produto, no mesmo FST.');return}
+    const independentBatch=distinctSkuCount>1&&isComponentSet===false
+    if(independentBatch&&(editingInspectionId||editingProcessId)){setPopupMessage('Não é possível dividir uma inspeção existente automaticamente. Preserve o histórico e crie entradas novas.');return}
+    if(independentBatch&&(!/^\d+$/.test(parentFstCode(inspection.codigo))||!inspection.itVersionId||skuRows.filter(skuRowHasData).some(row=>!row.sku.trim()))){setPopupMessage('Confirme o FST, a IT e o código de todos os SKUs antes de criar as inspeções independentes.');return}
+    if(independentBatch&&skuKeys.length>26){setPopupMessage('O FST admite até 26 entradas. Revise a quantidade de SKUs.');return}
     submitLock.current=true
     try {
     if(editingInspectionId||editingProcessId){
@@ -2631,23 +2670,17 @@ export default function App() {
 
     const itens:any[]=[]
     for (const row of skuRows) {
-      const hasAnyData=Boolean(
-        row.sku.trim() || row.nome.trim() || row.lote.trim() || row.material.trim() ||
-        row.capacidade.trim() || row.quantidade || row.quantidadePorCaixa ||
-        row.caixasRecebidas || row.caixasInspecionadas || row.distribuicaoCaixas.trim() ||
-        row.caixasPadrao || row.unidadesPadrao || row.caixasFracionadas || row.unidadesFracionadas ||
-        row.caixasLaboratorio || row.unidadesLaboratorio || row.fotoFile || row.fotoPrincipalPath
-      )
+      const hasAnyData=skuRowHasData(row)
       if (!hasAnyData) continue
 
       const dist=boxDistributionTotals(row)
       let fotoPrincipalPath=row.fotoPrincipalPath || ''
       if (row.fotoFile) {
         const safe=row.fotoFile.name.replace(/[^a-zA-Z0-9._-]/g,'_')
-        const folder=row.sku.trim() || 'temporario'
-        const photoPath=`${folder}/${Date.now()}-${safe}`
+        const folder=(row.sku.trim() || 'temporario').replace(/[^a-zA-Z0-9._-]/g,'_')
+        const photoPath=`${folder}/${createRequestId.current}-${itens.length}-${safe}`
         const upload=await supabase.storage.from('produto-fotos').upload(photoPath,row.fotoFile,{contentType:row.fotoFile.type||undefined})
-        if (upload.error){
+        if (upload.error&&!/already exists|already uploaded|resource already exists|assetalreadyexists|duplicate|já existe/i.test(upload.error.message)){
           setInspectionBusy(false)
           if(connectionFailure(upload.error.message)||!navigator.onLine){
             try{await queueInspectionCreate(iniciar)}catch(e:any){setError(String(e?.message||''))}
@@ -2680,10 +2713,14 @@ export default function App() {
       setInspectionBusy(false)
       return setError('A data da inspeção não pode ser anterior à chegada ao CD.')
     }
+    if(independentBatch)setBatchProgress('Criando uma inspeção por SKU. Não altere o cadastro até a confirmação.')
     const created=await apiPost<any>('/api/inspecoes/criar',{
       codigo:parentFstCode(inspection.codigo),
       processoId:inspection.processoId||null,
       subprocessoCodigo:inspection.subprocessoCodigo,ehConjunto:isComponentSet===true,
+      criarIndependentes:distinctSkuCount>1&&isComponentSet===false,
+      itPorSku:Object.fromEntries(skuKeys.filter(sku=>itPorSku[sku]).map(sku=>[sku,itPorSku[sku]])),
+      nivelPorSku:Object.fromEntries(skuKeys.filter(sku=>nivelPorSku[sku]).map(sku=>[sku,nivelPorSku[sku]])),
       requestId:createRequestId.current,
       cliente:inspection.cliente.trim() || null,
       notaFiscal:inspection.notaFiscal.trim() || null,
@@ -2705,6 +2742,20 @@ export default function App() {
         return
       }
       return setError(created.error?.message || 'Falha ao criar inspeção.')
+    }
+
+    if(independentBatch){
+      const count=Number(created.data.quantidade)||0
+      if(count!==skuKeys.length){setError('O servidor não confirmou todas as inspeções. Retente o mesmo cadastro.');return}
+      if(userId)await clearOfflineDraft(userId,'full:new')
+      const firstId=String(created.data.id)
+      resetNewInspection()
+      setMessage(count+' inspeções independentes criadas no mesmo FST. Um único Word será gerado com anexos separados.')
+      loadSequence.current++
+      if(iniciar){await openInspection(firstId);setActiveStage('amostragem')}
+      else setTab('quadro')
+      void refreshLists();void loadInspectionItems(true)
+      return
     }
 
     // Show the newly saved record without another round trip to the dashboard.
@@ -2742,7 +2793,7 @@ export default function App() {
     void loadInspectionItems(true)
     }finally{
       submitLock.current=false
-      setInspectionBusy(false)
+      setInspectionBusy(false);setBatchProgress('')
     }
   }
   async function moveInspectionOnBoard(id:string,target:'aberta'|'em_andamento'){
@@ -3607,9 +3658,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       <aside className="sgq-side-nav sgq-inspection-nav" aria-label="Navegação de inspeções">
         <div className="sgq-side-brand"><span className="sgq-brand-symbol"><ClipboardCheck size={29}/></span><div><b>SGQ</b><small>Inspeções</small></div></div>
         <div className="sgq-side-caption">INSPEÇÕES</div>
-        <button type="button" className={tab==='quadro'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='quadro'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Quadro de inspeções</button>
+        <button type="button" className={tab==='quadro'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='quadro'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Central de inspeções</button>
         <button type="button" className={tab==='inspecoes'?'selected':''} aria-current={tab==='inspecoes'?'page':undefined} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
-        <button type="button" className={tab==='auditorias'?'selected':''} aria-current={tab==='auditorias'?'page':undefined} onClick={()=>{setTab('auditorias');setError('')}}><Warehouse size={19}/> Inspeções Armazém</button>
+        <button type="button" className={tab==='equipamentos'?'selected':''} aria-current={tab==='equipamentos'?'page':undefined} onClick={()=>{setTab('equipamentos');setError('')}}><Wrench size={19}/> Equipamentos</button>
         <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button type="button" onClick={()=>void supabase.auth.signOut()}><LogOut size={14}/> Sair</button></div>
       </aside>
       <header className="topbar" aria-label="Cabeçalho do SGQ">
@@ -4042,23 +4093,42 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                 </label>
                 <label className={'sgq-kit-choice '+(isComponentSet===false?'selected':'')}>
                   <input type="radio" name="sgq-kit-classification" checked={isComponentSet===false} onChange={()=>setIsComponentSet(false)}/>
-                  <span><strong>São produtos independentes</strong><small>Uma entrada e uma inspeção própria para cada SKU, dentro do mesmo FST.</small></span>
+                  <span><strong>São produtos independentes</strong><small>O SGQ cria as entradas automaticamente: uma inspeção por SKU e um único Word do FST, com anexos separados.</small></span>
                 </label>
               </div>
-              {kitHistoryCount>0&&isComponentSet===null&&<p className="field-hint sgq-kit-history-hint">Esta combinação exata já foi confirmada como conjunto em {kitHistoryCount} inspeção(ões) anterior(es). Confirme se continua sendo um kit.</p>}
+              {isComponentSet===null&&(kitHistoryCount>0||independentHistoryCount>0)&&<p className="field-hint sgq-kit-history-hint">{kitHistoryCount>0&&independentHistoryCount>0?'Há classificações anteriores diferentes para estes mesmos SKUs. Confirme a relação neste recebimento.':kitHistoryCount>0?'Sugestão: kit. Esta combinação exata já foi confirmada como conjunto em '+kitHistoryCount+' inspeção(ões).':'Sugestão: independentes. Esta combinação exata já foi registrada separadamente em '+independentHistoryCount+' cadastro(s).'} O SGQ não decide apenas pelo FST.</p>}
               {isComponentSet===null&&<p className="field-hint">Escolha uma classificação antes de salvar. O SGQ não presume que SKUs do mesmo PV formem um kit.</p>}
-              {isComponentSet===false&&<p className="field-hint">Para produtos independentes, mantenha apenas um SKU nesta entrada e cadastre os demais em novas entradas do mesmo FST.</p>}
+              {isComponentSet===false&&<div className="sgq-independent-review">
+                <strong>{distinctSkuCount} inspeções · um FST · um documento com anexos separados</strong>
+                <p>Confira a IT e o nível de cada SKU. Os dados gerais são preenchidos uma vez. Ao iniciar, somente a primeira inspeção será iniciada; as demais ficam na fila.</p>
+                {skuKeys.map(sku=><div className="sgq-independent-line" key={sku}><strong>{sku}</strong>
+                  <label>IT do SKU<select aria-label={'IT de '+sku} value={itPorSku[sku]||''} onChange={e=>{
+                    const value=e.target.value
+                    setItPorSku(old=>({...old,[sku]:value}))
+                    const selected=itVersions.find(it=>it.id===value)
+                    setNivelPorSku(old=>({...old,[sku]:selected?.nivel_inspecao_padrao||''}))
+                  }}>
+                    <option value="">Usar IT selecionada acima</option>
+                    {itVersions.filter(it=>it.status==='publicada').map(it=><option key={it.id} value={it.id}>{it.instrucoes_trabalho?.codigo} · {it.instrucoes_trabalho?.titulo}</option>)}
+                  </select></label>
+                  <label>Nível<select aria-label={'Nível de '+sku} value={nivelPorSku[sku]||''} onChange={e=>setNivelPorSku(old=>({...old,[sku]:e.target.value}))}>
+                    <option value="">Usar nível geral ({inspection.inspectionLevel})</option>
+                    {['I','II','III','S1','S2','S3','S4'].map(level=><option key={level} value={level}>{level}</option>)}
+                  </select></label>
+                </div>)}
+              </div>}
             </section>}
             <section className="calc-strip">
               <div><small>Tipo</small><strong>{distinctSkuCount>1?(isComponentSet===true?'Conjunto / componentes':isComponentSet===false?'Produtos independentes':'Classificação pendente'):'Produto independente'}</strong></div>
-              <div><small>Lote estatístico</small><strong>{statisticalLot?statisticalLot.toLocaleString('pt-BR'):'—'}</strong></div>
-              <div><small>Plano</small><strong>{previewPlan.code?(previewPlan.code+' · '+previewPlan.sample+' un.'):'—'}</strong></div>
+              <div><small>Lote estatístico</small><strong>{distinctSkuCount>1&&isComponentSet===false?'Por SKU':statisticalLot?statisticalLot.toLocaleString('pt-BR'):'—'}</strong></div>
+              <div><small>Plano</small><strong>{distinctSkuCount>1&&isComponentSet===false?'Individual por SKU':previewPlan.code?(previewPlan.code+' · '+previewPlan.sample+' un.'):'—'}</strong></div>
               <div><small>Distribuição de caixas</small><strong>Por componente / SKU</strong></div>
             </section>
 
+            {batchProgress&&<p role="status" className="field-hint">{batchProgress}</p>}
             <div className="actions inspection-create-actions">
-              <button className="secondary" type="submit" value="salvar" disabled={inspectionBusy}><FileText size={17}/>{inspectionBusy?'Salvando…':'Salvar'}</button>
-              {!editingInspectionId && !editingProcessId && <button className="primary" type="submit" value="iniciar" disabled={inspectionBusy}><Play size={17}/> Iniciar inspeção</button>}
+              <button className="secondary" type="submit" value="salvar" disabled={inspectionBusy}><FileText size={17}/>{inspectionBusy?'Salvando…':distinctSkuCount>1&&isComponentSet===false?'Criar '+distinctSkuCount+' inspeções':'Salvar'}</button>
+              {!editingInspectionId && !editingProcessId && <button className="primary" type="submit" value="iniciar" disabled={inspectionBusy}><Play size={17}/> {distinctSkuCount>1&&isComponentSet===false?'Criar e iniciar primeira':'Iniciar inspeção'}</button>}
             </div>
           </form>
         </section>

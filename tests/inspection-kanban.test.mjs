@@ -38,7 +38,7 @@ test('Kanban cards separate FST, entry, customer, SKUs and inspection actions',(
 
 test('process hierarchy remains a separate view with direct entry actions',()=>{
  assert.match(board,/useState<'processos'\|'kanban'>\(initialView\)/)
- assert.match(board,/view==='processos'\?'Processos':'Inspeções'/)
+ assert.match(board,/view==='processos'\?'Processos':'Central de inspeções'/)
  assert.match(board,/processTree=useMemo\(/)
  assert.match(board,/processes\.map\(process=>/)
  assert.match(board,/inspectionsByProcess\.get\(process\.id\)/)

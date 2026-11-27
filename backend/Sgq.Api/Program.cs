@@ -39,6 +39,7 @@ app.Use(async(context,next)=>{
             context.Request.Method,context.GetEndpoint()?.DisplayName??"/api",stopwatch.ElapsedMilliseconds,context.Response.StatusCode);
 });
 var userValidationCache=new ConcurrentDictionary<string,(string UserId,DateTimeOffset Until)>();
+var batchLocks=Enumerable.Range(0,64).Select(_=>new SemaphoreSlim(1,1)).ToArray();
 
 string Token(HttpRequest request)
 {
@@ -790,16 +791,23 @@ app.MapGet("/api/inspecoes/{id}/resumo",async(string id,HttpRequest request,IHtt
     try{
         var token=Token(request);
         var client=factory.CreateClient("supabase");
-        var rows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=*,grupos_inspecao(*,processos(*)),it_versoes(*,instrucoes_trabalho(*))&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var rowsTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=*,grupos_inspecao(*,processos(*)),it_versoes(*,instrucoes_trabalho(*))&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
+        Task<JsonElement?> ReadItems(string groupId)=>RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+                $"select=id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,codigo_cliente,quantidade_pv,pv_numero,pv_fst,material,capacidade,quantidade_por_caixa,caixas_recebidas,caixas_inspecionadas,distribuicao_caixas,produtos(id,sku,nome,foto_principal_path))&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
+        var hint=request.Query["grupo"].ToString();
+        var hintedItems=Guid.TryParse(hint,out _)?ReadItems(hint):null;
+        var rows=await rowsTask;
         var (inspection,found)=FirstRow(rows);
-        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
-        var groupId=inspection!.Value.TryGetProperty("grupo_inspecao_id",out var groupProp)&&groupProp.ValueKind==JsonValueKind.String
+        var groupId=found&&inspection!.Value.TryGetProperty("grupo_inspecao_id",out var groupProp)&&groupProp.ValueKind==JsonValueKind.String
             ?groupProp.GetString():null;
         JsonElement? items=null;
-        if(!string.IsNullOrWhiteSpace(groupId))
-            items=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
-                $"select=id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,codigo_cliente,quantidade_pv,pv_numero,pv_fst,material,capacidade,quantidade_por_caixa,caixas_recebidas,caixas_inspecionadas,distribuicao_caixas,produtos(id,sku,nome,foto_principal_path))&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
+        if(hintedItems!=null){
+            try{var candidate=await hintedItems;if(found&&groupId==hint)items=candidate;}
+            catch when(!found||groupId!=hint){/* discard unrelated speculative request */}
+        }
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        if(items==null&&!string.IsNullOrWhiteSpace(groupId))items=await ReadItems(groupId);
         return Results.Ok(new{data=new{inspecao=inspection.Value,items,loadedStages=Array.Empty<string>()},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
@@ -1349,6 +1357,13 @@ async Task<bool> OperationalQuantitiesPersisted(
 }
 
 app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRequest request, IHttpClientFactory factory) =>
+    input.CriarIndependentes
+        ? await CreateIndependentInspectionBatch(input,request,factory)
+        : await CreateInspectionSingle(input,request,factory));
+
+string StableInspectionId(string seed)=>new Guid(SHA256.HashData(Encoding.UTF8.GetBytes(seed))[..16]).ToString();
+
+async Task<IResult> CreateInspectionSingle(CreateInspectionRequest input,HttpRequest request,IHttpClientFactory factory)
 {
     try
     {
@@ -1369,6 +1384,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             if(alreadyCreated)
             {
                 var firstParams=existing!.Value.GetProperty("parametros_amostragem");
+                if(input.BatchFingerprint!=null&&(!firstParams.TryGetProperty("batch_fingerprint",out var oldFingerprint)||oldFingerprint.GetString()!=input.BatchFingerprint))
+                    return Results.Json(Error("O cadastro original deste SKU não corresponde à tentativa atual."),statusCode:409);
                 // Uma inspeção por conjunto: um request_id sempre corresponde a um registro.
                 // Gravações antigas por SKU permanecem intactas para reconciliação, sem reuso neste fluxo.
                 if(firstParams.ValueKind==JsonValueKind.Object
@@ -1478,6 +1495,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             $"select=id,codigo,subprocesso_codigo&processo_id=eq.{Uri.EscapeDataString(processId)}");
         var groups=groupsRows is {ValueKind:JsonValueKind.Array}
             ?groupsRows.Value.EnumerateArray().ToList():new List<JsonElement>();
+        var reservedGroupId=input.BatchId!=null?StableInspectionId(requestId+"|group"):Guid.NewGuid().ToString();
+        var reservedGroup=groups.FirstOrDefault(x=>x.GetProperty("id").GetString()==reservedGroupId);
         var groupCodes=groups.Select(x=>x.GetProperty("codigo").GetString()??"")
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var groupIndex=1;
@@ -1489,16 +1508,20 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
         if(string.IsNullOrWhiteSpace(subCode))
             subCode=Enumerable.Range(65,26).Select(n=>((char)n).ToString())
                 .FirstOrDefault(c=>!usedSubs.Contains(c))??"";
+        if(reservedGroup.ValueKind==JsonValueKind.Object)
+            subCode=reservedGroup.GetProperty("subprocesso_codigo").GetString()??"";
         if(subCode.Length!=1||subCode[0]<'A'||subCode[0]>'Z')
             return Results.Json(Error("Subprocesso deve ter uma letra de A a Z."),statusCode:400);
-        if(usedSubs.Contains(subCode))
+        if(reservedGroup.ValueKind!=JsonValueKind.Object&&usedSubs.Contains(subCode))
             return Results.Json(Error($"O subprocesso {subCode} já existe neste FST."),statusCode:409);
         var nonEmptyNames = items.Select(x => (x.Nome ?? "").Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
         var groupName = nonEmptyNames.Count > 0 ? string.Join(" + ", nonEmptyNames) : "Inspeção em preenchimento";
         var isComponentSet = input.EhConjunto && distinctSkuCount > 1;
 
-        var createdGroup = await RestAsync(client, token, HttpMethod.Post, "grupos_inspecao", "select=id",
+        var createdGroup = reservedGroup.ValueKind==JsonValueKind.Object?null:
+            await RestAsync(client, token, HttpMethod.Post, "grupos_inspecao", "select=id",
             new {
+                id=reservedGroupId,
                 processo_id = processId,
                 codigo = groupCode,
                 subprocesso_codigo = subCode,
@@ -1512,8 +1535,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 status = "em_inspecao"
             }, "return=representation");
         var (groupRow, groupFound) = FirstRow(createdGroup);
-        if (!groupFound) throw new InvalidOperationException("Falha ao criar grupo de inspeção.");
-        var groupId = groupRow!.Value.GetProperty("id").GetString()!;
+        if (!groupFound&&reservedGroup.ValueKind!=JsonValueKind.Object) throw new InvalidOperationException("Falha ao criar grupo de inspeção.");
+        var groupId = reservedGroupId;
 
         string? firstItemId = null;
         var itemIndex = 0;
@@ -1559,8 +1582,11 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                 productId = pr!.Value.GetProperty("id").GetString()!;
             }
 
-            var itemCreated = await RestAsync(client, token, HttpMethod.Post, "processo_itens", "select=id",
+            var reservedItemId=input.BatchId!=null?StableInspectionId(requestId+"|item|"+itemIndex):Guid.NewGuid().ToString();
+            var itemCreated = await RestAsync(client, token, HttpMethod.Post, "processo_itens",
+                input.BatchId!=null?"on_conflict=id&select=id":"select=id",
                 new {
+                    id=reservedItemId,
                     processo_id = processId,
                     produto_id = productId,
                     codigo_cliente = string.IsNullOrWhiteSpace(item.Sku)?null:item.Sku.Trim(),
@@ -1575,24 +1601,30 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     caixas_recebidas = OperationalBoxesReceived(item)>0?(decimal?)OperationalBoxesReceived(item):null,
                     caixas_inspecionadas = OperationalBoxesToEvaluate(item)>0?(decimal?)OperationalBoxesToEvaluate(item):null,
                     distribuicao_caixas = NormalizeComponentDistribution(item)
-                }, "return=representation");
+                }, input.BatchId!=null?"resolution=ignore-duplicates,return=representation":"return=representation");
             var (ir, inf) = FirstRow(itemCreated);
+            if(!inf&&input.BatchId!=null){
+                var recovered=await RestAsync(client,token,HttpMethod.Get,"processo_itens",
+                    $"select=id&processo_id=eq.{Uri.EscapeDataString(processId)}&produto_id=eq.{Uri.EscapeDataString(productId)}&id=eq.{reservedItemId}");
+                (ir,inf)=FirstRow(recovered);
+            }
             if (!inf) throw new InvalidOperationException($"Falha ao cadastrar item {normalizedSku}.");
             var itemId = ir!.Value.GetProperty("id").GetString()!;
             firstItemId ??= itemId;
 
-            await RestAsync(client, token, HttpMethod.Post, "grupo_inspecao_itens", "",
+            await RestAsync(client, token, HttpMethod.Post, "grupo_inspecao_itens", input.BatchId!=null?"on_conflict=id":"",
                 new {
+                    id=input.BatchId!=null?StableInspectionId(requestId+"|link|"+itemIndex):Guid.NewGuid().ToString(),
                     grupo_inspecao_id = groupId,
                     processo_item_id = itemId,
                     quantidade_componente = effectiveQuantity,
                     unidades_por_conjunto = item.UnidadesPorConjunto <= 0 ? 1m : item.UnidadesPorConjunto
-                }, "return=minimal");
+                }, input.BatchId!=null?"resolution=ignore-duplicates,return=minimal":"return=minimal");
         }
 
         if(!string.IsNullOrWhiteSpace(effectiveIt))
-            await RestAsync(client,token,HttpMethod.Post,"grupo_inspecao_its","",
-                new {grupo_inspecao_id=groupId,it_versao_id=effectiveIt,principal=true},"return=minimal");
+            await RestAsync(client,token,HttpMethod.Post,"grupo_inspecao_its",input.BatchId!=null?"on_conflict=id":"",
+                new {id=input.BatchId!=null?StableInspectionId(requestId+"|it"):Guid.NewGuid().ToString(),grupo_inspecao_id=groupId,it_versao_id=effectiveIt,principal=true},input.BatchId!=null?"resolution=ignore-duplicates,return=minimal":"return=minimal");
 
         var inspectionNumber = $"INS-{DateTime.UtcNow.Year}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
         var totalBoxesReceived = items.Sum(OperationalBoxesReceived);
@@ -1600,6 +1632,7 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
 
         var createdInspection = await RestAsync(client, token, HttpMethod.Post, "inspecoes", "select=id",
             new {
+                id=input.BatchId!=null?StableInspectionId(requestId+"|inspection"):Guid.NewGuid().ToString(),
                 numero = inspectionNumber,
                 processo_item_id = firstItemId,
                 grupo_inspecao_id = groupId,
@@ -1632,7 +1665,11 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     somente_it_obrigatoria = true,
                     modelo_inspecao=isComponentSet?"conjunto":"individual",
                     quantidade_skus=items.Count,
-                    request_id=requestId
+                    request_id=requestId,
+                    batch_id=input.BatchId,
+                    batch_fingerprint=input.BatchFingerprint,
+                    batch_sku_set=input.BatchSkuSet,
+                    batch_sku_count=input.BatchSkuCount
                 }
             }, "return=representation");
 
@@ -1659,7 +1696,101 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
     {
         return Results.Json(Error("Falha ao criar inspeção no backend.", e.Message), statusCode: 500);
     }
-});
+}
+
+// Independent SKUs use the same creation engine, with a stable ID for each SKU.
+// The caderno/Word remains consolidated by parent FST. Each entry keeps its own IT,
+// sampling plan, evidence and result. No existing inspection is regrouped.
+async Task<IResult> CreateIndependentInspectionBatch(CreateInspectionRequest input,HttpRequest request,IHttpClientFactory factory)
+{
+    SemaphoreSlim? gate=null;
+    try{
+        if(input.EhConjunto || !Guid.TryParse(input.RequestId,out var batchGuid) ||
+           (string.IsNullOrWhiteSpace(input.Codigo)&&string.IsNullOrWhiteSpace(input.ProcessoId)))
+            return Results.Json(Error("Confirme produtos independentes, FST e identificador do cadastro."),statusCode:400);
+        if(InvalidOperationalUnits(input.Itens) || input.Itens.Any(x=>string.IsNullOrWhiteSpace(x.Sku)))
+            return Results.Json(Error("Informe o código de cada SKU e confira as quantidades inteiras."),statusCode:400);
+        var groups=input.Itens.GroupBy(x=>x.Sku.Trim().ToUpperInvariant()).ToArray();
+        if(groups.Length<2 || groups.Length>26)
+            return Results.Json(Error("O cadastro em lote exige de 2 a 26 SKUs distintos."),statusCode:400);
+        if(string.IsNullOrWhiteSpace(input.ProcessoId)&&!Regex.IsMatch(input.Codigo.Trim(),@"^(FST)?[0-9]+$",RegexOptions.IgnoreCase))
+            return Results.Json(Error("Informe um FST numérico válido antes de criar as entradas independentes."),statusCode:400);
+        if(!Guid.TryParse(input.ItVersionId,out _) ||
+           groups.Any(g=>input.ItPorSku?.TryGetValue(g.Key,out var version)==true && !Guid.TryParse(version,out _)))
+            return Results.Json(Error("Confirme a IT aplicável a cada SKU antes de salvar."),statusCode:400);
+        if(input.ChegadaCd.HasValue && (input.DataInspecao??DateOnly.FromDateTime(DateTime.UtcNow))<input.ChegadaCd.Value)
+            return Results.Json(Error("A data da inspeção não pode ser anterior à chegada ao CD."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var batchId=batchGuid.ToString("N");
+        var lockSlot=batchLocks[Math.Abs(batchGuid.GetHashCode()%batchLocks.Length)];
+        await lockSlot.WaitAsync(request.HttpContext.RequestAborted);
+        gate=lockSlot;
+        var skuSet=string.Join("|",groups.Select(g=>g.Key).OrderBy(x=>x,StringComparer.Ordinal));
+        var fingerprint=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(input))));
+        var versionIds=new[]{input.ItVersionId}.Concat(groups.Select(g=>input.ItPorSku?.TryGetValue(g.Key,out var it)==true?it:input.ItVersionId))
+            .Select(x=>Guid.Parse(x).ToString()).Distinct().ToArray();
+        var versionRows=await RestAsync(client,token,HttpMethod.Get,"it_versoes",$"select=id&id=in.({string.Join(",",versionIds)})");
+        if(versionRows is not {ValueKind:JsonValueKind.Array} || versionRows.Value.GetArrayLength()!=versionIds.Length)
+            return Results.Json(Error("Uma das ITs selecionadas não está disponível."),statusCode:400);
+        var saved=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,grupo_inspecao_id,parametros_amostragem&parametros_amostragem->>batch_id=eq.{batchId}&excluido_em=is.null");
+        var savedRows=saved is {ValueKind:JsonValueKind.Array}?saved.Value.EnumerateArray().ToArray():Array.Empty<JsonElement>();
+        if(savedRows.Any(row=>!row.GetProperty("parametros_amostragem").TryGetProperty("batch_fingerprint",out var old) ||
+            old.GetString()!=fingerprint))
+            return Results.Json(Error("Este cadastro já foi iniciado. Retome os mesmos dados para evitar duplicação; retifique as entradas salvas separadamente."),statusCode:409);
+        var byId=!string.IsNullOrWhiteSpace(input.ProcessoId);
+        var parentRows=await RestAsync(client,token,HttpMethod.Get,"processos",
+            $"select=id,codigo,excluido_em&{(byId?"id":"codigo")}=eq.{Uri.EscapeDataString(byId?input.ProcessoId!:input.Codigo.Trim())}&limit=1");
+        var (parent,found)=FirstRow(parentRows);
+        if(byId&&!found)return Results.Json(Error("FST principal não localizado."),statusCode:404);
+        if(found){
+            if(!Regex.IsMatch(parent!.Value.GetProperty("codigo").GetString()??"",@"^(FST)?[0-9]+$",RegexOptions.IgnoreCase))
+                return Results.Json(Error("O FST existente não possui código numérico válido para o laudo."),statusCode:409);
+            if(parent.Value.TryGetProperty("excluido_em",out var deleted)&&deleted.ValueKind!=JsonValueKind.Null)
+                return Results.Json(Error("Processo arquivado não pode receber entradas."),statusCode:409);
+            var existing=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
+                $"select=id,subprocesso_codigo&processo_id=eq.{Uri.EscapeDataString(parent.Value.GetProperty("id").GetString()!)}");
+            var used=existing is {ValueKind:JsonValueKind.Array}?existing.Value.EnumerateArray()
+                .Select(x=>x.TryGetProperty("subprocesso_codigo",out var sub)&&sub.ValueKind==JsonValueKind.String?sub.GetString():"")
+                .Where(x=>!string.IsNullOrWhiteSpace(x)).ToHashSet(StringComparer.OrdinalIgnoreCase):new HashSet<string?>(StringComparer.OrdinalIgnoreCase);
+            var reservedIds=groups.Select(g=>StableInspectionId(Guid.Parse(StableInspectionId(batchId+"|"+g.Key)).ToString("N")+"|group")).ToHashSet();
+            var reservedCount=existing is {ValueKind:JsonValueKind.Array}?existing.Value.EnumerateArray().Count(x=>reservedIds.Contains(x.GetProperty("id").GetString()??"")):0;
+            if(used.Count+groups.Length-Math.Max(savedRows.Length,reservedCount)>26)
+                return Results.Json(Error("O FST não possui letras de entrada suficientes para todos os SKUs."),statusCode:409);
+        }
+        var created=new List<JsonElement>();
+        for(var index=0;index<groups.Length;index++){
+            var group=groups[index];
+            var key=SHA256.HashData(Encoding.UTF8.GetBytes(batchId+"|"+group.Key));
+            var child=new CreateInspectionRequest {
+                Codigo=input.Codigo,ProcessoId=input.ProcessoId,SubprocessoCodigo=null,
+                EhConjunto=false,Iniciar=input.Iniciar&&index==0,
+                RequestId=new Guid(key[..16]).ToString(),
+                BatchId=batchId,BatchFingerprint=fingerprint,BatchSkuSet=skuSet,BatchSkuCount=groups.Length,
+                Cliente=input.Cliente,NotaFiscal=input.NotaFiscal,Origem=input.Origem,Transporte=input.Transporte,
+                ChegadaCd=input.ChegadaCd,DataInspecao=input.DataInspecao,
+                ItVersionId=input.ItPorSku?.TryGetValue(group.Key,out var it)==true?it:input.ItVersionId,
+                InspectionLevel=input.NivelPorSku?.TryGetValue(group.Key,out var level)==true?level:input.InspectionLevel,
+                ObservacaoInterna=input.ObservacaoInterna,Itens=group.ToList()
+            };
+            foreach(var item in child.Itens)item.UnidadesPorConjunto=1;
+            var result=await CreateInspectionSingle(child,request,factory);
+            var status=(result as IStatusCodeHttpResult)?.StatusCode??200;
+            var json=JsonSerializer.SerializeToElement((result as IValueHttpResult)?.Value);
+            if(status>=400 || json.ValueKind!=JsonValueKind.Object || !json.TryGetProperty("data",out var data) || data.ValueKind!=JsonValueKind.Object){
+                var reason=json.ValueKind==JsonValueKind.Object&&json.TryGetProperty("error",out var error)&&error.ValueKind==JsonValueKind.Object&&error.TryGetProperty("message",out var message)?message.GetString():"Falha no cadastro.";
+                return Results.Json(Error($"{created.Count} de {groups.Length} inspeções confirmadas. {reason} Retente o mesmo cadastro sem alterar os dados; as inspeções já confirmadas não serão duplicadas."),statusCode:status>=400?status:500);
+            }
+            created.Add(data);
+        }
+        return Results.Ok(new{data=new{id=created[0].GetProperty("id").GetString(),inspecoes=created,quantidade=created.Count},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao preparar as inspeções independentes.",e.Message),statusCode:500);}
+    finally{gate?.Release();}
+}
 
 // Fast, authorized numeric-only save for the all-SKU operational grid.
 // Avoid Omie/catalog lookups and per-item product updates for unchanged SKUs.
@@ -2214,9 +2345,12 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
             $"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&checklist_id=eq.{Uri.EscapeDataString(checkId)}&limit=1"):null;
         var userId=actingUser;
 
-        var checkRows=await RestAsync(client,token,HttpMethod.Get,"it_checklist",
-            $"select=classificacao_sugerida,grupo&id=eq.{Uri.EscapeDataString(checkId)}&limit=1");
-        var (check,checkFound)=FirstRow(checkRows);
+        var checkTask=RestAsync(client,token,HttpMethod.Get,"it_checklist",
+            $"select=classificacao_sugerida,grupo,it_versao_id&id=eq.{Uri.EscapeDataString(checkId)}&limit=1");
+        var inspectionTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,limite_rejeicao,it_versao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        await Task.WhenAll(checkTask,inspectionTask);
+        var (check,checkFound)=FirstRow(checkTask.Result);
         if(!checkFound) return Results.Json(Error("Verificação não encontrada."),statusCode:404);
 
         var automaticSeverity=check!.Value.TryGetProperty("classificacao_sugerida",out var cs) && cs.ValueKind==JsonValueKind.String
@@ -2224,10 +2358,11 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
         var group=check.Value.TryGetProperty("grupo",out var gp)&&gp.ValueKind==JsonValueKind.String?gp.GetString()??"": "";
         var dimensionalSummary=string.Equals(group.Trim(),"Dimensional",StringComparison.OrdinalIgnoreCase);
 
-        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,limite_rejeicao&id=eq.{Uri.EscapeDataString(id)}&limit=1");
-        var (inspection,inspectionFound)=FirstRow(insRows);
+        var (inspection,inspectionFound)=FirstRow(inspectionTask.Result);
         if(!inspectionFound) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var itVersionId=inspection!.Value.TryGetProperty("it_versao_id",out var iv)&&iv.ValueKind==JsonValueKind.String?iv.GetString():null;
+        if(string.IsNullOrWhiteSpace(itVersionId)||!check.Value.TryGetProperty("it_versao_id",out var cv)||cv.GetString()!=itVersionId)
+            return Results.Json(Error("A verificação não pertence à IT desta inspeção."),statusCode:409);
         var sample=inspection!.Value.TryGetProperty("tamanho_amostra",out var sm)&&sm.ValueKind==JsonValueKind.Number?sm.GetInt32():0;
         var currentUniqueNc=inspection.Value.TryGetProperty("total_nao_conforme",out var unc)&&unc.ValueKind==JsonValueKind.Number?unc.GetInt32():0;
         var priorInspected=inspection.Value.TryGetProperty("total_inspecionado",out var insCount)&&insCount.ValueKind==JsonValueKind.Number?insCount.GetInt32():0;
@@ -2259,20 +2394,13 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
 
         // A cobertura da amostra é controlada pelas verificações não dimensionais.
         // Dimensionais têm escopo próprio e fixo de 10 medições por parâmetro.
-        JsonElement? activeChecks=null;
-        // O it_versao_id é obtido separadamente para manter a consulta explícita e simples.
-        var versionRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=it_versao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
-        var (versionInspection,vFound)=FirstRow(versionRows);
-        var itVersionId=vFound?versionInspection!.Value.GetProperty("it_versao_id").GetString():null;
-        if(!string.IsNullOrWhiteSpace(itVersionId))
-        {
-            activeChecks=await RestAsync(client,token,HttpMethod.Get,"it_checklist",
-                $"select=id,grupo&it_versao_id=eq.{Uri.EscapeDataString(itVersionId!)}&ativo=eq.true");
-        }
-
-        var allResults=await RestAsync(client,token,HttpMethod.Get,"inspecao_checklist_resultados",
+        var activeChecksTask=RestAsync(client,token,HttpMethod.Get,"it_checklist",
+            $"select=id,grupo&it_versao_id=eq.{Uri.EscapeDataString(itVersionId!)}&ativo=eq.true");
+        var allResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_checklist_resultados",
             $"select=checklist_id,resultado,quantidade_avaliada,quantidade_nc&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+        await Task.WhenAll(activeChecksTask,allResultsTask);
+        var activeChecks=activeChecksTask.Result;
+        var allResults=allResultsTask.Result;
         var resultById=new Dictionary<string,JsonElement>(StringComparer.OrdinalIgnoreCase);
         if(allResults is {ValueKind:JsonValueKind.Array})
             foreach(var row in allResults.Value.EnumerateArray())
@@ -4734,6 +4862,13 @@ public class CreateInspectionRequest
     public string? ProcessoId { get; set; }
     public string? SubprocessoCodigo { get; set; }
     public bool EhConjunto { get; set; } = false;
+    public bool CriarIndependentes { get; set; }
+    public Dictionary<string,string>? ItPorSku { get; set; }
+    public Dictionary<string,string>? NivelPorSku { get; set; }
+    internal string? BatchId { get; set; }
+    internal string? BatchFingerprint { get; set; }
+    internal string? BatchSkuSet { get; set; }
+    internal int? BatchSkuCount { get; set; }
     public bool Iniciar { get; set; } = true;
     public string? RequestId { get; set; }
     public string Codigo { get; set; } = "";
