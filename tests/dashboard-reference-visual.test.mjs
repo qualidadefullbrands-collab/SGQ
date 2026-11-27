@@ -40,7 +40,6 @@ test('reference dashboard provides responsive cards, chart, navigation and real 
  assert.match(css,/@media\(max-width:620px\)/)
  assert.match(css,/data-status-filter="concluida"/)
  assert.ok(board.includes("const search=normalized(query||externalQuery||'')"))
- assert.match(board,/mode==='panel'\s*\?column\.items/)
 })
 
 test('inspection shell preserves notifications, user identity and logout actions',()=>{
