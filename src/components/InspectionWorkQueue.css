@@ -77,3 +77,5 @@
  .sgq-work-open{flex:1}.sgq-work-sku-list>div{grid-template-columns:minmax(80px,.4fr) minmax(0,1fr)}
 }
 @media(prefers-reduced-motion:reduce){.sgq-work-row{transition:none}}
+
+.sgq-center-more{justify-self:center;min-height:34px;margin:4px 0;padding:0 13px;border:1px solid #d6e2e9;border-radius:8px;background:#fff;color:#42667e;font-size:10px;font-weight:800}.sgq-center-more:hover{background:#f1f6f8;border-color:#b9cedb}
