@@ -27,7 +27,7 @@ test('main navigation and routes are restricted to inspection workflows',()=>{
   for(const label of ['Estoque','Instruções técnicas','Equipamentos','Configurações','Painel','Insights'])
     assert.doesNotMatch(nav,new RegExp(label))
   assert.match(app,/inspectionTabs=\['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile'\]/)
-  assert.ok(app.includes("tab==='auditorias' && <AuditoriasPage"))
+  assert.ok(app.includes("tab==='auditorias' && ("))
   assert.ok(app.includes("<AuditoriasPage userId={userId||''} profileName={profile.nome} canDelete={!!canDelete} canManageTemplates={!!canManageIts}/>"))
 })
 
