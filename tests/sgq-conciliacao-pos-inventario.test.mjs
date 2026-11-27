@@ -8,7 +8,7 @@ const navigation=read('src/stock/StockWorkspaceNav.tsx')
 const sql=read('supabase/migrations/20261113193000_sgq_conciliacao_pos_inventario_fst.sql')
 
 test('post-inventory reconciliation is visible as a separate SGQ stock tab',()=>{
- assert.match(app,/const BlindInventoryReconciliation=lazy/
+ assert.match(app,/const BlindInventoryReconciliation=lazy/)
  assert.ok(app.includes("stockMode==='conciliacao'&&<Suspense")&&app.includes('<BlindInventoryReconciliation'))
  assert.match(navigation,/Conciliação SGQ/)
  assert.match(ui,/Conciliação pós-inventário/)
