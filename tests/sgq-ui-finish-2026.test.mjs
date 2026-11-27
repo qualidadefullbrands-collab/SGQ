@@ -13,7 +13,7 @@ const settings=source('src/config/SettingsPage.tsx')
 test('existing subprocess identities use separate FST and entry labels and show CD arrival',()=>{
  assert.match(processes,/sgq-process-identity-head/)
  assert.match(processes,/Chegada ao CD:/)
- assert.match(processes,/Entrada \\{sub\\.letter/)
+ assert.match(processes,/Entrada \{sub\.letter/)
  assert.match(processes,/sgq-subprocess-products/)
  assert.match(processes,/product\.sku/)
  assert.match(processes,/product\.descricao/)
