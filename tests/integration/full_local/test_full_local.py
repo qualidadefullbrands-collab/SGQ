@@ -52,7 +52,7 @@ class FullLocalIntegration(unittest.TestCase):
         cls.other,cls.other_token=cls.create_user("other")
         fixture=(ROOT/"tests/integration/full_local/fixture.sql").read_text()
         assert fixture.count("__OWNER_UUID__")>10
-        sql=fixture.replace("__OWNER_UUID__",cls.owner)
+        sql=fixture.replace("__OWNER_UUID__",cls.owner)+"\n"+(ROOT/"supabase/sql/sgq_reclassificar_inspecao.sql").read_text()
         p=subprocess.run(["psql","-X","-v","ON_ERROR_STOP=1",cls.db],
                          input=sql,text=True,capture_output=True,check=False)
         if p.returncode:
@@ -492,5 +492,102 @@ class FullLocalIntegration(unittest.TestCase):
         stored=query.json()[0]
         self.assertEqual(stored["tipo"],"kit_componentes")
         self.assertEqual({x["processo_itens"]["produtos"]["sku"]:x["unidades_por_conjunto"] for x in stored["grupo_inspecao_itens"]},{"QA-KIT-BASE":1,"QA-KIT-PECA":2})
+
+    def test_15_reclassify_split_merge_atomic_and_word(self):
+        headers=self.headers(self.owner_token)
+        body={"codigo":"FST99995","cliente":"Cliente QA","notaFiscal":"QA-RECLASS",
+              "origem":"Brasil","transporte":"Rodoviario","chegadaCd":"2026-11-20",
+              "dataInspecao":"2026-11-21","itVersionId":"66666666-6666-4666-8666-666666666666",
+              "inspectionLevel":"II","requestId":str(uuid.uuid4()),"ehConjunto":True,"iniciar":False,
+              "itens":[{"sku":"QA-RECLASS-A","nome":"Base","quantidade":100,"unidadesPorConjunto":1,"caixasRecebidas":1,"caixasInspecionadas":1},
+                       {"sku":"QA-RECLASS-B","nome":"Peça","quantidade":200,"unidadesPorConjunto":2,"caixasRecebidas":2,"caixasInspecionadas":1}]}
+        created=self.http.post(self.api+"/api/inspecoes/criar",headers=headers,json=body)
+        self.assertEqual(created.status_code,200,fail_text(created))
+        original=created.json()["data"]
+        pid=original["processo_id"]
+        endpoint=self.api+"/api/inspecoes/"+original["id"]+"/reclassificar"
+        def active():
+            groups=self.http.get(self.sb+"/rest/v1/grupos_inspecao",headers=headers,
+                params={"processo_id":"eq."+pid,"select":"id,tipo,subprocesso_codigo,reclassificado_em,grupo_inspecao_itens(id,processo_item_id,unidades_por_conjunto,processo_itens(produtos(sku))),inspecoes(id,status,excluido_em,tamanho_lote,tamanho_amostra)"}).json()
+            return [(g,i) for g in groups for i in g["inspecoes"] if i["excluido_em"] is None]
+        before=active()
+        ids={x["processo_item_id"] for x in before[0][0]["grupo_inspecao_itens"]}
+        self.assertEqual(len(before),1)
+        ctx=self.http.post(endpoint,headers=headers,json={"modo":"contexto"})
+        self.assertEqual(ctx.status_code,200,fail_text(ctx))
+        self.assertEqual(ctx.json()["data"]["tipo"],"kit_componentes")
+        unauthorized=self.http.post(endpoint,headers=self.headers(self.other_token),json={"modo":"separar"})
+        self.assertIn(unauthorized.status_code,(403,404),fail_text(unauthorized))
+        split={"modo":"separar"}
+        pre=self.http.post(endpoint,headers=headers,json=split)
+        self.assertEqual(pre.status_code,200,fail_text(pre))
+        preview=pre.json()["data"]
+        self.assertEqual([x["plano"]["lote"] for x in preview["destinos"]],[100,200])
+        for target in preview["destinos"]:
+            plan=self.http.get(self.api+"/api/amostragem/plano",params={"lote":target["plano"]["lote"],"nivel":target["nivel"]})
+            self.assertEqual(plan.status_code,200,fail_text(plan))
+            plan_data=plan.json().get("data",plan.json())
+            self.assertEqual(target["plano"]["amostra"],plan_data["amostra"])
+        self.assertEqual(len(active()),1,"Preview must not change data")
+        bad=self.http.post(endpoint,headers=headers,json={**split,"confirmacao":"invalid","motivo":"Teste"})
+        self.assertEqual(bad.status_code,409,fail_text(bad))
+        self.assertEqual(len(active()),1)
+        payload={**split,"confirmacao":preview["confirmacao"],"motivo":"Classificação incorreta no teste"}
+        result=self.http.post(endpoint,headers=headers,json=payload)
+        self.assertEqual(result.status_code,200,fail_text(result))
+        data=result.json()["data"]
+        self.assertEqual(len(data["novas"]),2)
+        now=active()
+        self.assertEqual(len(now),2)
+        self.assertEqual({g["tipo"] for g,i in now},{"individual"})
+        self.assertEqual({x["processo_item_id"] for g,i in now for x in g["grupo_inspecao_itens"]},ids)
+        self.assertEqual({i["tamanho_lote"] for g,i in now},{100,200})
+        self.assertEqual(self.http.post(endpoint,headers=headers,json=payload).json()["data"]["novas"],data["novas"])
+        stale=self.http.post(self.api+"/api/inspecoes/criar",headers=headers,json=body)
+        self.assertEqual(stale.status_code,409,fail_text(stale))
+        # Merge again without manually reentering common data.
+        merge_url=self.api+"/api/inspecoes/"+data["novas"][0]+"/reclassificar"
+        merge={"modo":"agrupar","selecionadas":data["novas"],"unidades":{"QA-RECLASS-A":1,"QA-RECLASS-B":2}}
+        pre=self.http.post(merge_url,headers=headers,json=merge)
+        self.assertEqual(pre.status_code,200,fail_text(pre))
+        mp=pre.json()["data"]
+        self.assertEqual(len(mp["destinos"]),1)
+        self.assertEqual(mp["destinos"][0]["plano"]["lote"],100)
+        merged=self.http.post(merge_url,headers=headers,json={**merge,"confirmacao":mp["confirmacao"],"motivo":"Corrigir para conjunto"})
+        self.assertEqual(merged.status_code,200,fail_text(merged))
+        final_id=merged.json()["data"]["novas"][0]
+        now=active()
+        self.assertEqual(len(now),1)
+        group,inspection=now[0]
+        self.assertEqual(group["tipo"],"kit_componentes")
+        self.assertEqual(inspection["id"],final_id)
+        self.assertEqual({x["processo_item_id"] for x in group["grupo_inspecao_itens"]},ids)
+        self.assertEqual({x["processo_itens"]["produtos"]["sku"]:x["unidades_por_conjunto"] for x in group["grupo_inspecao_itens"]},{"QA-RECLASS-A":1,"QA-RECLASS-B":2})
+        history=self.http.get(self.sb+"/rest/v1/audit_log",headers=headers,params={"entidade_id":"eq."+pid,"acao":"eq.reclassificacao_skus","select":"dados"})
+        self.assertEqual(history.status_code,200,fail_text(history))
+        self.assertEqual(len(history.json()),2)
+        self.assertEqual(len(history.json()[0]["dados"]["antes"]["vinculos"]),2)
+        # Add actual evidence after preview. The stale correction must fail and
+        # retain the original record and evidence, not redistribute or delete them.
+        final_url=self.api+"/api/inspecoes/"+final_id+"/reclassificar"
+        preview2=self.http.post(final_url,headers=headers,json=split).json()["data"]
+        path=f"{self.owner}/{final_id}/reclass-evidence.png"
+        upload=self.http.post(self.sb+"/storage/v1/object/inspecao-fotos/"+path,headers={**headers,"Content-Type":"image/png","x-upsert":"false"},content=self.image)
+        self.assertIn(upload.status_code,(200,201),fail_text(upload))
+        photo=self.http.post(self.sb+"/rest/v1/inspecao_fotos",headers=headers,json={"inspecao_id":final_id,"storage_path":path,"legenda":"EVIDENCIA RECLASS"})
+        self.assertIn(photo.status_code,(200,201),fail_text(photo))
+        blocked=self.http.post(final_url,headers=headers,json={**split,"confirmacao":preview2["confirmacao"],"motivo":"Não deve modificar"})
+        self.assertEqual(blocked.status_code,409,fail_text(blocked))
+        self.assertEqual(len(active()),1)
+        ctx=self.http.post(final_url,headers=headers,json={"modo":"contexto"}).json()["data"]
+        self.assertTrue(ctx["entradas"][0]["bloqueio"])
+        # In the isolated fixture only, finish the kit to test the actual single Word.
+        self.run_sql("update public.inspecoes set status='concluida',resultado='aprovado',total_inspecionado=tamanho_amostra,total_nao_conforme=0,dimensionais_finalizados=true,testes_finalizados=true where id='"+str(uuid.UUID(final_id))+"';")
+        status=self.http.get(self.api+"/api/processos/"+pid+"/laudo-status",headers=headers)
+        self.assertEqual(status.status_code,200,fail_text(status))
+        self.assertEqual(status.json()["data"]["subprocesses"],1)
+        doc,words=self.parse_docx(self.http.post(self.api+"/api/processos/"+pid+"/laudo",headers=headers))
+        for expected in ("QA-RECLASS-A","QA-RECLASS-B","EVIDENCIA RECLASS","APROVADO"):
+            self.assertIn(expected,words)
 
 if __name__=="__main__":unittest.main()
