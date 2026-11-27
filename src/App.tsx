@@ -23,6 +23,7 @@ const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
 const RECOVERY_REDIRECT_URL = 'https://app-sgq.onrender.com/?auth=recovery'
 const ItEditorDemo=lazy(()=>import('./its/ItEditorDemo'))
 const ItLibrary=lazy(()=>import('./its/ItLibrary'))
+const SkuReclassification=lazy(()=>import('./components/SkuReclassification'))
 const MobileFotos=lazy(()=>import('./mobile/MobileFotos'))
 const InsightsPage=lazy(()=>import('./insights/InsightsPage'))
 const SettingsPage=lazy(()=>import('./config/SettingsPage'))
@@ -904,6 +905,7 @@ export default function App() {
   const processDeletionLock=useRef<string|null>(null)
   const {equipments,setEquipments,busy:equipmentBusy,refresh:refreshEquipments}=useEquipmentList()
   const [editingInspectionData, setEditingInspectionData] = useState<any>(null)
+  const [reclassificationId,setReclassificationId]=useState<string|null>(null)
   const [retentionSuggestion, setRetentionSuggestion] = useState<{quantidade:number|null;fonte:string|null}>({quantidade:null,fonte:null})
 
   const [itForm, setItForm] = useState({
@@ -2339,6 +2341,26 @@ export default function App() {
     try{await request}finally{
       if(detailStageRequests.current.get(requestKey)===request)detailStageRequests.current.delete(requestKey)
     }
+  }
+
+  function openSkuReclassification(id:string|null){
+    if(!id)return
+    if(!navigator.onLine||offlinePending||offlineConflicts){setPopupMessage('Conecte-se e sincronize os registros pendentes antes de alterar a classificação.');return}
+    setEditingInspectionData(null);setReclassificationId(id)
+    void loadCatalogs()
+  }
+  async function afterSkuReclassification(result:{originais:string[];novas:string[]}){
+    setReclassificationId(null);setEditingInspectionData(null);setDetail(null);setSelectedInspectionId(null)
+    openDetailTarget.current=null;setWordStatus(null)
+    setActiveStage('dados');setAllowDimensionalRectification(false)
+    loadSequence.current++;catalogsLoadedUser.current=null;itemLinksLoadedUser.current=null
+    if(userId){
+      await Promise.all([...result.originais.flatMap(id=>['full:detail:'+id,'full:summary:'+id]),
+        'app:bootstrap','app:inspection-items','app:catalogos'].map(key=>clearOfflineDraft(userId,key).catch(()=>undefined)))
+    }
+    setTab('quadro')
+    setMessage('Classificação corrigida no mesmo FST. Confira as inspeções e os novos planos de amostragem.')
+    await Promise.all([refreshLists(),loadInspectionItems(true)])
   }
 
   function startEditingInspectionData() {
@@ -4160,6 +4182,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <div className="row-actions">
               <span className="pill">{statusLabel(detail.status)}</span>
               {canWrite && <button className="secondary" type="button" onClick={startEditingInspectionData}><Edit3 size={16}/> Editar dados</button>}
+              {canWrite && <button className="secondary" type="button" onClick={()=>openSkuReclassification(detail.id)}><Boxes size={16}/> Alterar classificação dos SKUs</button>}
               {canWrite && detail.status==='concluida' && <button className={allowDimensionalRectification?'secondary':'primary'} type="button" onClick={()=>{
                 if(allowDimensionalRectification){setAllowDimensionalRectification(false);return}
                 if(!navigator.onLine){setError('Conecte-se para editar com auditoria.');return}
@@ -5002,6 +5025,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </section>
       )}
 
+      {reclassificationId&&<Suspense fallback={<div className="modal-backdrop"><article className="sample-detail" role="status">Carregando reclassificação…</article></div>}>
+        <SkuReclassification key={reclassificationId} inspectionId={reclassificationId} versions={itVersions} onClose={()=>setReclassificationId(null)} onApplied={result=>void afterSkuReclassification(result)}/>
+      </Suspense>}
       {editingInspectionData && (
         <div className="modal-backdrop">
           <article className="sample-detail inspection-edit-modal" onClick={(e)=>e.stopPropagation()}>
@@ -5009,6 +5035,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             <span className="eyebrow">DADOS DA INSPEÇÃO</span>
             <h2>Editar inspeção</h2>
             <p className="muted">Altere os campos necessários e salve.</p>
+            {canWrite&&selectedInspectionId&&<button type="button" className="secondary" onClick={()=>openSkuReclassification(selectedInspectionId)}><Boxes size={16}/> Alterar classificação dos SKUs</button>}
             <div className="form-grid">
               <label>FST principal<input value={editingInspectionData.codigo ?? ''} readOnly title="Para alterar o código do FST, edite o processo principal."/></label>
               <label>Cliente<input value={editingInspectionData.cliente ?? ''} onChange={(e)=>setEditingInspectionData({...editingInspectionData,cliente:e.target.value})}/></label>

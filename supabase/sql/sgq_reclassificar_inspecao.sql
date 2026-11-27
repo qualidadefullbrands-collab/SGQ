@@ -101,11 +101,11 @@ begin
  end if;
 
  -- Serialize corrections on the FST, then lock original rows and item links.
- perform 1 from public.processos where id=v_process.id and excluido_em is null for update;
+ select * into v_process from public.processos where id=v_process.id and excluido_em is null for update;
  if not found then raise exception 'FST arquivado durante a operação.'; end if;
  if p_confirmacao is not null then
   select dados->'resultado' into v_previous from public.audit_log
-   where entidade='processos' and entidade_id=v_process.id::text and acao='reclassificacao_skus'
+   where entidade='processos' and entidade_id::text=v_process.id::text and acao='reclassificacao_skus'
    and dados->>'confirmacao'=p_confirmacao and usuario_id=v_actor order by id desc limit 1;
   if found then return v_previous || jsonb_build_object('replay',true); end if;
  end if;
@@ -156,6 +156,10 @@ begin
  if p_modo='agrupar' and exists(select 1 from public.grupo_inspecao_itens l join public.processo_itens x on x.id=l.processo_item_id
   join public.produtos p on p.id=x.produto_id where l.id=any(v_links) group by l.grupo_inspecao_id having count(distinct upper(btrim(p.sku)))<>1) then
   raise exception 'Uma das entradas não é realmente independente.';
+ end if;
+ if p_modo='agrupar' and exists(select 1 from public.grupo_inspecao_itens l join public.processo_itens x on x.id=l.processo_item_id
+  join public.produtos p on p.id=x.produto_id where l.id=any(v_links) group by upper(btrim(p.sku)) having count(distinct l.grupo_inspecao_id)>1) then
+  raise exception 'Há o mesmo SKU em mais de uma entrada. Confira os lotes antes de agrupar.';
  end if;
  v_it:=coalesce(p_it,v_ins.it_versao_id); v_level:=coalesce(p_nivel,v_ins.nivel_inspecao);
  if v_it is null or not exists(select 1 from public.it_versoes where id=v_it and status='publicada')

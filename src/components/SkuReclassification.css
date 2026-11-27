@@ -1,0 +1,10 @@
+.sgq-reclassification{max-width:760px;width:calc(100% - 24px);max-height:90vh;overflow:auto}
+.sgq-reclassification fieldset{border:1px solid #d4e1e9;border-radius:8px;padding:14px;min-width:0;margin:14px 0}
+.sgq-reclassification legend{font-weight:700;padding:0 7px}
+.sgq-reclassification .sgq-reclass-summary{display:grid;gap:5px;padding:12px;border:1px solid #d4e1e9;background:#f4f8fb;border-radius:7px;margin:8px 0;color:#25465c;overflow-wrap:anywhere}
+.sgq-reclassification .sgq-reclass-candidates{display:grid;gap:6px;margin:12px 0}
+.sgq-reclassification .sgq-reclass-entry{display:flex;align-items:flex-start;gap:10px;padding:10px;border:1px solid #dbe5ec;border-radius:6px}
+.sgq-reclassification .sgq-reclass-entry input{width:auto;min-width:16px;margin-top:4px;flex-shrink:0}
+.sgq-reclassification .sgq-reclass-entry span{display:grid;gap:3px}
+.sgq-reclassification .sgq-reclass-preview{padding:12px;border:1px solid #b7cddd;border-radius:8px}
+.sgq-reclassification textarea{width:100%;min-height:70px}
