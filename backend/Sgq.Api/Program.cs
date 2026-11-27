@@ -785,6 +785,90 @@ app.MapGet("/api/inspecoes/{id}/fotos/links", async (string id,HttpRequest reque
     catch(Exception e){return Results.Json(Error("Não foi possível obter as fotos.",e.Message),statusCode:500);}
 });
 
+// Fast first paint for an inspection: only its header and SKU rows.
+app.MapGet("/api/inspecoes/{id}/resumo",async(string id,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var rows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=*,grupos_inspecao(*,processos(*)),it_versoes(*,instrucoes_trabalho(*))&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inspection,found)=FirstRow(rows);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var groupId=inspection!.Value.TryGetProperty("grupo_inspecao_id",out var groupProp)&&groupProp.ValueKind==JsonValueKind.String
+            ?groupProp.GetString():null;
+        JsonElement? items=null;
+        if(!string.IsNullOrWhiteSpace(groupId))
+            items=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+                $"select=id,papel,quantidade_componente,unidades_por_conjunto,processo_itens(id,produto_id,lote,quantidade,codigo_cliente,quantidade_pv,pv_numero,pv_fst,material,capacidade,quantidade_por_caixa,caixas_recebidas,caixas_inspecionadas,distribuicao_caixas,produtos(id,sku,nome,foto_principal_path))&grupo_inspecao_id=eq.{Uri.EscapeDataString(groupId)}");
+        return Results.Ok(new{data=new{inspecao=inspection.Value,items,loadedStages=Array.Empty<string>()},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar o resumo da inspeção.",e.Message),statusCode:500);}
+});
+
+// Checklist, dimensional, special tests, photos and retention load only when their stage is opened.
+app.MapGet("/api/inspecoes/{id}/etapa/{stage}",async(string id,string stage,HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        var row=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=it_versao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        var (inspection,found)=FirstRow(row);
+        if(!found)return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var itId=inspection!.Value.TryGetProperty("it_versao_id",out var itProp)&&itProp.ValueKind==JsonValueKind.String
+            ?itProp.GetString():null;
+        Task<JsonElement?> checklistTask=Task.FromResult<JsonElement?>(null);
+        Task<JsonElement?> checkResultsTask=Task.FromResult<JsonElement?>(null);
+        Task<JsonElement?> paramsTask=Task.FromResult<JsonElement?>(null);
+        Task<JsonElement?> dimResultsTask=Task.FromResult<JsonElement?>(null);
+        Task<JsonElement?> dimConfigsTask=Task.FromResult<JsonElement?>(null);
+        Task<JsonElement?> testsTask=Task.FromResult<JsonElement?>(null);
+        Task<JsonElement?> testResultsTask=Task.FromResult<JsonElement?>(null);
+        Task<JsonElement?> photosTask=Task.FromResult<JsonElement?>(null);
+        Task<JsonElement?> registersTask=Task.FromResult<JsonElement?>(null);
+        Task<JsonElement?> ncsTask=Task.FromResult<JsonElement?>(null);
+        Task<JsonElement?> retainedTask=Task.FromResult<JsonElement?>(null);
+        switch(stage.ToLowerInvariant()){
+            case "verificacoes":
+                checklistTask=string.IsNullOrWhiteSpace(itId)?Task.FromResult<JsonElement?>(null):
+                    RestAsync(client,token,HttpMethod.Get,"it_checklist",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
+                checkResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_checklist_resultados",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+                registersTask=RestAsync(client,token,HttpMethod.Get,"inspecao_registros",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=sequencia.asc");
+                ncsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_nao_conformidades",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&order=criado_em.asc");
+                break;
+            case "dimensionais":
+                paramsTask=string.IsNullOrWhiteSpace(itId)?Task.FromResult<JsonElement?>(null):
+                    RestAsync(client,token,HttpMethod.Get,"it_parametros_dimensionais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
+                dimResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_dimensionais",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+                dimConfigsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_dimensional_configuracoes",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+                break;
+            case "testes":
+                testsTask=string.IsNullOrWhiteSpace(itId)?Task.FromResult<JsonElement?>(null):
+                    RestAsync(client,token,HttpMethod.Get,"it_testes_especiais",$"select=*&it_versao_id=eq.{Uri.EscapeDataString(itId)}&ativo=eq.true&order=ordem.asc");
+                testResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_testes_resultados",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+                break;
+            case "fotos":
+                photosTask=RestAsync(client,token,HttpMethod.Get,"inspecao_fotos",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&order=criado_em.asc");
+                break;
+            case "retencao":
+                retainedTask=RestAsync(client,token,HttpMethod.Get,"amostras",$"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+                break;
+            default:
+                return Results.Json(Error("Etapa de inspeção inválida."),statusCode:400);
+        }
+        await Task.WhenAll(checklistTask,checkResultsTask,paramsTask,dimResultsTask,dimConfigsTask,
+            testsTask,testResultsTask,photosTask,registersTask,ncsTask,retainedTask);
+        return Results.Ok(new{data=new{
+            checklist=checklistTask.Result,checklistResults=checkResultsTask.Result,
+            @params=paramsTask.Result,dimResults=dimResultsTask.Result,dimConfigs=dimConfigsTask.Result,
+            tests=testsTask.Result,testResults=testResultsTask.Result,photos=photosTask.Result,
+            registers=registersTask.Result,ncs=ncsTask.Result,retained=retainedTask.Result
+        },error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar esta etapa da inspeção.",e.Message),statusCode:500);}
+});
+
 app.MapGet("/api/inspecoes/{id}/detalhe", async (string id,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
