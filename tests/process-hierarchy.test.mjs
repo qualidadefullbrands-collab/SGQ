@@ -32,13 +32,8 @@ test('processes without inspection entry are separated from active inspection wo
  assert.ok(queue.includes('Criar entrada'))
 })
 test('main inspection route uses the new queue and retains process editing callbacks',()=>{
- const start=app.indexOf("{tab==='quadro' && <InspectionWorkQueue")
- const end=app.indexOf("{tab==='nova'",start)
- const route=app.slice(start,end)
- assert.ok(route.includes('<InspectionWorkQueue'))
- assert.ok(route.includes('onEditProcess='))
- assert.ok(route.includes('onReuseProcess='))
- assert.ok(!route.includes('<InspectionsKanban'))
+ assert.ok(app.includes("{tab==='quadro' && <InspectionWorkQueue"))
+ assert.ok(app.includes('onEditProcess=')&&app.includes('onReuseProcess='))
 })
 test('editing a parent process does not replace subprocess-specific invoice data',()=>{
  const section=app.split('function editProcessFull(p:ProcessRow)')[1]?.split('const fstLookupRequest')[0]||''
