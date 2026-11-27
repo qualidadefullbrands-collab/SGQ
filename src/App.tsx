@@ -601,7 +601,7 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [tab, setTab] = useState<'painel' | 'insights' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile' | 'quadro' | 'configuracoes'>(()=>window.matchMedia('(max-width: 768px)').matches || new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'painel')
+  const [tab, setTab] = useState<'painel' | 'insights' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile' | 'quadro' | 'configuracoes'>(()=>new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'quadro')
   const [itDemoOpen,setItDemoOpen]=useState(false)
   const [dashboardSearch,setDashboardSearch]=useState('')
   const [popupMessage,setPopupMessage]=useState('')
@@ -645,7 +645,8 @@ export default function App() {
   const [counts, setCounts] = useState({ processos: 0, inspecoes: 0, amostras: 0, laudos: 0 })
   const [processes, setProcesses] = useState<ProcessRow[]>([])
   const [inspections, setInspections] = useState<InspectionRow[]>([])
-  const [processItemLinks,setProcessItemLinks]=useState<Array<{grupo_inspecao_id:string;processo_itens?:{codigo_cliente?:string|null;produtos?:{sku?:string|null;nome?:string|null}|null}|null}>>([])
+  const [processItemLinks,setProcessItemLinks]=useState<Array<{grupo_inspecao_id:string;grupos_inspecao?:{tipo?:string}|null;processo_itens?:{id?:string;codigo_cliente?:string|null;quantidade?:number|null;produtos?:{sku?:string|null;nome?:string|null}|null}|null}>>([])
+  const [itemLinksLoading,setItemLinksLoading]=useState(false)
   const [omieInbox,setOmieInbox]=useState<OmieInboxOrder[]>([])
   const [omieInboxSeen,setOmieInboxSeen]=useState<Set<string>>(new Set())
   const [omieInboxError,setOmieInboxError]=useState('')
@@ -653,26 +654,32 @@ export default function App() {
   const levelOfferPrompted=useRef(new Set<string>())
   const omieUnread=omieInbox.filter(order=>order.status!=='cancelado'&&!omieInboxSeen.has(order.id)).length
 
-  async function loadOmieInbox(){
+  const omieInboxRequest=useRef<Promise<void>|null>(null)
+  const omieInboxLoadedAt=useRef(0)
+  async function loadOmieInbox(force=false){
     if(!userId||!navigator.onLine)return
-    const [orders,seen]=await Promise.all([
-      authClient.from('sgq_omie_pedidos')
-        .select('id,omie_codigo_pedido,numero_pedido,cliente,fst_referencia,status,itens,numero_itens,recebido_em,atualizado_em')
-        .order('recebido_em',{ascending:false}).limit(40),
-      authClient.from('sgq_omie_pedidos_lidos')
-        .select('pedido_id').eq('usuario_id',userId).limit(200)
-    ])
-    if(orders.error){setOmieInboxError('Não foi possível carregar os PVs do Omie.');return}
-    setOmieInbox((orders.data||[]) as OmieInboxOrder[])
-    setOmieInboxSeen(new Set((seen.data||[]).map(x=>String(x.pedido_id))))
-    setOmieInboxError('')
+    if(!force&&Date.now()-omieInboxLoadedAt.current<60000)return
+    if(omieInboxRequest.current)return omieInboxRequest.current
+    const req=(async()=>{
+      setOmieInboxLoading(true)
+      try{
+        const [orders,seen]=await Promise.all([
+          authClient.from('sgq_omie_pedidos')
+            .select('id,omie_codigo_pedido,numero_pedido,cliente,fst_referencia,status,itens,numero_itens,recebido_em,atualizado_em')
+            .order('recebido_em',{ascending:false}).limit(40),
+          authClient.from('sgq_omie_pedidos_lidos')
+            .select('pedido_id').eq('usuario_id',userId).limit(200)
+        ])
+        if(orders.error){setOmieInboxError('Não foi possível carregar os PVs do Omie.');return}
+        setOmieInbox((orders.data||[]) as OmieInboxOrder[])
+        setOmieInboxSeen(new Set((seen.data||[]).map(x=>String(x.pedido_id))))
+        setOmieInboxError('')
+        omieInboxLoadedAt.current=Date.now()
+      }finally{setOmieInboxLoading(false)}
+    })()
+    omieInboxRequest.current=req
+    try{await req}finally{if(omieInboxRequest.current===req)omieInboxRequest.current=null}
   }
-  useEffect(()=>{
-    if(!userId)return
-    void loadOmieInbox()
-    const interval=window.setInterval(()=>void loadOmieInbox(),60000)
-    return()=>window.clearInterval(interval)
-  },[userId])
 
   async function reviewOmieInboxOrder(order:OmieInboxOrder){
     if(!canWrite)return
@@ -764,6 +771,7 @@ export default function App() {
   const [selectedInspectionId, setSelectedInspectionId] = useState<string | null>(null)
   const [activeStage, setActiveStage] = useState<'dados'|'amostragem'|'verificacoes'|'dimensionais'|'testes'|'fotos'|'resultado'|'retencao'>('dados')
   const [detail, setDetail] = useState<any>(null)
+  const [detailLoading,setDetailLoading]=useState(false)
   type WordReadiness={ready:boolean;pending:string[];error?:string}
   const [wordStatus,setWordStatus]=useState<WordReadiness|null>(null)
   function parseWordStatus(response:any):WordReadiness {
@@ -877,6 +885,11 @@ export default function App() {
   const productSearchTimers = useRef<Record<number,number>>({})
   const loadAppRequest = useRef<Promise<void> | null>(null)
   const catalogsRequest=useRef<Promise<void>|null>(null)
+  const itemLinksRequest=useRef<Promise<void>|null>(null)
+  const catalogsLoadedUser=useRef<string|null>(null)
+  const itemLinksLoadedUser=useRef<string|null>(null)
+  const equipmentLoadedUser=useRef<string|null>(null)
+  const detailRequests=useRef(new Map<string,Promise<void>>())
   const stockRequest=useRef<Promise<void>|null>(null)
   const photosLinksExpiration=useRef(new Map<string,number>())
   const photoLinksRequest=useRef(new Map<string,Promise<void>>())
@@ -932,7 +945,12 @@ export default function App() {
     return valid.length ? Math.min(...valid) : 0
   }, [skuRows])
 
-  const [isComponentSet,setIsComponentSet] = useState(false)
+  const [isComponentSet,setIsComponentSet] = useState<boolean|null>(null)
+  const distinctSkuCount=useMemo(()=>new Set(skuRows.filter(skuRowHasData).map(row=>row.sku.trim().toUpperCase()).filter(Boolean)).size,[skuRows])
+  useEffect(()=>{
+    if(distinctSkuCount<2)setIsComponentSet(false)
+    else if(isComponentSet===false)setIsComponentSet(null)
+  },[distinctSkuCount])
   const previewPlan = useMemo(
     () => samplingPlan(statisticalLot, inspection.inspectionLevel),
     [statisticalLot, inspection.inspectionLevel],
@@ -1089,6 +1107,10 @@ export default function App() {
       setProcesses([])
       setInspections([])
       setProcessItemLinks([])
+      itemLinksLoadedUser.current=null
+      catalogsLoadedUser.current=null
+      equipmentLoadedUser.current=null
+      setDetailLoading(false)
       setSamples([])
       setItVersions([])
       setGroups([])
@@ -1100,14 +1122,30 @@ export default function App() {
       photosLinksExpiration.current.clear()
       return
     }
-    void loadApp().then(()=>{
-      // Mobile photo mode needs only the minimal operational bootstrap; defer heavy catalogs/stock.
-      if(tab==='fotos-mobile')return
-      void loadCatalogs()
-      void loadStock()
-      void refreshEquipments()
-    }).catch(()=>setError('Não foi possível iniciar os dados do SGQ. Atualize a página.'))
+    void loadApp().catch(()=>setError('Não foi possível iniciar os dados do SGQ. Atualize a página.'))
   }, [userId])
+
+  useEffect(()=>{
+    if(!userId)return
+    if(tab==='quadro'||tab==='inspecoes')void loadInspectionItems()
+    if(tab==='nova'||tab==='inspecoes')void loadCatalogs()
+    if(tab==='inspecoes')void loadOmieInbox()
+  },[userId,tab])
+
+  useEffect(()=>{
+    if(!userId){equipmentLoadedUser.current=null;return}
+    if(tab==='execucao'&&activeStage==='dimensionais'&&equipmentLoadedUser.current!==userId){
+      equipmentLoadedUser.current=userId
+      void refreshEquipments().then(error=>{
+        if(error){equipmentLoadedUser.current=null;setError('Não foi possível carregar os instrumentos dimensionais.')}
+      })
+    }
+  },[userId,tab,activeStage])
+
+  useEffect(()=>{
+    const inspectionTabs=['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile']
+    if(!inspectionTabs.includes(tab))setTab('quadro')
+  },[tab])
 
   useEffect(()=>{
     const u=new URL(window.location.href)
@@ -1246,6 +1284,8 @@ export default function App() {
   }
 
   async function loadCatalogs(){
+    if(!userId)return
+    if(catalogsLoadedUser.current===userId)return
     if(catalogsRequest.current)return catalogsRequest.current
     const req=(async()=>{
       setCatalogsLoading(true)
@@ -1255,9 +1295,10 @@ export default function App() {
           void saveOfflineDraft(userId||'','app:catalogos',res.data).catch(()=>undefined)
           setItVersions((res.data.itVersions??[]) as ItVersion[])
           setGroups((res.data.groups??[]) as Group[])
+          catalogsLoadedUser.current=userId
         }else{
           const cached=await readOfflineDraft<any>(userId||'','app:catalogos').catch(()=>null)
-          if(cached){setItVersions(cached.itVersions||[]);setGroups(cached.groups||[])}
+          if(cached){setItVersions(cached.itVersions||[]);setGroups(cached.groups||[]);catalogsLoadedUser.current=userId}
           else setError(res.error?.message||'Não foi possível carregar as instruções técnicas. Use Atualizar ou entre novamente.')
         }
       }catch{
@@ -1266,6 +1307,35 @@ export default function App() {
     })()
     catalogsRequest.current=req
     try{await req}finally{if(catalogsRequest.current===req)catalogsRequest.current=null}
+  }
+
+  async function loadInspectionItems(force=false){
+    if(!userId)return
+    if(!force&&itemLinksLoadedUser.current===userId)return
+    if(itemLinksRequest.current)return itemLinksRequest.current
+    const request=(async()=>{
+      setItemLinksLoading(true)
+      try{
+        const res=await apiGet<any>('/api/app/inspection-items')
+        if(res.data){
+          const rows=res.data.itemLinks??[]
+          setProcessItemLinks(rows)
+          itemLinksLoadedUser.current=userId
+          void saveOfflineDraft(userId,'app:inspection-items',{itemLinks:rows}).catch(()=>undefined)
+        }else{
+          const cached=await readOfflineDraft<any>(userId,'app:inspection-items').catch(()=>null)
+          if(cached){
+            setProcessItemLinks(cached.itemLinks||[])
+            itemLinksLoadedUser.current=userId
+          }
+        }
+      }catch{
+        const cached=await readOfflineDraft<any>(userId,'app:inspection-items').catch(()=>null)
+        if(cached){setProcessItemLinks(cached.itemLinks||[]);itemLinksLoadedUser.current=userId}
+      }finally{setItemLinksLoading(false)}
+    })()
+    itemLinksRequest.current=request
+    try{await request}finally{if(itemLinksRequest.current===request)itemLinksRequest.current=null}
   }
 
   async function loadStock(){
@@ -1336,7 +1406,7 @@ export default function App() {
         return
       }
       setProfile(data.profile as Profile)
-      void saveOfflineDraft(userId||'','app:bootstrap',{profile:data.profile,processes:data.processes,inspections:data.inspections,itemLinks:data.itemLinks})
+      void saveOfflineDraft(userId||'','app:bootstrap',{profile:data.profile,processes:data.processes,inspections:data.inspections})
         .catch(()=>undefined)
       setProcesses((data.processes ?? []) as ProcessRow[])
       setInspections((data.inspections ?? []) as InspectionRow[])
@@ -1456,7 +1526,7 @@ export default function App() {
       processoId: '', subprocessoCodigo: 'A', codigo: '', cliente: '', notaFiscal: '', origem: 'China', transporte: '', chegadaCd: '',
       dataInspecao: '', itVersionId: '', inspectionLevel: 'I', observacaoInterna: '',
     })
-    setSkuRows([emptySku()]);setIsComponentSet(false)
+    setSkuRows([emptySku()]);setIsComponentSet(null)
   }
 
   function fillTestInspectionData() {
@@ -1722,7 +1792,7 @@ export default function App() {
        refreshId!==listRefreshSequence.current)return
     setProcesses((res.data.processes??[]) as ProcessRow[])
     setInspections((res.data.inspections??[]) as InspectionRow[])
-    setProcessItemLinks(res.data.itemLinks??[])
+    // SKU links are refreshed separately only when the inspection board is used.
   }
 
   function openOmieSkuReview(suggestion:OmieSkuImport){
@@ -1978,7 +2048,7 @@ export default function App() {
     if (selectedInspectionId===i.id) {
       setSelectedInspectionId(null)
       setDetail(null)
-      setTab('painel')
+      setTab('quadro')
     }
     setMessage('Inspeção excluída.')
     void refreshLists()
@@ -2080,54 +2150,65 @@ export default function App() {
   async function openInspection(id: string) {
     setError('')
     setWordStatus(null)
+    if(detail?.id===id){
+      setSelectedInspectionId(id)
+      setTab('execucao')
+      return
+    }
+    const running=detailRequests.current.get(id)
+    if(running){await running;return}
     if(selectedInspectionId!==id){setActiveStage('dados');setAllowDimensionalRectification(false)}
     setSelectedInspectionId(id)
-    const loaded=await apiGet<any>('/api/inspecoes/'+id+'/detalhe')
-    let data=loaded.data
-    if (loaded.error || !data?.inspecao) {
-      data=await readOfflineDraft<any>(userId||'','full:detail:'+id).catch(()=>null)
-      if(!data?.inspecao)return setError(loaded.error?.message ?? 'Inspeção não disponível offline.')
-    }else void saveOfflineDraft(userId||'','full:detail:'+id,data).catch(()=>undefined)
-    editingBaseline.current=offlineInspectionVersion(data)
-    const photoUrls=data.photoUrls ?? {}
-    const photosWithUrls=(data.photos ?? []).map((p:any)=>({
-      ...p,
-      signed_url:photoUrls[p.storage_path] ?? null,
-    }))
-    const next={
-      ...data.inspecao,
-      items:data.items ?? [],
-      checklist:data.checklist ?? [],
-      checklistResults:data.checklistResults ?? [],
-      params:data.params ?? [],
-      dimResults:data.dimResults ?? [],
-      dimConfigs:data.dimConfigs ?? [],
-      tests:data.tests ?? [],
-      testResults:data.testResults ?? [],
-      photos:photosWithUrls,
-      registers:data.registers ?? [],
-      ncs:data.ncs ?? [],
-      retained:data.retained ?? [],
-    }
-
-    photosLinksExpiration.current.delete(id)
-    setDetail(next)
-    setSampleNcDraft(String(next.total_nao_conforme ?? 0))
-    setFinalObservation(next.observacoes ?? '')
-    setInternalObservation(next.observacao_interna ?? '')
-    const retention:Record<string,{retain:boolean;qty:string;address:string;photoFile:File|null;photoPreview:string}>={}
-    for (const link of next.items as any[]) {
-      const item=link.processo_itens
-      const existing=(next.retained as any[]).find((x:any)=>x.produto_id===item?.produto_id)
-      retention[item.id]={retain:!!existing,qty:'',address:'',photoFile:null,photoPreview:''}
-    }
-    const suggestedQty=retentionQuantityFromText(next.observacao_interna)
-    if (suggestedQty!=null) {
-      setRetentionSuggestion({quantidade:suggestedQty,fonte:'observacao_interna'})
-      for (const key of Object.keys(retention)) retention[key].qty=String(suggestedQty)
-    } else setRetentionSuggestion({quantidade:null,fonte:null})
-    setRetentionRows(retention)
+    setDetail(null)
+    setDetailLoading(true)
     setTab('execucao')
+    const request=(async()=>{
+      try{
+        const loaded=await apiGet<any>('/api/inspecoes/'+id+'/detalhe')
+        let data=loaded.data
+        if(loaded.error||!data?.inspecao){
+          data=await readOfflineDraft<any>(userId||'','full:detail:'+id).catch(()=>null)
+          if(!data?.inspecao){
+            setError(loaded.error?.message??'Inspeção não disponível offline.')
+            setTab('quadro')
+            return
+          }
+        }else void saveOfflineDraft(userId||'','full:detail:'+id,data).catch(()=>undefined)
+        editingBaseline.current=offlineInspectionVersion(data)
+        const photoUrls=data.photoUrls??{}
+        const photosWithUrls=(data.photos??[]).map((p:any)=>({...p,signed_url:photoUrls[p.storage_path]??null}))
+        const next={
+          ...data.inspecao,items:data.items??[],checklist:data.checklist??[],
+          checklistResults:data.checklistResults??[],params:data.params??[],
+          dimResults:data.dimResults??[],dimConfigs:data.dimConfigs??[],
+          tests:data.tests??[],testResults:data.testResults??[],photos:photosWithUrls,
+          registers:data.registers??[],ncs:data.ncs??[],retained:data.retained??[]
+        }
+        photosLinksExpiration.current.delete(id)
+        setDetail(next)
+        setSampleNcDraft(String(next.total_nao_conforme??0))
+        setFinalObservation(next.observacoes??'')
+        setInternalObservation(next.observacao_interna??'')
+        const retention:Record<string,{retain:boolean;qty:string;address:string;photoFile:File|null;photoPreview:string}>={}
+        for(const link of next.items as any[]){
+          const item=link.processo_itens
+          const existing=(next.retained as any[]).find((x:any)=>x.produto_id===item?.produto_id)
+          retention[item.id]={retain:!!existing,qty:'',address:'',photoFile:null,photoPreview:''}
+        }
+        const suggestedQty=retentionQuantityFromText(next.observacao_interna)
+        if(suggestedQty!=null){
+          setRetentionSuggestion({quantidade:suggestedQty,fonte:'observacao_interna'})
+          for(const key of Object.keys(retention))retention[key].qty=String(suggestedQty)
+        }else setRetentionSuggestion({quantidade:null,fonte:null})
+        setRetentionRows(retention)
+      }finally{
+        setDetailLoading(false)
+      }
+    })()
+    detailRequests.current.set(id,request)
+    try{await request}finally{
+      if(detailRequests.current.get(id)===request)detailRequests.current.delete(id)
+    }
   }
 
   function startEditingInspectionData() {
@@ -2368,7 +2449,7 @@ export default function App() {
     const photos=rows.map((row,index)=>row.fotoFile?{index,file:row.fotoFile}:null).filter(Boolean)
     const payload={
       codigo:parentFstCode(inspection.codigo),processoId:inspection.processoId||null,
-      subprocessoCodigo:inspection.subprocessoCodigo,ehConjunto:isComponentSet,
+      subprocessoCodigo:inspection.subprocessoCodigo,ehConjunto:isComponentSet===true,
       requestId:createRequestId.current,
       cliente:inspection.cliente.trim()||null,notaFiscal:inspection.notaFiscal.trim()||null,
       origem:inspection.origem.trim()||null,transporte:inspection.transporte.trim()||null,
@@ -2385,7 +2466,7 @@ export default function App() {
     setOfflineDraftStatus('')
     setMessage('Inspeção salva no dispositivo. Sincronização automática quando houver internet.')
     resetNewInspection()
-    setTab('painel')
+    setTab('quadro')
   }
   async function queueInspectionUpdate(id:string,payload:any){
     if(!userId||!editingBaseline.current)throw new Error('Não há versão original verificada para sincronizar esta inspeção.')
@@ -2400,6 +2481,8 @@ export default function App() {
     if(!canWrite||!userId||inspectionBusy||submitLock.current)return
     const quantityError=operationalQuantityError(skuRows)
     if(quantityError){setPopupMessage(quantityError);return}
+    if(distinctSkuCount>1&&isComponentSet===null){setPopupMessage('Defina se os SKUs formam um mesmo kit ou se são produtos independentes.');return}
+    if(distinctSkuCount>1&&isComponentSet===false){setPopupMessage('Os SKUs são produtos independentes. Mantenha um único SKU nesta entrada e crie uma nova entrada para cada outro produto, no mesmo FST.');return}
     submitLock.current=true
     try {
     if(editingInspectionId||editingProcessId){
@@ -2430,19 +2513,19 @@ export default function App() {
           itVersionId:inspection.itVersionId||null,observacaoInterna:inspection.observacaoInterna,itens
         }
         if(!navigator.onLine){
-          try{await queueInspectionUpdate(id,editPayload);resetNewInspection();setTab('painel')}
+          try{await queueInspectionUpdate(id,editPayload);resetNewInspection();setTab('quadro')}
           catch(e:any){setPopupMessage(String(e?.message||''))}
           return
         }
         const saved=await apiPut<any>('/api/inspecoes/'+id+'/dados',editPayload)
         if(saved.error){
           if(connectionFailure(saved.error.message)){
-            try{await queueInspectionUpdate(id,editPayload);resetNewInspection();setTab('painel')}
+            try{await queueInspectionUpdate(id,editPayload);resetNewInspection();setTab('quadro')}
             catch(e:any){setPopupMessage(String(e?.message||''))}
           }else setPopupMessage(saved.error.message)
           return
         }
-        resetNewInspection();setTab('painel');setMessage('Inspeção salva.');void refreshLists();return
+        resetNewInspection();setTab('quadro');setMessage('Inspeção salva.');void refreshLists();return
       }finally{setInspectionBusy(false)}
     }
     setError('')
@@ -2553,7 +2636,7 @@ export default function App() {
       grupos_inspecao:{
         id:created.data.grupo_inspecao_id||'',subprocesso_codigo:inspection.subprocessoCodigo,
         nota_fiscal:inspection.notaFiscal||null,nome:skuRows.find(row=>row.nome.trim())?.nome||'Inspeção',
-        tipo:skuRows.filter(row=>row.sku.trim()||row.nome.trim()).length>1?'kit_componentes':'individual',
+        tipo:isComponentSet===true?'kit_componentes':'individual',
         processo_id:existing?.id||'',processos:processSummary
       }
     }
@@ -2563,7 +2646,7 @@ export default function App() {
     resetNewInspection()
     loadSequence.current++
     if(iniciar){await openInspection(created.data.id);setActiveStage('amostragem')}
-    else setTab('painel')
+    else setTab('quadro')
     setInspectionBusy(false)
     void refreshLists()
     }finally{
@@ -3418,7 +3501,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   if(tab==='fotos-mobile')return <Suspense fallback={<div className="center-screen">Carregando Modo Fotos…</div>}>
     <MobileFotos processes={processes} inspections={inspections} canWrite={!!canWrite} userId={userId||''}
       onRefresh={refreshLists}
-      onExit={()=>{setTab('painel');void loadCatalogs();void loadStock();void refreshEquipments()}}/>
+      onExit={()=>setTab('quadro')}/>
   </Suspense>
 
   const checklistDone = detail ? (detail.checklist?.length ?? 0) === 0 || (detail.checklistResults?.length ?? 0) >= detail.checklist.length : false
@@ -3429,40 +3512,25 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
   return (
     <main className="app-shell sgq-operational-shell" data-sgq-screen={tab}>
       <a href="#sgq-primary-content" className="sgq-skip-link">Pular para o conteúdo</a>
-      <aside className="sgq-side-nav" aria-label="Navegação principal do SGQ">
-        <div className="sgq-side-brand"><span className="sgq-brand-symbol"><Boxes size={31}/></span><div><b>SGQ</b><small>Qualidade · Operações</small></div></div>
-        <div className="sgq-side-caption">OPERAÇÃO</div>
-        <button type="button" className={tab==='painel'||tab==='insights'?'selected':''} aria-current={tab==='painel'||tab==='insights'?'page':undefined} onClick={()=>setTab('painel')}><LayoutDashboard size={19}/> Painel</button>
-        <button type="button" className={tab==='inspecoes'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='inspecoes'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
-        <button type="button" className={tab==='quadro'?'selected':''} aria-current={tab==='quadro'?'page':undefined} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Inspeções</button>
-        <button type="button" className={tab==='estoque'?'selected':''} aria-current={tab==='estoque'?'page':undefined} onClick={()=>setTab('estoque')}><Boxes size={19}/> Estoque</button>
-        <button type="button" onClick={()=>setTab('fotos-mobile')}><Camera size={19}/> Modo Fotos</button>
+      <aside className="sgq-side-nav sgq-inspection-nav" aria-label="Navegação de inspeções">
+        <div className="sgq-side-brand"><span className="sgq-brand-symbol"><ClipboardCheck size={29}/></span><div><b>SGQ</b><small>Inspeções</small></div></div>
+        <div className="sgq-side-caption">INSPEÇÕES</div>
+        <button type="button" className={tab==='quadro'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='quadro'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Quadro de inspeções</button>
+        <button type="button" className={tab==='inspecoes'?'selected':''} aria-current={tab==='inspecoes'?'page':undefined} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
         <button type="button" className={tab==='auditorias'?'selected':''} aria-current={tab==='auditorias'?'page':undefined} onClick={()=>{setTab('auditorias');setError('')}}><Warehouse size={19}/> Inspeções Armazém</button>
-        <div className="sgq-side-caption">QUALIDADE</div>
-        <button type="button" className={tab==='its'?'selected':''} aria-current={tab==='its'?'page':undefined} onClick={()=>setTab('its')}><FileText size={19}/> Instruções técnicas</button>
-        <button type="button" className={tab==='equipamentos'?'selected':''} aria-current={tab==='equipamentos'?'page':undefined} onClick={()=>{setTab('equipamentos');void refreshEquipments()}}><Wrench size={19}/> Equipamentos</button>
-        <div className="sgq-side-caption">ADMINISTRAÇÃO</div>
-        <button type="button" className={tab==='configuracoes'?'selected':''} aria-current={tab==='configuracoes'?'page':undefined} onClick={()=>{setError('');setTab('configuracoes')}}><Settings2 size={19}/> Configurações</button>
         <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button type="button" onClick={()=>void supabase.auth.signOut()}><LogOut size={14}/> Sair</button></div>
       </aside>
       <header className="topbar" aria-label="Cabeçalho do SGQ">
         <div className="sgq-topbar-context">
-          <button type="button" className="sgq-topbar-home" onClick={()=>setTab('painel')} aria-label="Ir ao Painel"><LayoutDashboard size={19}/></button>
+          <button type="button" className="sgq-topbar-home" onClick={()=>setTab('quadro')} aria-label="Ir às inspeções"><ClipboardCheck size={19}/></button>
           <span>SGQ</span>
           <ChevronRight size={15} className="sgq-topbar-chevron" aria-hidden="true"/>
           <strong>{({
             painel:'Painel',insights:'Insights',inspecoes:'Processos',quadro:'Inspeções',nova:'Nova inspeção',
-            execucao:'Execução da inspeção',estoque:'Estoque',
-            auditorias:'Inspeções Armazém',its:'Instruções técnicas',equipamentos:'Equipamentos',configuracoes:'Configurações',
+            execucao:'Execução da inspeção',estoque:'Estoque',auditorias:'Inspeções Armazém',
+            its:'Instruções técnicas',equipamentos:'Equipamentos',configuracoes:'Configurações','fotos-mobile':'Fotos da inspeção',
           } as Record<typeof tab,string>)[tab]}</strong>
         </div>
-        <label className="sgq-topbar-search" htmlFor="sgq-global-search">
-          <Search size={20} aria-hidden="true"/>
-          <input id="sgq-global-search" type="search" value={dashboardSearch}
-            placeholder="Buscar inspeções, processos, clientes..."
-            onChange={e=>{setDashboardSearch(e.target.value);if(tab!=='painel')setTab('painel')}}
-            aria-label="Buscar inspeções, processos, clientes e NFs"/>
-        </label>
         <div className="userbox sgq-topbar-user-actions">
           <button type="button" className="sgq-topbar-bell" onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}
             aria-label={omieUnread?'Ver '+omieUnread+' novos pedidos Omie':'Abrir pedidos de venda Omie'} title="Pedidos de venda recebidos do Omie">
@@ -3521,7 +3589,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       {offlineError && <div className="alert error" role="alert">{offlineError}</div>}
 
       {tab==='insights' && <Suspense fallback={<div className="center-screen">Carregando Insights…</div>}>
-        <InsightsPage onBack={()=>setTab('painel')} onOpenInspection={id=>void openInspection(id)}/>
+        <InsightsPage onBack={()=>setTab('quadro')} onOpenInspection={id=>void openInspection(id)}/>
       </Suspense>}
 
       {tab==='configuracoes' && <Suspense fallback={<div className="center-screen">Carregando configurações…</div>}>
@@ -3609,6 +3677,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </section>
         <InspectionsKanban
         focusProcessId={focusedProcessId}
+        externalQuery={dashboardSearch}
+        itemLinksLoading={itemLinksLoading}
         inspections={inspections}
         processes={processes}
         itemLinks={processItemLinks}
@@ -3627,6 +3697,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       /> </>}
 
       {tab==='quadro' && <InspectionsKanban key="quadro" initialView="kanban"
+        externalQuery={dashboardSearch}
+        itemLinksLoading={itemLinksLoading}
         inspections={inspections}
         processes={processes}
         itemLinks={processItemLinks}
@@ -3754,7 +3826,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
             <section id="sgq-new-inspection-products" className="panel section-card">
               <div className="section-title">
-                <h2>Produtos / componentes</h2>
+                <h2>SKUs da entrada</h2>
                 <div className="row-actions">
                   {omieSkuImport?.codigo===fstCode(inspection.codigo) &&
                     <button type="button" className="secondary" onClick={()=>openOmieSkuReview(omieSkuImport)}><Boxes size={16}/> Revisar SKUs · PV {omieSkuImport.numeroPedido}</button>}
@@ -3773,8 +3845,8 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                           onClick={()=>setExpandedSkuIndex(current=>current===i?null:i)}>
                           <ChevronDown className={'sgq-sku-chevron '+(expandedSkuIndex===i?'open':'')} size={19}/>
                           <span className="sgq-sku-summary">
-                            <strong>{skuRows.length>1?'Componente '+(i+1):'Produto'} · {row.sku||'Novo código'}</strong>
-                            <small>{row.nome||'Preencha os dados deste componente'}{row.quantidade?' · '+Number(row.quantidade).toLocaleString('pt-BR')+' un':''}</small>
+                            <strong>{isComponentSet===true?'Componente '+(i+1):'SKU '+(i+1)} · {row.sku||'Novo código'}</strong>
+                            <small>{row.nome||'Descrição do SKU'}{row.quantidade?' · '+Number(row.quantidade).toLocaleString('pt-BR')+' un':''}</small>
                           </span>
                         </button>
                         {skuRows.length>1 && <button type="button" className="icon-button" aria-label={'Remover componente '+(i+1)}
@@ -3814,7 +3886,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                         }}/></label>
                         <label>Caixas inspecionadas<input type="number" step="0.01" value={row.caixasInspecionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?{...r,caixasInspecionadas:e.target.value}:r))}/><small className="field-hint">Sugerido pela tabela da IT; pode ser alterado.</small></label>
                         <div className="span-2 box-distribution-editor">
-                          <div className="field-label"><span>Distribuição para armazenagem · {row.sku || (isComponentSet?'Componente '+(i+1):'Produto')}</span></div>
+                          <div className="field-label"><span>Distribuição para armazenagem · {row.sku || (isComponentSet===true?'Componente '+(i+1):'SKU '+(i+1))}</span></div>
                           <div className="distribution-grid">
                             <div className="distribution-line"><strong>Padrão</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasPadrao} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasPadrao',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesPadrao || row.quantidadePorCaixa} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'unidadesPadrao',e.target.value):r))}/></label></div>
                             <div className="distribution-line"><strong>Fracionada</strong><label>Caixas<input type="number" min="0" step="1" value={row.caixasFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'caixasFracionadas',e.target.value):r))}/></label><label>Un/caixa<input type="number" min="0" step="0.01" value={row.unidadesFracionadas} onChange={(e)=>setSkuRows(skuRows.map((r,j)=>j===i?updateBoxDistributionField(r,'unidadesFracionadas',e.target.value):r))}/></label></div>
@@ -3869,13 +3941,23 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               {itSuggestionNote && <p className="field-hint" role="status">{itSuggestionNote}</p>}
             </section>
 
-            {new Set(skuRows.filter(skuRowHasData).map(row=>row.sku.trim().toUpperCase()).filter(Boolean)).size>1&&<section className="panel section-card" aria-label="Agrupamento de SKUs">
-              <label className="check-option"><input type="checkbox" checked={isComponentSet} onChange={e=>setIsComponentSet(e.target.checked)}/>
-                <span>Os SKUs desta entrada formam um conjunto de componentes</span></label>
-              <small className="field-hint">Produtos independentes devem ser cadastrados em uma Nova Entrada do mesmo FST, com inspeção e laudo próprios.</small>
+            {distinctSkuCount>1&&<section className="panel section-card sgq-kit-classification" aria-label="Classificação dos SKUs">
+              <div className="section-title"><div><h2>Como esses SKUs se relacionam?</h2><span className="section-note">{distinctSkuCount} códigos distintos nesta entrada</span></div></div>
+              <div className="sgq-kit-choice-grid">
+                <label className={'sgq-kit-choice '+(isComponentSet===true?'selected':'')}>
+                  <input type="radio" name="sgq-kit-classification" checked={isComponentSet===true} onChange={()=>setIsComponentSet(true)}/>
+                  <span><strong>Formam um mesmo kit</strong><small>Uma única inspeção para o conjunto. Os dimensionais continuam separados por SKU.</small></span>
+                </label>
+                <label className={'sgq-kit-choice '+(isComponentSet===false?'selected':'')}>
+                  <input type="radio" name="sgq-kit-classification" checked={isComponentSet===false} onChange={()=>setIsComponentSet(false)}/>
+                  <span><strong>São produtos independentes</strong><small>Uma entrada e uma inspeção própria para cada SKU, dentro do mesmo FST.</small></span>
+                </label>
+              </div>
+              {isComponentSet===null&&<p className="field-hint">Escolha uma classificação antes de salvar. O SGQ não presume que SKUs do mesmo PV formem um kit.</p>}
+              {isComponentSet===false&&<p className="field-hint">Para produtos independentes, mantenha apenas um SKU nesta entrada e cadastre os demais em novas entradas do mesmo FST.</p>}
             </section>}
             <section className="calc-strip">
-              <div><small>Tipo</small><strong>{isComponentSet?'Conjunto / componentes':'Produto independente'}</strong></div>
+              <div><small>Tipo</small><strong>{distinctSkuCount>1?(isComponentSet===true?'Conjunto / componentes':isComponentSet===false?'Produtos independentes':'Classificação pendente'):'Produto independente'}</strong></div>
               <div><small>Lote estatístico</small><strong>{statisticalLot?statisticalLot.toLocaleString('pt-BR'):'—'}</strong></div>
               <div><small>Plano</small><strong>{previewPlan.code?(previewPlan.code+' · '+previewPlan.sample+' un.'):'—'}</strong></div>
               <div><small>Distribuição de caixas</small><strong>Por componente / SKU</strong></div>
