@@ -15,19 +15,24 @@ const sql=read('supabase/migrations/20261112_estoque_inspecao_documental.sql')
 const conclusion=read('supabase/functions/sgq-conclusao/index.ts')
 const suggestion=read('supabase/functions/sgq-it-sugerir/index.ts')
 
-test('FST process tree displays arrival, child SKU and description and no duplicate search',()=>{
+test('FST process tree displays arrival, child SKU and description with local search',()=>{
  assert.doesNotMatch(board,/Laudo único disponível ao abrir uma inspeção concluída/)
  assert.doesNotMatch(board,/Editar FST/)
- assert.doesNotMatch(board,/className="sgq-kanban-search"/)
+ assert.match(board,/className="sgq-kanban-search"/)
+ assert.match(board,/Buscar FST, cliente, SKU ou NF/)
+ assert.doesNotMatch(app,/id="sgq-global-search"/)
  assert.match(board,/Chegada ao CD:/)
  assert.match(board,/sgq-subprocess-products/)
  assert.match(board,/linkedItemsByGroup/)
 })
-test('backend exposes stock item links for process cards',()=>{
- assert.match(api,/select=grupo_inspecao_id,processo_itens\(id,codigo_cliente,produtos\(sku,nome\)\)/)
- assert.match(api,/itemLinks=itemLinksTask.Result/)
+test('inspection SKU links are loaded lazily outside the initial bootstrap',()=>{
+ assert.match(api,/\/api\/app\/inspection-items/)
+ assert.match(api,/select=grupo_inspecao_id,grupos_inspecao\(tipo\),processo_itens\(id,codigo_cliente,quantidade,produtos\(sku,nome\)\)/)
+ assert.doesNotMatch(api,/itemLinks=itemLinksTask\.Result/)
  assert.match(app,/itemLinks=\{processItemLinks\}/)
+ assert.match(app,/async function loadInspectionItems\(force=false\)/)
 })
+
 test('legacy IDs are hidden in key operational cards',()=>{
  assert.doesNotMatch(board,/\{item.numero\}<\/span>/)
  assert.doesNotMatch(app,/\{selectedSample.codigo\}<\/strong>/)
