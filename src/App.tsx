@@ -1159,7 +1159,7 @@ export default function App() {
 
   useEffect(()=>{
     if(!userId){equipmentLoadedUser.current=null;return}
-    if(tab==='execucao'&&activeStage==='dimensionais'&&equipmentLoadedUser.current!==userId){
+    if((tab==='equipamentos'||(tab==='execucao'&&activeStage==='dimensionais'))&&equipmentLoadedUser.current!==userId){
       equipmentLoadedUser.current=userId
       void refreshEquipments().then(error=>{
         if(error){equipmentLoadedUser.current=null;setError('Não foi possível carregar os instrumentos dimensionais.')}
@@ -1168,7 +1168,7 @@ export default function App() {
   },[userId,tab,activeStage])
 
   useEffect(()=>{
-    const inspectionTabs=['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile']
+    const inspectionTabs=['quadro','inspecoes','nova','execucao','equipamentos','fotos-mobile']
     if(!inspectionTabs.includes(tab))setTab('quadro')
   },[tab])
 
@@ -3607,9 +3607,9 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       <aside className="sgq-side-nav sgq-inspection-nav" aria-label="Navegação de inspeções">
         <div className="sgq-side-brand"><span className="sgq-brand-symbol"><ClipboardCheck size={29}/></span><div><b>SGQ</b><small>Inspeções</small></div></div>
         <div className="sgq-side-caption">INSPEÇÕES</div>
-        <button type="button" className={tab==='quadro'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='quadro'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Quadro de inspeções</button>
+        <button type="button" className={tab==='quadro'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='quadro'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Central de inspeções</button>
         <button type="button" className={tab==='inspecoes'?'selected':''} aria-current={tab==='inspecoes'?'page':undefined} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
-        <button type="button" className={tab==='auditorias'?'selected':''} aria-current={tab==='auditorias'?'page':undefined} onClick={()=>{setTab('auditorias');setError('')}}><Warehouse size={19}/> Inspeções Armazém</button>
+        <button type="button" className={tab==='equipamentos'?'selected':''} aria-current={tab==='equipamentos'?'page':undefined} onClick={()=>{setTab('equipamentos');setError('')}}><Wrench size={19}/> Equipamentos</button>
         <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button type="button" onClick={()=>void supabase.auth.signOut()}><LogOut size={14}/> Sair</button></div>
       </aside>
       <header className="topbar" aria-label="Cabeçalho do SGQ">

@@ -1,6 +1,6 @@
 import {useMemo,useState} from 'react'
 import {AlertTriangle,CheckCircle2,ChevronRight,ClipboardCheck,Copy,Edit3,MoreHorizontal,Package,Play,Plus,Search,Trash2} from 'lucide-react'
-import {indexActiveInspections,workspaceQuery,canTransitionInspection} from '../lib/inspection-board.mjs'
+import {indexActiveInspections,workspaceQuery,canTransitionInspection,workQueue,workQueueCounts} from '../lib/inspection-board.mjs'
 import './InspectionsKanban.css'
 
 type Process={
@@ -109,6 +109,7 @@ export default function InspectionsKanban({
   const [view,setView]=useState<'processos'|'kanban'>(initialView)
   const [expandedProcessId,setExpandedProcessId]=useState<string|null>(null)
   const [shownByLane,setShownByLane]=useState<Record<string,number>>({})
+  const [workFilter,setWorkFilter]=useState<'pendentes'|'em_andamento'|'aberta'|'concluida'|'todas'>('pendentes')
   const pageSize=mode==='panel'?8:24
   const effectiveQuery=workspaceQuery(mode,query,externalQuery)
   const search=normalized(effectiveQuery)
@@ -152,6 +153,8 @@ export default function InspectionsKanban({
     .concat(visible.some(i=>!columns.some(c=>c.status===i.status))?[{
       status:'other',label:'Outras',tone:'other',items:visible.filter(i=>!columns.some(c=>c.status===i.status))
     } as any]:[]),[visible])
+  const workCounts=useMemo(()=>workQueueCounts(visible),[visible])
+  const displayColumns=useMemo(()=>mode==='panel'?columnsToShow:[{status:'work',label:'Lista de trabalho',tone:'work',items:workQueue(visible,workFilter)}],[mode,columnsToShow,visible,workFilter])
   const inspectionsByProcess=useMemo(()=>indexActiveInspections(inspections),[inspections])
   const processTree=useMemo(()=>processes.map(process=>{
     const own=inspectionsByProcess.get(process.id)||[]
@@ -197,15 +200,15 @@ export default function InspectionsKanban({
   return <section className={'workspace sgq-kanban-page '+(mode==='panel'?'sgq-kanban-embedded':'')} aria-label="Inspeções">
     <header className="sgq-kanban-toolbar">
       <div className="sgq-kanban-title">
-        {mode==='panel'?<h2>Inspeções</h2>:<><h1>{view==='processos'?'Processos':'Inspeções'}</h1><p>{view==='processos'?'Entradas e dados de cada FST.':'Acompanhe cada inspeção pelo status.'}</p></>}
+        {mode==='panel'?<h2>Inspeções</h2>:<><h1>{view==='processos'?'Processos':'Central de inspeções'}</h1><p>{view==='processos'?'Entradas e dados de cada FST.':'Retome as inspeções em andamento ou escolha o próximo trabalho da fila.'}</p></>}
         <span className="sgq-kanban-total">{mode==='panel'?inspections.filter(i=>i.status!=='cancelada').length:processes.length}</span>
       </div>
       {mode==='panel'?<button type="button" className="secondary small" onClick={onViewAll}>Ver todas</button>:
       <div className="sgq-kanban-tools">
         {searchInput}
-        <div className="sgq-process-view-toggle" role="group" aria-label="Visualizar processos ou quadro de inspeções">
+        <div className="sgq-process-view-toggle" role="group" aria-label="Visualizar processos ou lista de trabalho">
           <button type="button" className={view==='processos'?'is-active':''} aria-pressed={view==='processos'} onClick={()=>setView('processos')}>Processos</button>
-          <button type="button" className={view==='kanban'?'is-active':''} aria-pressed={view==='kanban'} onClick={()=>setView('kanban')}>Kanban</button>
+          <button type="button" className={view==='kanban'?'is-active':''} aria-pressed={view==='kanban'} onClick={()=>setView('kanban')}>Lista de trabalho</button>
         </div>
         <button type="button" className="primary sgq-kanban-new" onClick={onCreate}><Plus size={17}/> Nova inspeção</button>
       </div>}
@@ -271,9 +274,12 @@ export default function InspectionsKanban({
       {!processTree.length&&<div className="sgq-kanban-no-results">{search?'Nenhum processo encontrado para “'+query+'”.':'Nenhum processo cadastrado.'}</div>}
     </section>}
 
-    {(mode==='panel'||view==='kanban')&&<div className="sgq-kanban-board" aria-label="Quadro Kanban de inspeções">
-      {columnsToShow.map(column=><section id={'sgq-kanban-lane-'+column.status} className={'sgq-kanban-lane tone-'+column.tone} key={column.status} aria-label={column.label}>
-        <div className="sgq-kanban-lane-head"><span className="sgq-kanban-lane-dot" aria-hidden="true"/><h2>{column.label}</h2><span className="sgq-kanban-lane-count">{column.items.length}</span></div>
+    {mode==='page'&&view==='kanban'&&<div className="sgq-work-filters" role="group" aria-label="Filtrar fila de inspeções">
+      {([{id:'pendentes',label:'Fila de trabalho'},{id:'em_andamento',label:'Em andamento'},{id:'aberta',label:'A iniciar'},{id:'concluida',label:'Histórico'},{id:'todas',label:'Todas'}] as const).map(filter=><button key={filter.id} type="button" aria-pressed={workFilter===filter.id} onClick={()=>{setWorkFilter(filter.id);setShownByLane({})}}><span>{filter.label}</span><strong>{workCounts[filter.id]}</strong></button>)}
+    </div>}
+    {(mode==='panel'||view==='kanban')&&<div className={'sgq-kanban-board '+(mode==='page'?'sgq-work-list':'')} aria-label={mode==='page'?'Lista de trabalho de inspeções':'Quadro Kanban de inspeções'}>
+      {displayColumns.map(column=><section id={'sgq-kanban-lane-'+column.status} className={'sgq-kanban-lane tone-'+column.tone} key={column.status} aria-label={column.label}>
+        {mode==='panel'&&<div className="sgq-kanban-lane-head"><span className="sgq-kanban-lane-dot" aria-hidden="true"/><h2>{column.label}</h2><span className="sgq-kanban-lane-count">{column.items.length}</span></div>}
         <div className="sgq-kanban-lane-content">
           {column.items.slice(0,shownByLane[column.status]??pageSize).map(item=>{
             const group=item.grupos_inspecao
@@ -296,6 +302,7 @@ export default function InspectionsKanban({
               <div className="sgq-kanban-card-top">
                 <span className="sgq-kanban-fst">{processCode||'FST não informado'}</span>
                 <span className="sgq-kanban-entry">Entrada {entryCode}</span>
+                {mode==='page'&&<span className="sgq-work-status">{done?'Concluída':active?'Em andamento':item.status==='aberta'?'A iniciar':item.status}</span>}
                 <InspectionMenu inspection={item} process={process} canDelete={canDelete} deletingProcessId={deletingProcessId}
                   onReuseProcess={onReuseProcess} onEditProcess={onEditProcess} onDeleteProcess={onDeleteProcess} onDeleteInspection={onDeleteInspection}/>
               </div>
@@ -331,11 +338,11 @@ export default function InspectionsKanban({
           })}
           {column.items.length>(shownByLane[column.status]??pageSize)&&
             <button type="button" className="sgq-kanban-loadmore" onClick={()=>setShownByLane(current=>({...current,[column.status]:(current[column.status]??pageSize)+pageSize}))}>Ver mais</button>}
-          {!column.items.length&&<div className="sgq-kanban-empty">Nenhuma inspeção nesta etapa</div>}
+          {!column.items.length&&<div className="sgq-kanban-empty">{mode==='page'?'Nenhuma inspeção neste filtro.':'Nenhuma inspeção nesta etapa'}</div>}
         </div>
       </section>)}
     </div>}
-    {mode==='page'&&view==='kanban'&&emptyProcesses.length>0&&<section className="sgq-kanban-unassigned" aria-label="Processos sem inspeção">
+    {mode==='page'&&view==='kanban'&&(workFilter==='pendentes'||workFilter==='todas')&&emptyProcesses.length>0&&<section className="sgq-kanban-unassigned" aria-label="Processos sem inspeção">
       <div className="sgq-kanban-unassigned-head"><ClipboardCheck size={17}/><h2>Processos sem entrada</h2><span>{emptyProcesses.length}</span></div>
       <div className="sgq-kanban-unassigned-list">
         {emptyProcesses.map(process=><article className="sgq-kanban-unassigned-card" key={process.id}>
