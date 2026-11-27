@@ -39,17 +39,15 @@ test('reference dashboard provides responsive cards, chart, navigation and real 
  assert.match(css,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/)
  assert.match(css,/@media\(max-width:620px\)/)
  assert.match(css,/data-status-filter="concluida"/)
- assert.match(board,/externalQuery \?\? \(mode==='page'\?'':query\)/)
- assert.match(board,/mode==='panel'\s*\?column\.items/)
+ assert.ok(board.includes("const search=normalized(query||externalQuery||'')"))
 })
 
-test('new SGQ shell preserves notifications, global search and logout actions',()=>{
- assert.match(app,/id="sgq-global-search"/)
- assert.match(app,/setDashboardSearch\(e\.target\.value\)/)
+test('inspection shell preserves notifications, user identity and logout actions',()=>{
+ assert.doesNotMatch(app,/id="sgq-global-search"/)
+ assert.match(app,/sgq-topbar-user-actions/)
  assert.match(app,/omieUnread>0&&/)
  assert.match(app,/sgq-topbar-bell/)
- assert.match(app,/supabase\.auth\.signOut\(\)/)
+ assert.ok(app.includes('supabase.auth.signOut()'))
  assert.match(app,/tab==='quadro'/)
- assert.match(shell,/linear-gradient\(165deg,#092c50/)
- assert.match(shell,/sgq-topbar-search/)
+ assert.ok(shell.includes('linear-gradient(165deg,#092c50'))
 })

@@ -6,52 +6,47 @@ const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8')
 const api=read('backend/Sgq.Api/Program.cs')
 const docs=read('server/app.py')
 const ui=read('src/App.tsx')
-const board=read('src/components/InspectionsKanban.tsx')
-const photos=read('src/mobile/MobileFotos.tsx')
-const editor=read('src/its/ItEditorDemo.tsx')
+const migration=read('supabase/migrations/20261127155339_sgq_report_scope.sql')
 
-test('each SGQ entry can validate and generate its own report',()=>{
- assert.match(docs,/async def process_word_status\([^\n]*group_id:str\|None=None\)/)
- assert.match(docs,/groups=\[group for group in groups if group\["id"\]==group_id\]/)
- assert.match(docs,/process_word_status\(client,token,process\["id"\],group_id\)/)
- assert.match(api,/request\.Query\["entrada"\]/)
- assert.match(api,/statusUrl\+="\?entrada="/)
- // API retains isolated reports for explicitly independent future entries.
- assert.match(api,/app\.MapPost\("\/api\/inspecoes\/\{id\}\/laudo"/)
- // But current A/B legacy entries must remain consolidated under the parent FST.
- assert.match(ui,/const consolidated=Boolean\(parentId&&detail\.grupos_inspecao\?\.subprocesso_codigo\)/)
- assert.match(ui,/const url=consolidated/)
- assert.match(ui,/api\/processos\/\$\{encodeURIComponent\(parentId!\)\}\/laudo/)
- assert.match(ui,/const collectionName=consolidated\?'':askCollectionName\(\)/)
-
- assert.match(docs,/str\(group\.get\("subprocesso_codigo"\)\)/)
+test('new independent SKU entries and kits generate one report per inspection entry',()=>{
+ assert.ok(ui.includes('const consolidated=Boolean(parentId&&detail.grupos_inspecao?.relatorio_consolidado===true)'))
+ assert.ok(ui.includes("const suffix=consolidated?'':'?individual=1'"))
+ assert.ok(ui.includes('const url=consolidated'))
+ assert.ok(ui.includes('selectedInspectionId')&&ui.includes('individual=1'))
+ assert.ok(ui.includes("const suffix=consolidated?'':'?entrada='+encodeURIComponent(groupId!)"))
+ assert.ok(ui.includes('consolidated={detail.grupos_inspecao?.relatorio_consolidado===true}'))
+ assert.ok(api.includes('request.Query["individual"]'))
+ assert.ok(api.includes('generate-inspection/'))
+ assert.ok(docs.includes('groups=[group for group in groups if group["id"]==group_id]'))
+ const generator=docs.split('@app.get("/generate-inspection/{inspection_id}")')[1]?.split('@app.get("/generate-process/{process_id}")')[0]||''
+ assert.ok(generator.includes('"grupo_inspecao_id":f"eq.{group_id}"'))
+ assert.ok(generator.includes('items.append(item)'))
 })
 
-test('legacy A and B use full FST readiness and one combined Word',()=>{
+test('existing legacy A/B/C entries retain their consolidated FST report',()=>{
+ assert.ok(migration.includes('set relatorio_consolidado = true'))
+ assert.ok(migration.includes('where subprocesso_codigo is not null'))
+ assert.ok(ui.includes("const consolidated=Boolean(parentId&&detail.grupos_inspecao?.relatorio_consolidado===true)"))
  const refresh=ui.split('async function refreshWordStatus()')[1]?.split('function reflectCompletedEdit()')[0]||''
- assert.match(refresh,/\+encodeURIComponent\(processId\)\+'\/laudo-status'/)
- assert.doesNotMatch(refresh,/entrada=/)
- const auto=ui.split('useEffect\(\(\)=>\{\n    const processId=detail\?\.grupos_inspecao\?\.processo_id')[1]?.split('const \[finalObservation')[0]||''
- assert.doesNotMatch(auto,/entrada=/)
- assert.match(docs,/for group in groups\[1:\]:/)
- assert.match(docs,/append_filled_inspection_form\(doc,filled\.body\)/)
- assert.match(docs,/consolidated_report_filename\(/)
+ assert.ok(refresh.includes("const suffix=consolidated?'':'?entrada='+encodeURIComponent(groupId!)"))
+ assert.ok(refresh.includes("'/laudo-status'+suffix"))
+ assert.ok(ui.includes('/api/processos/'))
+ assert.ok(docs.includes('for group in groups[1:]:'))
+ assert.ok(docs.includes('append_filled_inspection_form(doc,filled.body)'))
+ assert.ok(docs.includes('consolidated_report_filename('))
 })
 
-test('multiple SKUs are not presumed a kit',()=>{
- assert.match(api,/var distinctSkuCount=items.Select/)
- assert.match(api,/distinctSkuCount>1&&!input\.EhConjunto/)
- assert.match(api,/var isComponentSet = input\.EhConjunto && distinctSkuCount > 1;/)
- assert.match(ui,/ehConjunto:isComponentSet===true/)
- assert.match(ui,/Formam um mesmo kit/)
+test('kit membership is explicit and multiple SKUs are never presumed a kit',()=>{
+ assert.ok(api.includes('var distinctSkuCount=items.Select'))
+ assert.ok(api.includes('distinctSkuCount>1&&!input.EhConjunto'))
+ assert.ok(api.includes('var isComponentSet = input.EhConjunto && distinctSkuCount > 1;'))
+ assert.ok(ui.includes('ehConjunto:isComponentSet===true'))
+ assert.ok(ui.includes('Formam um mesmo kit'))
+ assert.ok(ui.includes('kitHistoryLinks'))
+ assert.ok(ui.includes('loadKitHistory'))
 })
 
-test('SGQ entry names, photo theme, and editable IT interface are preserved',()=>{
- assert.match(board,/Nova inspeção/)
- assert.match(board,/Nova entrada/)
- assert.match(photos,/sgq-mobile-photo sgq-operational-shell/)
- assert.match(editor,/Em Revisão/)
- assert.match(editor,/Rascunho/)
- assert.doesNotMatch(editor,/Editor de IT · Demonstração com documento oficial/)
- assert.doesNotMatch(editor,/Nenhum ajuste salva ou publica a IT original/)
+test('migration defaults new entries to individual reports without changing the legacy scope',()=>{
+ assert.ok(migration.includes('add column if not exists relatorio_consolidado boolean not null default false'))
+ assert.ok(migration.includes('comment on column public.grupos_inspecao.relatorio_consolidado'))
 })

@@ -30,7 +30,7 @@ test('inspection SKU links are loaded lazily outside the initial bootstrap',()=>
  assert.match(api,/select=grupo_inspecao_id,grupos_inspecao\(tipo\),processo_itens\(id,codigo_cliente,quantidade,produtos\(sku,nome\)\)/)
  assert.doesNotMatch(api,/itemLinks=itemLinksTask\.Result/)
  assert.match(app,/itemLinks=\{processItemLinks\}/)
- assert.match(app,/async function loadInspectionItems\(force=false\)/)
+ assert.ok(app.includes('async function loadInspectionItems(force=false,sourceInspections:InspectionRow[]=inspections)'))
 })
 
 test('legacy IDs are hidden in key operational cards',()=>{

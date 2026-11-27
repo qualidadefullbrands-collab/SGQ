@@ -150,8 +150,20 @@ export default function InspectionsKanban({
     .concat(visible.some(i=>!columns.some(c=>c.status===i.status))?[{
       status:'other',label:'Outras',tone:'other',items:visible.filter(i=>!columns.some(c=>c.status===i.status))
     } as any]:[]),[visible])
+  const inspectionsByProcess=useMemo(()=>{
+    const grouped=new Map<string,Inspection[]>()
+    for(const item of inspections){
+      if(item.status==='cancelada')continue
+      const processId=item.grupos_inspecao?.processo_id
+      if(!processId)continue
+      const current=grouped.get(processId)||[]
+      current.push(item)
+      grouped.set(processId,current)
+    }
+    return grouped
+  },[inspections])
   const processTree=useMemo(()=>processes.map(process=>{
-    const own=inspections.filter(item=>item.status!=='cancelada'&&item.grupos_inspecao?.processo_id===process.id)
+    const own=inspectionsByProcess.get(process.id)||[]
     const groups=new Map<string,{key:string;letter:string;invoice:string|null;arrival:string|null;name:string;items:Inspection[]}>()
     for(const item of own){
       const group=item.grupos_inspecao
@@ -175,8 +187,8 @@ export default function InspectionsKanban({
       anyStarted:own.some(item=>item.status==='em_andamento')}
   }).filter(entry=>!search||entry.searchable.includes(search))
     .sort((a,b)=>Number(b.process.id===focusProcessId)-Number(a.process.id===focusProcessId)),
-  [inspections,processes,search,focusProcessId,linkedItemsByGroup])
-  const activeProcessIds=useMemo(()=>new Set(inspections.map(i=>i.grupos_inspecao?.processo_id).filter(Boolean)),[inspections])
+  [inspectionsByProcess,processes,search,focusProcessId,linkedItemsByGroup])
+  const activeProcessIds=useMemo(()=>new Set(inspectionsByProcess.keys()),[inspectionsByProcess])
   const emptyProcesses=processes.filter(p=>!activeProcessIds.has(p.id)&&
     (!search||normalized([p.codigo,p.cliente,p.nota_fiscal].join(' ')).includes(search)))
   const totalMatches=visible.length+emptyProcesses.length

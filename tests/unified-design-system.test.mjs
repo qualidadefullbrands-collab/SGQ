@@ -22,7 +22,7 @@ test('the active application shell exposes inspection workflows only',()=>{
  const end=app.indexOf('</aside>',start)
  assert.ok(start>=0&&end>start)
  const nav=app.slice(start,end)
- for(const label of ['Quadro de inspeções','Processos','Inspeções Armazém'])assert.ok(nav.includes(label))
+ for(const label of ['Central de inspeções','Processos','Inspeções Armazém'])assert.ok(nav.includes(label))
  for(const label of ['Estoque','Equipamentos','Instruções técnicas','Configurações','Painel','Insights'])assert.doesNotMatch(nav,new RegExp(label))
  assert.match(app,/inspectionTabs=\['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile'\]/)
  for(const name of ['nova','execucao','inspecoes','quadro','auditorias'])assert.match(app,new RegExp("tab==='"+name+"'"))

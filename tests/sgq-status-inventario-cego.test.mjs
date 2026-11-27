@@ -7,11 +7,11 @@ const app=read('src/App.tsx')
 const navigation=read('src/stock/StockWorkspaceNav.tsx')
 
 test('SGQ has dedicated blind-inventory status tab and direct navigation',()=>{
- assert.match(app,/import BlindInventoryStatus/)
+ assert.match(app,/const BlindInventoryStatus=lazy/)
  assert.match(app,/status_cegos/)
  assert.match(navigation,/Acompanhamento/)
  assert.match(ui,/Status do inventário FST/)
- assert.match(app,/stockMode==='status_cegos'&&<BlindInventoryStatus/)
+ assert.ok(app.includes("stockMode==='status_cegos'&&<Suspense")&&app.includes('<BlindInventoryStatus'))
  assert.match(app,/onOpenCount=\{\(\)=>setStockMode\('cego'\)\}/)
  assert.match(app,/onOpenReconciliation=\{\(\)=>setStockMode\('conciliacao'\)\}/)
 })

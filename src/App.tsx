@@ -4,18 +4,18 @@ import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/sup
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure,retryOfflinePhotoOperation,type OfflineOperation} from './lib/offline'
 import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSync'
-import InventoryPanel from './stock/InventoryPanel'
-import BlindInventoryUnified from './stock/BlindInventoryUnified'
-import BlindInventoryReconciliation from './stock/BlindInventoryReconciliation'
-import BlindInventoryStatus from './stock/BlindInventoryStatus'
-import StockWorkspaceNav from './stock/StockWorkspaceNav'
-import InspectionsKanban from './components/InspectionsKanban'
+import InspectionWorkQueue from './components/InspectionWorkQueue'
 import InspectionJourney from './components/InspectionJourney'
 import ReportReadinessPanel from './components/ReportReadinessPanel'
 import NewInspectionGuide from './components/NewInspectionGuide'
-import SgqDashboard from './components/SgqDashboard'
 import './SgqOperationsTheme.css'
-import './config/SettingsPage.css'
+const InventoryPanel=lazy(()=>import('./stock/InventoryPanel'))
+const BlindInventoryUnified=lazy(()=>import('./stock/BlindInventoryUnified'))
+const BlindInventoryReconciliation=lazy(()=>import('./stock/BlindInventoryReconciliation'))
+const BlindInventoryStatus=lazy(()=>import('./stock/BlindInventoryStatus'))
+const StockWorkspaceNav=lazy(()=>import('./stock/StockWorkspaceNav'))
+const InspectionsKanban=lazy(()=>import('./components/InspectionsKanban'))
+const SgqDashboard=lazy(()=>import('./components/SgqDashboard'))
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
 const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
@@ -80,6 +80,7 @@ type InspectionRow = {
     tipo: string
     processo_id: string
     subprocesso_codigo?: string | null
+    relatorio_consolidado?: boolean
     nota_fiscal?: string | null
     origem?: string | null
     transporte?: string | null
@@ -647,6 +648,8 @@ export default function App() {
   const [inspections, setInspections] = useState<InspectionRow[]>([])
   const [processItemLinks,setProcessItemLinks]=useState<Array<{grupo_inspecao_id:string;grupos_inspecao?:{tipo?:string}|null;processo_itens?:{id?:string;codigo_cliente?:string|null;quantidade?:number|null;produtos?:{sku?:string|null;nome?:string|null}|null}|null}>>([])
   const [itemLinksLoading,setItemLinksLoading]=useState(false)
+  const [kitHistoryLinks,setKitHistoryLinks]=useState<Array<{grupo_inspecao_id:string;grupos_inspecao?:{tipo?:string}|null;processo_itens?:{id?:string;codigo_cliente?:string|null;quantidade?:number|null;produtos?:{sku?:string|null;nome?:string|null}|null}|null}>>([])
+  const [kitHistoryLoading,setKitHistoryLoading]=useState(false)
   const [omieInbox,setOmieInbox]=useState<OmieInboxOrder[]>([])
   const [omieInboxSeen,setOmieInboxSeen]=useState<Set<string>>(new Set())
   const [omieInboxError,setOmieInboxError]=useState('')
@@ -790,14 +793,16 @@ export default function App() {
   }
   async function refreshWordStatus(){
     const processId=detail?.grupos_inspecao?.processo_id as string|undefined
-    if(!processId){
-      setWordStatus({ready:false,pending:['FST principal não identificado nesta inspeção.']})
+    const groupId=detail?.grupos_inspecao?.id as string|undefined
+    const consolidated=detail?.grupos_inspecao?.relatorio_consolidado===true
+    if(!processId||(!consolidated&&!groupId)){
+      setWordStatus({ready:false,pending:['FST ou entrada principal não identificada nesta inspeção.']})
       return
     }
     setWordCheckBusy(true)
     try{
-      // Laudo padrão do FST: A e B compartilham um único documento.
-      const response=await apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status')
+      const suffix=consolidated?'':'?entrada='+encodeURIComponent(groupId!)
+      const response=await apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status'+suffix)
       setWordStatus(parseWordStatus(response))
     }catch(e:any){
       setWordStatus({ready:false,pending:[],error:'Falha de comunicação ao verificar o Word: '+String(e?.message||'sem resposta')})
@@ -887,6 +892,8 @@ export default function App() {
   const loadAppRequest = useRef<Promise<void> | null>(null)
   const catalogsRequest=useRef<Promise<void>|null>(null)
   const itemLinksRequest=useRef<Promise<void>|null>(null)
+  const kitHistoryRequest=useRef<Promise<void>|null>(null)
+  const kitHistoryLoadedUser=useRef<string|null>(null)
   const catalogsLoadedUser=useRef<string|null>(null)
   const itemLinksLoadedUser=useRef<string|null>(null)
   const equipmentLoadedUser=useRef<string|null>(null)
@@ -953,7 +960,7 @@ export default function App() {
   const kitHistoryCount=useMemo(()=>{
     if(!skuSetFingerprint)return 0
     const groups=new Map<string,{type:string;skus:Set<string>}>()
-    for(const link of processItemLinks){
+    for(const link of kitHistoryLinks){
       const groupId=link.grupo_inspecao_id
       const sku=String(link.processo_itens?.produtos?.sku||link.processo_itens?.codigo_cliente||'').trim().toUpperCase()
       if(!sku)continue
@@ -962,7 +969,7 @@ export default function App() {
       groups.set(groupId,current)
     }
     return [...groups.values()].filter(group=>group.type==='kit_componentes'&&[...group.skus].sort().join('|')===skuSetFingerprint).length
-  },[processItemLinks,skuSetFingerprint])
+  },[kitHistoryLinks,skuSetFingerprint])
   const priorSkuSetFingerprint=useRef(skuSetFingerprint)
   useEffect(()=>{
     if(priorSkuSetFingerprint.current!==skuSetFingerprint){
@@ -1126,7 +1133,9 @@ export default function App() {
       setProcesses([])
       setInspections([])
       setProcessItemLinks([])
+      setKitHistoryLinks([])
       itemLinksLoadedUser.current=null
+      kitHistoryLoadedUser.current=null
       catalogsLoadedUser.current=null
       omieInboxLoadedAt.current=0
       setOmieInbox([])
@@ -1153,9 +1162,10 @@ export default function App() {
   useEffect(()=>{
     if(!userId)return
     if(tab==='quadro'||tab==='inspecoes')void loadInspectionItems()
+    if(tab==='nova')void loadKitHistory()
     if(tab==='nova'||tab==='inspecoes')void loadCatalogs()
     if(tab==='inspecoes')void loadOmieInbox()
-  },[userId,tab])
+  },[userId,tab,inspections])
 
   useEffect(()=>{
     if(!userId){equipmentLoadedUser.current=null;return}
@@ -1334,33 +1344,69 @@ export default function App() {
     try{await req}finally{if(catalogsRequest.current===req)catalogsRequest.current=null}
   }
 
-  async function loadInspectionItems(force=false){
+  async function loadInspectionItems(force=false,sourceInspections:InspectionRow[]=inspections){
     if(!userId)return
-    if(!force&&itemLinksLoadedUser.current===userId)return
-    if(itemLinksRequest.current)return itemLinksRequest.current
+    const groupIds=[...new Set(sourceInspections.map(item=>item.grupos_inspecao?.id).filter((id):id is string=>Boolean(id)))].sort()
+    const signature=userId+':'+groupIds.join(',')
+    if(!force&&itemLinksLoadedUser.current===signature)return
+    if(itemLinksRequest.current){
+      await itemLinksRequest.current
+      if(!force&&itemLinksLoadedUser.current===signature)return
+    }
     const request=(async()=>{
       setItemLinksLoading(true)
       try{
-        const res=await apiGet<any>('/api/app/inspection-items')
-        if(res.data){
-          const rows=res.data.itemLinks??[]
-          setProcessItemLinks(rows)
-          itemLinksLoadedUser.current=userId
-          void saveOfflineDraft(userId,'app:inspection-items',{itemLinks:rows}).catch(()=>undefined)
-        }else{
-          const cached=await readOfflineDraft<any>(userId,'app:inspection-items').catch(()=>null)
-          if(cached){
-            setProcessItemLinks(cached.itemLinks||[])
-            itemLinksLoadedUser.current=userId
-          }
+        if(!groupIds.length){
+          setProcessItemLinks([])
+          itemLinksLoadedUser.current=signature
+          return
         }
+        const batches:string[][]=[]
+        for(let index=0;index<groupIds.length;index+=100)batches.push(groupIds.slice(index,index+100))
+        const responses=await Promise.all(batches.map(ids=>
+          apiGet<any>('/api/app/inspection-items?groupIds='+encodeURIComponent(ids.join(',')))))
+        if(responses.some(result=>result.error||!result.data))throw new Error('Falha ao carregar os SKUs das inspeções.')
+        const rows=responses.flatMap(result=>result.data?.itemLinks??[])
+        setProcessItemLinks(rows)
+        itemLinksLoadedUser.current=signature
+        void saveOfflineDraft(userId,'app:inspection-items',{itemLinks:rows}).catch(()=>undefined)
       }catch{
         const cached=await readOfflineDraft<any>(userId,'app:inspection-items').catch(()=>null)
-        if(cached){setProcessItemLinks(cached.itemLinks||[]);itemLinksLoadedUser.current=userId}
+        if(cached){
+          const allowed=new Set(groupIds)
+          const rows=(cached.itemLinks||[]).filter((link:any)=>allowed.has(link.grupo_inspecao_id))
+          setProcessItemLinks(rows)
+          itemLinksLoadedUser.current=signature
+        }
       }finally{setItemLinksLoading(false)}
     })()
     itemLinksRequest.current=request
     try{await request}finally{if(itemLinksRequest.current===request)itemLinksRequest.current=null}
+  }
+
+  async function loadKitHistory(force=false){
+    if(!userId)return
+    if(!force&&kitHistoryLoadedUser.current===userId)return
+    if(kitHistoryRequest.current){
+      await kitHistoryRequest.current
+      if(!force&&kitHistoryLoadedUser.current===userId)return
+    }
+    const request=(async()=>{
+      setKitHistoryLoading(true)
+      try{
+        const res=await apiGet<any>('/api/app/kit-history')
+        if(res.error||!res.data)throw new Error(res.error?.message||'Falha ao carregar histórico de kits.')
+        const rows=res.data.itemLinks??[]
+        setKitHistoryLinks(rows)
+        kitHistoryLoadedUser.current=userId
+        void saveOfflineDraft(userId,'app:kit-history',{itemLinks:rows}).catch(()=>undefined)
+      }catch{
+        const cached=await readOfflineDraft<any>(userId,'app:kit-history').catch(()=>null)
+        if(cached){setKitHistoryLinks(cached.itemLinks||[]);kitHistoryLoadedUser.current=userId}
+      }finally{setKitHistoryLoading(false)}
+    })()
+    kitHistoryRequest.current=request
+    try{await request}finally{if(kitHistoryRequest.current===request)kitHistoryRequest.current=null}
   }
 
   async function loadStock(){
@@ -1417,7 +1463,9 @@ export default function App() {
             setProfile(offline.profile)
             setProcesses(offline.processes||[])
             setInspections(offline.inspections||[])
-            setProcessItemLinks(offline.itemLinks||[])
+            const offlineGroupIds=new Set((offline.inspections||[]).map((item:any)=>item.grupos_inspecao?.id).filter(Boolean))
+            setProcessItemLinks((offline.itemLinks||[]).filter((link:any)=>offlineGroupIds.has(link.grupo_inspecao_id)))
+            setKitHistoryLinks(offline.kitHistoryLinks||[])
             return
           }
         }
@@ -1435,7 +1483,8 @@ export default function App() {
         .catch(()=>undefined)
       setProcesses((data.processes ?? []) as ProcessRow[])
       setInspections((data.inspections ?? []) as InspectionRow[])
-      setProcessItemLinks(data.itemLinks??[])
+      setProcessItemLinks([])
+      itemLinksLoadedUser.current=null
       setCounts(old=>({
         ...old,processos:(data.processes??[]).length,inspecoes:(data.inspections??[]).length
       }))
@@ -1817,7 +1866,11 @@ export default function App() {
     if(res.error||!res.data||version!==loadSequence.current||
        refreshId!==listRefreshSequence.current)return
     setProcesses((res.data.processes??[]) as ProcessRow[])
-    setInspections((res.data.inspections??[]) as InspectionRow[])
+    const nextInspections=(res.data.inspections??[]) as InspectionRow[]
+    setInspections(nextInspections)
+    itemLinksLoadedUser.current=null
+    kitHistoryLoadedUser.current=null
+    void loadInspectionItems(true,nextInspections)
   }
 
   function openOmieSkuReview(suggestion:OmieSkuImport){
@@ -3495,7 +3548,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       return setError('Esta inspeção não possui IT vinculada. Vincule uma IT para gerar o Word oficial.')
     }
     const parentId=detail.grupos_inspecao?.processo_id as string|undefined
-    const consolidated=Boolean(parentId&&detail.grupos_inspecao?.subprocesso_codigo)
+    const consolidated=Boolean(parentId&&detail.grupos_inspecao?.relatorio_consolidado===true)
     // Entradas A/B/C legadas são componentes do MESMO FST e geram um laudo único.
     const collectionName=consolidated?'':askCollectionName()
     if(collectionName===null)return
@@ -3504,7 +3557,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       const session=await supabase.auth.getSession()
       const token=session.data.session?.access_token
       if(!token){setError('Sua sessão expirou. Entre novamente no SGQ.');return}
-      const suffix=collectionName?'?nomeConjunto='+encodeURIComponent(collectionName):''
+      const suffix=consolidated?'':'?individual=1'+(collectionName?'&nomeConjunto='+encodeURIComponent(collectionName):'')
       const url=consolidated
         ?`${apiUrl}/api/processos/${encodeURIComponent(parentId!)}/laudo`
         :`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo${suffix}`
@@ -3607,7 +3660,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       <aside className="sgq-side-nav sgq-inspection-nav" aria-label="Navegação de inspeções">
         <div className="sgq-side-brand"><span className="sgq-brand-symbol"><ClipboardCheck size={29}/></span><div><b>SGQ</b><small>Inspeções</small></div></div>
         <div className="sgq-side-caption">INSPEÇÕES</div>
-        <button type="button" className={tab==='quadro'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='quadro'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Quadro de inspeções</button>
+        <button type="button" className={tab==='quadro'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='quadro'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>setTab('quadro')} ><CheckCircle2 size={19}/> Central de inspeções</button>
         <button type="button" className={tab==='inspecoes'?'selected':''} aria-current={tab==='inspecoes'?'page':undefined} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
         <button type="button" className={tab==='auditorias'?'selected':''} aria-current={tab==='auditorias'?'page':undefined} onClick={()=>{setTab('auditorias');setError('')}}><Warehouse size={19}/> Inspeções Armazém</button>
         <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button type="button" onClick={()=>void supabase.auth.signOut()}><LogOut size={14}/> Sair</button></div>
@@ -3618,7 +3671,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <span>SGQ</span>
           <ChevronRight size={15} className="sgq-topbar-chevron" aria-hidden="true"/>
           <strong>{({
-            painel:'Painel',insights:'Insights',inspecoes:'Processos',quadro:'Inspeções',nova:'Nova inspeção',
+            painel:'Painel',insights:'Insights',inspecoes:'Processos',quadro:'Central de inspeções',nova:'Nova inspeção',
             execucao:'Execução da inspeção',estoque:'Estoque',auditorias:'Inspeções Armazém',
             its:'Instruções técnicas',equipamentos:'Equipamentos',configuracoes:'Configurações','fotos-mobile':'Fotos da inspeção',
           } as Record<typeof tab,string>)[tab]}</strong>
@@ -3697,6 +3750,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
       {tab==='painel' && (
+        <Suspense fallback={<div className="workspace">Carregando painel…</div>}>
         <SgqDashboard
           inspections={inspections}
           processCount={processes.length}
@@ -3732,6 +3786,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             onDeleteInspection={id=>{const i=inspections.find(x=>x.id===id);if(i)void deleteInspection(i)}}
           />
         </SgqDashboard>
+        </Suspense>
       )}
 
       {tab==='inspecoes' && <>
@@ -3767,38 +3822,18 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>}
           </div>
         </section>
-        <InspectionsKanban
-        focusProcessId={focusedProcessId}
-        externalQuery={dashboardSearch}
-        itemLinksLoading={itemLinksLoading}
-        inspections={inspections}
-        processes={processes}
-        itemLinks={processItemLinks}
-        canDelete={!!canDelete}
-        deletingProcessId={deletingProcessId}
-        canMove={!!canWrite}
-        movingInspectionId={kanbanMovingId}
-        onMove={(id,target)=>void moveInspectionOnBoard(id,target)}
-        formatFst={formatFst}
-        onOpen={id=>void openInspection(id)}
-        onCreate={()=>{resetNewInspection();setTab('nova')}}
-        onReuseProcess={id=>{const process=processes.find(p=>p.id===id);if(process)reuseProcess(process)}}
-        onEditProcess={id=>{const process=processes.find(p=>p.id===id);if(process)editProcessFull(process)}}
-        onDeleteProcess={id=>{const process=processes.find(p=>p.id===id);if(process)void deleteProcess(process)}}
-        onDeleteInspection={id=>{const item=inspections.find(i=>i.id===id);if(item)void deleteInspection(item)}}
-      /> </>}
+         </>}
 
-      {tab==='quadro' && <InspectionsKanban key="quadro" initialView="kanban"
+      {tab==='quadro' && <InspectionWorkQueue key="inspection-queue"
         externalQuery={dashboardSearch}
         itemLinksLoading={itemLinksLoading}
+        focusProcessId={focusedProcessId}
         inspections={inspections}
         processes={processes}
         itemLinks={processItemLinks}
         canDelete={!!canDelete}
+        canWrite={!!canWrite}
         deletingProcessId={deletingProcessId}
-        canMove={!!canWrite}
-        movingInspectionId={kanbanMovingId}
-        onMove={(id,target)=>void moveInspectionOnBoard(id,target)}
         formatFst={formatFst}
         onOpen={id=>void openInspection(id)}
         onCreate={()=>{resetNewInspection();setTab('nova')}}
@@ -4045,6 +4080,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <span><strong>São produtos independentes</strong><small>Uma entrada e uma inspeção própria para cada SKU, dentro do mesmo FST.</small></span>
                 </label>
               </div>
+              {kitHistoryLoading&&<p className="field-hint sgq-kit-history-hint">Consultando combinações de kits já confirmadas…</p>}
               {kitHistoryCount>0&&isComponentSet===null&&<p className="field-hint sgq-kit-history-hint">Esta combinação exata já foi confirmada como conjunto em {kitHistoryCount} inspeção(ões) anterior(es). Confirme se continua sendo um kit.</p>}
               {isComponentSet===null&&<p className="field-hint">Escolha uma classificação antes de salvar. O SGQ não presume que SKUs do mesmo PV formem um kit.</p>}
               {isComponentSet===false&&<p className="field-hint">Para produtos independentes, mantenha apenas um SKU nesta entrada e cadastre os demais em novas entradas do mesmo FST.</p>}
@@ -4098,7 +4134,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               status={wordStatus}
               checking={wordCheckBusy}
               generating={wordDownloading}
-              consolidated={Boolean(detail.grupos_inspecao?.processo_id && detail.grupos_inspecao?.subprocesso_codigo)}
+              consolidated={detail.grupos_inspecao?.relatorio_consolidado===true}
               onCheck={()=>void refreshWordStatus()}
               onGenerate={()=>void downloadInspectionWord()}
             />
@@ -4681,22 +4717,24 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
-          <StockWorkspaceNav
-            active={stockMode}
-            onChange={next=>{setStockMode(next);if(next!=='posicoes')setSelectedSample(null)}}
-          />
+          <Suspense fallback={<div className="workspace">Carregando navegação de estoque…</div>}>
+            <StockWorkspaceNav
+              active={stockMode}
+              onChange={next=>{setStockMode(next);if(next!=='posicoes')setSelectedSample(null)}}
+            />
+          </Suspense>
           {['cego','status_cegos','conciliacao'].includes(stockMode) && (
             <p className="sgq-stock-boundary" role="note">
               <strong>Referência de quantidade:</strong> controles físicos do SGQ para a mesma localização.
               A consulta ao Omie confere apenas código e descrição do produto.
             </p>
           )}
-          {stockMode==='cego'&&<BlindInventoryUnified canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/>}
-          {stockMode==='conciliacao'&&<BlindInventoryReconciliation canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/>}
-          {stockMode==='status_cegos'&&<BlindInventoryStatus onOpenCount={()=>setStockMode('cego')} onOpenReconciliation={()=>setStockMode('conciliacao')}/>}
-          {stockMode==='inventario'&&<InventoryPanel samples={samples} canWrite={!!canWrite}
+          {stockMode==='cego'&&<Suspense fallback={<div className="workspace">Carregando…</div>}><BlindInventoryUnified canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/></Suspense>}
+          {stockMode==='conciliacao'&&<Suspense fallback={<div className="workspace">Carregando…</div>}><BlindInventoryReconciliation canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/></Suspense>}
+          {stockMode==='status_cegos'&&<Suspense fallback={<div className="workspace">Carregando…</div>}><BlindInventoryStatus onOpenCount={()=>setStockMode('cego')} onOpenReconciliation={()=>setStockMode('conciliacao')}/></Suspense>}
+          {stockMode==='inventario'&&<Suspense fallback={<div className="workspace">Carregando inventário…</div>}><InventoryPanel samples={samples} canWrite={!!canWrite}
             canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}
-            onRefreshStock={loadStock}/>}
+            onRefreshStock={loadStock}/></Suspense>}
           {stockMode==='posicoes'&&<>
           {stockSkuConflicts.length>0&&<section className="sgq-stock-sku-conflicts" aria-label="Conferência de identificação de produtos">
             <div className="sgq-sku-conflict-heading">
