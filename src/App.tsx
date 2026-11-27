@@ -10,6 +10,7 @@ import BlindInventoryReconciliation from './stock/BlindInventoryReconciliation'
 import BlindInventoryStatus from './stock/BlindInventoryStatus'
 import StockWorkspaceNav from './stock/StockWorkspaceNav'
 import InspectionsKanban from './components/InspectionsKanban'
+import InspectionWorkQueue from './components/InspectionWorkQueue'
 import InspectionJourney from './components/InspectionJourney'
 import ReportReadinessPanel from './components/ReportReadinessPanel'
 import NewInspectionGuide from './components/NewInspectionGuide'
@@ -3788,17 +3789,15 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         onDeleteInspection={id=>{const item=inspections.find(i=>i.id===id);if(item)void deleteInspection(item)}}
       /> </>}
 
-      {tab==='quadro' && <InspectionsKanban key="quadro" initialView="kanban"
+      {tab==='quadro' && <InspectionWorkQueue key="inspection-queue"
         externalQuery={dashboardSearch}
         itemLinksLoading={itemLinksLoading}
+        focusProcessId={focusedProcessId}
         inspections={inspections}
         processes={processes}
         itemLinks={processItemLinks}
         canDelete={!!canDelete}
         deletingProcessId={deletingProcessId}
-        canMove={!!canWrite}
-        movingInspectionId={kanbanMovingId}
-        onMove={(id,target)=>void moveInspectionOnBoard(id,target)}
         formatFst={formatFst}
         onOpen={id=>void openInspection(id)}
         onCreate={()=>{resetNewInspection();setTab('nova')}}
