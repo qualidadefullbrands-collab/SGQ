@@ -59,7 +59,7 @@ def main():
         page.locator('select[data-field="decision"][data-id="1"]').select_option("reprovado")
         page.get_by_role("button",name="Conferir laudo").click()
         page.get_by_role("button",name="Gerar Word (.docx)").wait_for()
-        assert page.get_by_role("button",name="Gerar Word (.docx)").is_enabled()
+        assert page.get_by_role("button",name="Gerar Word (.docx)").is_enabled(), page.locator("main").inner_text()
         with page.expect_download() as event:page.get_by_role("button",name="Gerar Word (.docx)").click()
         out=p/"gerado.docx";event.value.save_as(out)
         browser.close()

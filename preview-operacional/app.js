@@ -51,8 +51,11 @@ document.addEventListener('change',async event=>{
   document.querySelector('#status').textContent='Lendo documento…'
   t.disabled=true
   try{const parsed=await readDocument(t.files[0]);revoke();model=parsed;stage='plan';error='';render()}
-  catch(ex){error=ex.message;render()}return
+  catch(ex){error=ex.message;render()}
  }
+})
+document.addEventListener('input',event=>{
+ const t=event.target
  const k=t.dataset.field;if(!k||!model)return
  const r=model.records[Number(t.dataset.id)]
  if(!r)return
