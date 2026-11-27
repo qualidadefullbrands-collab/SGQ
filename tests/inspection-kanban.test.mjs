@@ -44,7 +44,7 @@ test('queue preserves create, edit and delete permissions',()=>{
 test('queue is responsive on desktop, tablet and mobile',()=>{
  assert.ok(css.includes('@media(max-width:1120px)'))
  assert.ok(css.includes('@media(max-width:640px)'))
- assert.ok(css.includes('.sgq-work-row{grid-template-columns:minmax(0,1fr);'))
+ assert.ok(css.includes('.sgq-work-row{grid-template-columns:minmax(0,1fr);gap:11px;'))
 })
 test('legacy process grouping is linear rather than filtering all inspections for each process',()=>{
  assert.ok(legacy.includes('const inspectionsByProcess=useMemo'))
