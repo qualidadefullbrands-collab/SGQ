@@ -28,7 +28,7 @@ test('active product navigation exposes inspection workflows only',()=>{
  const end=app.indexOf('</aside>',start)
  assert.ok(start>=0&&end>start)
  const nav=app.slice(start,end)
- assert.match(nav,/Quadro de inspeções/)
+ assert.match(nav,/Central de inspeções/)
  assert.match(nav,/Processos/)
  assert.match(nav,/Inspeções Armazém/)
  for(const name of ['Estoque','Equipamentos','Instruções técnicas','Configurações','Painel','Insights'])
