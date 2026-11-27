@@ -950,6 +950,19 @@ export default function App() {
   const [isComponentSet,setIsComponentSet] = useState<boolean|null>(null)
   const skuSetFingerprint=useMemo(()=>[...new Set(skuRows.filter(skuRowHasData).map(row=>row.sku.trim().toUpperCase()).filter(Boolean))].sort().join('|'),[skuRows])
   const distinctSkuCount=skuSetFingerprint?skuSetFingerprint.split('|').length:0
+  const kitHistoryCount=useMemo(()=>{
+    if(!skuSetFingerprint)return 0
+    const groups=new Map<string,{type:string;skus:Set<string>}>()
+    for(const link of processItemLinks){
+      const groupId=link.grupo_inspecao_id
+      const sku=String(link.processo_itens?.produtos?.sku||link.processo_itens?.codigo_cliente||'').trim().toUpperCase()
+      if(!sku)continue
+      const current=groups.get(groupId)||{type:String(link.grupos_inspecao?.tipo||''),skus:new Set<string>()}
+      current.skus.add(sku)
+      groups.set(groupId,current)
+    }
+    return [...groups.values()].filter(group=>group.type==='kit_componentes'&&[...group.skus].sort().join('|')===skuSetFingerprint).length
+  },[processItemLinks,skuSetFingerprint])
   const priorSkuSetFingerprint=useRef(skuSetFingerprint)
   useEffect(()=>{
     if(priorSkuSetFingerprint.current!==skuSetFingerprint){
@@ -4032,6 +4045,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <span><strong>São produtos independentes</strong><small>Uma entrada e uma inspeção própria para cada SKU, dentro do mesmo FST.</small></span>
                 </label>
               </div>
+              {kitHistoryCount>0&&isComponentSet===null&&<p className="field-hint sgq-kit-history-hint">Esta combinação exata já foi confirmada como conjunto em {kitHistoryCount} inspeção(ões) anterior(es). Confirme se continua sendo um kit.</p>}
               {isComponentSet===null&&<p className="field-hint">Escolha uma classificação antes de salvar. O SGQ não presume que SKUs do mesmo PV formem um kit.</p>}
               {isComponentSet===false&&<p className="field-hint">Para produtos independentes, mantenha apenas um SKU nesta entrada e cadastre os demais em novas entradas do mesmo FST.</p>}
             </section>}
