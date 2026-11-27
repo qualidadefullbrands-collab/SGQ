@@ -17,7 +17,7 @@ test('existing subprocess identities use separate FST and entry labels and show 
  assert.match(processes,/sgq-subprocess-products/)
  assert.match(processes,/product\.sku/)
  assert.match(processes,/product\.descricao/)
- assert.match(processesCss,/\.sgq-subprocess-product\\{display:inline-flex/)
+ assert.ok(processesCss.includes('.sgq-subprocess-product{display:inline-flex'))
  assert.doesNotMatch(processes,/> Editar FST</)
  assert.doesNotMatch(processes,/> Adicionar entrada A</)
  assert.doesNotMatch(processes,/<input[^>]*type="search"/)
