@@ -175,3 +175,167 @@
 }
 .sgq-operational-shell .sgq-subprocess-product>b{display:block;font-size:12px;letter-spacing:.01em}
 .sgq-operational-shell .sgq-subprocess-product>span{display:block;width:100%;font-size:12px;line-height:1.45}
+
+
+/* Inspection workspace — clearer hierarchy and direct actions */
+.sgq-kanban-page{max-width:1600px;padding-top:24px;padding-bottom:44px}
+.sgq-kanban-toolbar{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap;margin-bottom:20px}
+.sgq-kanban-title{display:flex;align-items:center;gap:12px;min-width:220px}
+.sgq-kanban-title h1,.sgq-kanban-title h2{margin:0;color:#17364d;font-size:clamp(25px,2.5vw,34px);font-weight:820;letter-spacing:-.04em}
+.sgq-kanban-title p{margin:5px 0 0;color:#657c8f;font-size:13px}
+.sgq-kanban-total{display:grid;place-items:center;min-width:34px;height:34px;padding:0 9px;border-radius:10px;background:#e6f1f8;color:#1a648e;font-weight:800;font-size:13px}
+.sgq-kanban-tools{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;flex:1}
+.sgq-kanban-search{display:flex;align-items:center;gap:9px;min-width:260px;max-width:390px;height:44px;padding:0 11px;border:1px solid #c6d7e2;border-radius:10px;background:#fff;color:#668195}
+.sgq-kanban-search input{width:100%;min-width:0;height:40px;border:0!important;outline:0!important;box-shadow:none!important;background:transparent!important;color:#1b3c53;font-size:13px}
+.sgq-kanban-search input::placeholder{color:#879baa}
+.sgq-kanban-search button{border:0;background:transparent;color:#72889a;font-size:21px;line-height:1;padding:4px 6px}
+.sgq-process-view-toggle{display:flex;gap:3px;padding:4px;border:1px solid #d2dfe7;border-radius:10px;background:#f0f5f8}
+.sgq-process-view-toggle button{min-height:34px;padding:0 13px;border:0;border-radius:7px;background:transparent;color:#5c7385;font-size:12px;font-weight:750}
+.sgq-process-view-toggle button.is-active{background:#fff;color:#155f89;box-shadow:0 1px 4px #1b425515}
+.sgq-kanban-new{min-height:44px;padding:0 16px;border-radius:9px;font-size:13px;font-weight:800}
+.sgq-kanban-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:start;gap:14px}
+.sgq-kanban-lane{min-width:0;overflow:hidden;border:1px solid #d1dee7;border-radius:14px;background:#f1f5f8}
+.sgq-kanban-lane-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:9px;padding:15px 15px 13px;border-bottom:1px solid #d6e1e8;background:#f7fafc}
+.sgq-kanban-lane-head h2{margin:0;color:#25445a;font-size:14px;font-weight:800}
+.sgq-kanban-lane-dot{width:9px;height:9px;border-radius:50%;background:#91a6b6}
+.sgq-kanban-lane.tone-active .sgq-kanban-lane-dot{background:#d69b31}
+.sgq-kanban-lane.tone-done .sgq-kanban-lane-dot{background:#2d966a}
+.sgq-kanban-lane-count{display:grid;place-items:center;min-width:25px;height:24px;margin-left:auto;padding:0 6px;border-radius:7px;background:#e3edf3;color:#31536a;font-size:11px;font-weight:800}
+.sgq-kanban-lane-content{display:grid;gap:11px;max-height:calc(100vh - 255px);min-height:180px;overflow:auto;padding:11px}
+.sgq-kanban-card{min-width:0;padding:14px;border:1px solid #d3e0e8;border-radius:12px;background:#fff;box-shadow:0 2px 8px #21445c08;transition:transform .16s,border-color .16s,box-shadow .16s}
+.sgq-kanban-card:hover{transform:translateY(-2px);border-color:#a7c2d3;box-shadow:0 8px 20px #21445c12}
+.sgq-kanban-card-top{display:flex;align-items:center;gap:7px;min-width:0;margin-bottom:10px}
+.sgq-kanban-fst{display:inline-flex;align-items:center;min-height:25px;padding:3px 8px;border-radius:6px;background:#e9f3f9;color:#145c86;font-size:11px;font-weight:850;letter-spacing:.01em}
+.sgq-kanban-entry{display:inline-flex;align-items:center;min-height:25px;padding:3px 8px;border:1px solid #dbe5eb;border-radius:6px;background:#f8fafb;color:#4e6678;font-size:11px;font-weight:750}
+.sgq-kanban-card-top .sgq-kanban-actions{margin-left:auto}
+.sgq-kanban-card h3{margin:0 0 7px;color:#203b50;font-size:16px;font-weight:800;line-height:1.3;overflow-wrap:anywhere}
+.sgq-kanban-card-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;color:#6d8293;font-size:11px}
+.sgq-kanban-card-products{display:grid;gap:7px;margin-top:13px;padding:10px;border:1px solid #e1eaf0;border-radius:9px;background:#f8fafc}
+.sgq-kanban-products-title{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#597184;font-size:11px;font-weight:800}
+.sgq-kanban-product-row{display:grid;grid-template-columns:minmax(80px,.48fr) minmax(0,1fr);gap:8px;align-items:start;padding-top:7px;border-top:1px solid #e5edf2}
+.sgq-kanban-product-row b{color:#234b66;font-size:11px;overflow-wrap:anywhere}
+.sgq-kanban-product-row span{color:#61798a;font-size:11px;line-height:1.35;overflow-wrap:anywhere}
+.sgq-kit-type{display:inline-flex;align-items:center;gap:4px;width:max-content;max-width:100%;padding:4px 7px;border-radius:6px;background:#edf2f5;color:#5b7181;font-size:10px;font-weight:800;white-space:nowrap}
+.sgq-kit-type.is-kit{background:#e6f4ed;color:#1e704b}
+.sgq-kit-type.needs-review{background:#fff2df;color:#96601b}
+.sgq-kanban-progress{margin-top:13px}
+.sgq-kanban-progress-label{display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;color:#6d8191;font-size:11px}
+.sgq-kanban-progress-label strong{color:#36566e;font-variant-numeric:tabular-nums}
+.sgq-kanban-progress-track{height:6px;overflow:hidden;border-radius:20px;background:#e6edf2}
+.sgq-kanban-progress-track span{display:block;height:100%;border-radius:20px;background:#3d91b8;transition:width .25s}
+.sgq-kanban-card-bottom{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:14px;padding-top:11px;border-top:1px solid #e5edf2}
+.sgq-kanban-card-spacer{flex:1}
+.sgq-kanban-result{font-size:11px;font-weight:850}
+.sgq-kanban-result.is-approved{color:#20784e}
+.sgq-kanban-result.is-rejected{color:#b52e40}
+.sgq-kanban-move{min-height:36px;padding:0 10px;border:1px solid #c6d8e4;border-radius:8px;background:#f5f9fc;color:#315c78;font-size:11px;font-weight:750}
+.sgq-kanban-open{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:37px;margin-left:auto;padding:0 12px;border:1px solid #176b98;border-radius:8px;background:#176b98;color:#fff;font-size:11px;font-weight:800}
+.sgq-kanban-open:hover:not(:disabled){background:#11587f}
+.sgq-kanban-move:disabled,.sgq-kanban-open:disabled{opacity:.55;cursor:not-allowed}
+.sgq-kanban-empty{display:grid;place-items:center;min-height:120px;padding:18px;border:1px dashed #cbd9e2;border-radius:10px;color:#8194a2;font-size:12px;text-align:center}
+.sgq-kanban-loadmore{width:100%;min-height:37px;border:1px solid #c6d7e1;border-radius:8px;background:#fff;color:#2b6386;font-size:12px;font-weight:750}
+.sgq-kanban-unassigned{margin-top:22px;padding:16px;border:1px solid #d2dfe7;border-radius:13px;background:#fff}
+.sgq-kanban-unassigned-head{display:flex;align-items:center;gap:9px;color:#36566e}
+.sgq-kanban-unassigned-head h2{margin:0;font-size:15px}
+.sgq-kanban-unassigned-head span{margin-left:auto;color:#6e8596;font-size:12px}
+.sgq-kanban-unassigned-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:9px;margin-top:13px}
+.sgq-kanban-unassigned-card{display:flex;align-items:center;justify-content:space-between;gap:9px;padding:11px;border:1px solid #e0e9ef;border-radius:9px;background:#fafcfd}
+.sgq-kanban-unassigned-card>div:first-child{display:grid;gap:4px;min-width:0}
+.sgq-kanban-unassigned-card strong{color:#24506c;font-size:13px}
+.sgq-kanban-unassigned-card span{color:#718797;font-size:11px;overflow-wrap:anywhere}
+.sgq-kanban-unassigned-actions{display:flex;gap:4px}
+.sgq-kanban-unassigned-actions button{display:grid;place-items:center;width:34px;height:34px;border:1px solid #d1dfe7;border-radius:8px;background:#fff;color:#42647b}
+.sgq-process-tree{display:grid;gap:11px}
+.sgq-process-node{overflow:hidden;border:1px solid #d3e0e8;border-radius:13px;background:#fff;box-shadow:0 2px 8px #21445c08}
+.sgq-process-node-heading{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:14px;padding:15px 17px}
+.sgq-process-node-toggle{display:flex;align-items:center;gap:10px;min-width:0;padding:0;border:0;background:transparent;text-align:left}
+.sgq-process-node-toggle>svg{flex:none;color:#6c8798;transition:transform .18s}
+.sgq-process-node-toggle>svg.is-expanded{transform:rotate(90deg)}
+.sgq-process-node-identity{display:grid;gap:5px;min-width:0}
+.sgq-process-identity-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sgq-process-node-identity strong{color:#1e4d69;font-size:15px;font-weight:850}
+.sgq-process-node-identity>span:last-child{color:#6c8292;font-size:12px}
+.sgq-process-arrival{color:#8194a2;font-size:10px}
+.sgq-process-node-summary{display:flex;align-items:center;gap:9px;color:#6b8293;font-size:11px}
+.sgq-process-node-actions{display:flex;align-items:center;gap:6px}
+.sgq-process-node-actions button{display:inline-flex;align-items:center;gap:5px;min-height:34px;padding:0 9px;border:1px solid #d1dfe7;border-radius:8px;background:#fff;color:#42647b;font-size:11px;font-weight:750}
+.sgq-process-node-actions button.sgq-process-danger{width:34px;padding:0;justify-content:center;color:#ad3945}
+.sgq-process-children{display:grid;gap:9px;padding:0 14px 14px;background:#f7fafc}
+.sgq-subprocess-node{overflow:hidden;border:1px solid #dce6ec;border-radius:10px;background:#fff}
+.sgq-subprocess-node-heading{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto auto;align-items:center;gap:10px;padding:12px}
+.sgq-subprocess-letter{display:grid;place-items:center;width:32px;height:32px;border-radius:8px;background:#e9f2f8;color:#1a6089;font-size:13px;font-weight:850}
+.sgq-subprocess-node-name{display:grid;gap:6px;min-width:0}
+.sgq-subprocess-node-name>strong{color:#34556d;font-size:12px}
+.sgq-subprocess-products{display:flex;flex-wrap:wrap;gap:5px}
+.sgq-subprocess-products>span:not(.sgq-subprocess-product){color:#8798a5;font-size:10px}
+.sgq-subprocess-product{display:inline-flex;gap:5px;max-width:100%;padding:4px 7px;border-radius:6px;background:#f1f6f9;color:#4e6a7d;font-size:10px}
+.sgq-subprocess-product b{color:#27536f}
+.sgq-subprocess-product span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}
+.sgq-subprocess-invoice{color:#708596;font-size:10px;white-space:nowrap}
+.sgq-subprocess-inspection{display:flex;align-items:center;gap:10px;padding:10px 13px 10px 56px;border-top:1px solid #e6edf2;color:#657d8f;font-size:11px}
+.sgq-subprocess-inspection-number{font-weight:800;color:#335a73}
+.sgq-subprocess-inspection button{display:inline-flex;align-items:center;gap:5px;min-height:32px;margin-left:auto;padding:0 10px;border:1px solid #c5d8e4;border-radius:7px;background:#f5f9fc;color:#225e83;font-size:11px;font-weight:800}
+.sgq-process-empty{padding:18px;color:#6d8494;font-size:12px}
+.sgq-process-empty button{display:inline-flex;align-items:center;gap:5px;margin-left:8px;color:#1e648e;font-weight:800}
+.sgq-kanban-no-results{padding:30px;border:1px dashed #cbd9e2;border-radius:12px;color:#6f8595;text-align:center}
+.sgq-kanban-actions{position:relative;margin-left:auto}
+.sgq-kanban-actions>summary{display:grid;place-items:center;width:31px;height:31px;border:1px solid #d9e4eb;border-radius:8px;background:#fff;color:#61798a;list-style:none;cursor:pointer}
+.sgq-kanban-actions>summary::-webkit-details-marker{display:none}
+.sgq-kanban-actions-menu{position:absolute;right:0;top:35px;z-index:12;display:grid;min-width:180px;padding:5px;border:1px solid #d4e0e8;border-radius:9px;background:#fff;box-shadow:0 10px 26px #193b521f}
+.sgq-kanban-actions-menu button{display:flex;align-items:center;gap:8px;min-height:36px;padding:0 9px;border:0;border-radius:6px;background:transparent;color:#36556a;text-align:left;font-size:11px}
+.sgq-kanban-actions-menu button:hover{background:#f2f6f9}
+.sgq-kanban-actions-menu button.danger-item{color:#ad3544}
+.sgq-kanban-actions-menu button.danger-item:hover{background:#fff1f2}
+.sgq-kanban-embedded .sgq-kanban-board{grid-template-columns:1fr}
+.sgq-kanban-embedded .sgq-kanban-lane-content{max-height:460px}
+.sgq-kit-classification{margin-top:14px}
+.sgq-kit-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.sgq-kit-choice{display:flex;align-items:flex-start;gap:11px;padding:15px;border:1px solid #cddce5;border-radius:11px;background:#fafcfd;cursor:pointer}
+.sgq-kit-choice.selected{border-color:#4d91b4;background:#edf6fb;box-shadow:inset 0 0 0 1px #4d91b4}
+.sgq-kit-choice input{flex:none;width:17px;height:17px;margin:2px 0 0;accent-color:#176b98}
+.sgq-kit-choice span{display:grid;gap:5px}
+.sgq-kit-choice strong{color:#23455d;font-size:13px}
+.sgq-kit-choice small{color:#687f90;font-size:11px;line-height:1.45}
+.sgq-kit-classification .field-hint{margin:11px 0 0}
+.sgq-inspection-nav .sgq-side-caption{margin-top:22px}
+.sgq-inspection-nav .sgq-side-footer{margin-top:auto}
+.sgq-inspection-detail-loading{max-width:1200px;margin:28px auto;padding:24px;border:1px solid #d2dfe7;border-radius:14px;background:#fff}
+.sgq-inspection-detail-loading .loading-line{height:13px;margin:12px 0;border-radius:8px;background:linear-gradient(90deg,#edf2f5 20%,#f8fafb 50%,#edf2f5 80%);background-size:200% 100%;animation:sgq-loading-shimmer 1.3s ease-in-out infinite}
+.sgq-inspection-detail-loading .loading-line.wide{width:70%}
+.sgq-inspection-detail-loading .loading-line.short{width:38%}
+@keyframes sgq-loading-shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+@media(max-width:1180px){
+ .sgq-kanban-board{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .sgq-kanban-lane:last-child{grid-column:1/-1}
+ .sgq-process-node-heading{grid-template-columns:minmax(0,1fr) auto}
+ .sgq-process-node-actions{grid-column:1/-1;justify-content:flex-end}
+ .sgq-subprocess-node-heading{grid-template-columns:34px minmax(0,1fr) auto}
+ .sgq-subprocess-invoice{grid-column:2}
+ .sgq-subprocess-node-heading>.sgq-process-status{grid-column:3}
+}
+@media(max-width:760px){
+ .sgq-kanban-page{padding-top:14px}
+ .sgq-kanban-toolbar{align-items:stretch;gap:12px}
+ .sgq-kanban-tools{display:grid;grid-template-columns:1fr 1fr;justify-content:stretch}
+ .sgq-kanban-search{grid-column:1/-1;max-width:none;min-width:0}
+ .sgq-kanban-new{width:100%;justify-content:center}
+ .sgq-kanban-board{grid-template-columns:1fr}
+ .sgq-kanban-lane:last-child{grid-column:auto}
+ .sgq-kanban-lane-content{max-height:none}
+ .sgq-kanban-card{padding:13px}
+ .sgq-process-node-heading{grid-template-columns:minmax(0,1fr);gap:10px;padding:13px}
+ .sgq-process-node-summary{justify-content:space-between}
+ .sgq-process-node-actions{grid-column:auto;justify-content:flex-start;flex-wrap:wrap}
+ .sgq-process-children{padding:0 9px 9px}
+ .sgq-subprocess-node-heading{grid-template-columns:32px minmax(0,1fr);gap:8px}
+ .sgq-subprocess-invoice{grid-column:2}
+ .sgq-subprocess-node-heading>.sgq-process-status{grid-column:2}
+ .sgq-subprocess-inspection{padding-left:12px;flex-wrap:wrap}
+ .sgq-subprocess-inspection button{margin-left:auto}
+ .sgq-kit-choice-grid{grid-template-columns:1fr}
+ .sgq-kanban-unassigned-list{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){
+ .sgq-kanban-card,.sgq-kanban-progress-track span,.sgq-process-node-toggle>svg{transition:none}
+ .sgq-inspection-detail-loading .loading-line{animation:none}
+}
