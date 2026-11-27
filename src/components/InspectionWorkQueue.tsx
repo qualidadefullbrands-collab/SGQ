@@ -135,7 +135,7 @@ export default function InspectionWorkQueue({
           <div className="sgq-work-products">
             <div className="sgq-work-products-heading"><span>Produtos da inspeção</span>
               <span className={'sgq-work-classification '+(row.isKit?'is-kit':row.needsReview?'needs-review':'')}>
-                {row.needsReview&&<AlertTriangle size={12}/ >}{row.isKit&&<Package size={12}/ >}{classification}
+                {row.needsReview&&<AlertTriangle size={12}/>}{row.isKit&&<Package size={12}/>}{classification}
               </span>
             </div>
             {row.products.length>0?<div className="sgq-work-sku-list">{row.products.map((product,index)=><div key={product.sku+'-'+index}>
@@ -152,7 +152,7 @@ export default function InspectionWorkQueue({
           </div>
           <div className="sgq-work-row-actions">
             <button type="button" className="sgq-work-open" onClick={()=>onOpen(row.item.id)}>
-              {status==='concluida'?<FileText size={15}/>:status==='em_andamento'?<CheckCircle2 size={15}/>:<ClipboardCheck size={15}/ >}{action}
+              {status==='concluida'?<FileText size={15}/>:status==='em_andamento'?<CheckCircle2 size={15}/>:<ClipboardCheck size={15}/>}{action}
             </button>
             <InspectionActions inspection={row.item} process={row.process} canDelete={canDelete} deletingProcessId={deletingProcessId}
               onReuseProcess={onReuseProcess} onEditProcess={onEditProcess} onDeleteProcess={onDeleteProcess} onDeleteInspection={onDeleteInspection}/>
