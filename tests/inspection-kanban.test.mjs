@@ -8,7 +8,7 @@ const css=read('src/components/InspectionWorkQueue.css')
 const legacy=read('src/components/InspectionsKanban.tsx')
 
 test('main inspection screen uses the Central de Inspeções instead of the old Kanban',()=>{
- const start=app.indexOf("{tab==='quadro'")
+ const start=app.indexOf("{tab==='quadro' && <InspectionWorkQueue")
  const end=app.indexOf("{tab==='nova'",start)
  assert.ok(start>=0&&end>start)
  const route=app.slice(start,end)
@@ -22,7 +22,7 @@ test('work queue defaults to actionable inspections and provides explicit status
 })
 test('kit membership is explicit and multiple SKUs are never inferred to be a kit',()=>{
  assert.ok(queue.includes("String(group?.tipo||'')==='kit_componentes'"))
- assert.ok(queue.includes('const needsReview=products.length>1&&!isKit'))
+ assert.ok(queue.includes('needsReview=products.length>1&&!isKit'))
  assert.ok(queue.includes('Kit · '))
  assert.ok(queue.includes('Relação de SKUs a confirmar'))
 })
@@ -48,7 +48,7 @@ test('queue preserves create, edit and delete permissions',()=>{
 test('queue is responsive on desktop, tablet and mobile',()=>{
  assert.ok(css.includes('@media(max-width:1120px)'))
  assert.ok(css.includes('@media(max-width:640px)'))
- assert.ok(css.includes('.sgq-work-row{grid-template-columns:minmax(0,1fr)}'))
+ assert.ok(css.includes('.sgq-work-row{grid-template-columns:minmax(0,1fr);'))
 })
 test('legacy process grouping is linear rather than filtering all inspections for each process',()=>{
  assert.ok(legacy.includes('const inspectionsByProcess=useMemo'))
