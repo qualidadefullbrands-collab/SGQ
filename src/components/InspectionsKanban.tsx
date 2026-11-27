@@ -256,7 +256,7 @@ export default function InspectionsKanban({
                   <span className={'sgq-process-status '+(done?'is-complete':'')}>{done?'Concluída':started?'Em andamento':'Não iniciada'}</span>
                 </div>
                 {sub.items.map(item=><div className="sgq-subprocess-inspection" key={item.id}>
-                  <span className="sgq-subprocess-inspection-number">{item.numero}</span>
+                  <span className="sgq-subprocess-inspection-number">Inspeção</span>
                   <span>{item.status==='concluida'?(item.resultado==='aprovado'?'Aprovado':item.resultado==='reprovado'?'Reprovado':'Concluída'):item.status==='em_andamento'?'Em andamento':'Não iniciada'}</span>
                   <button type="button" onClick={()=>onOpen(item.id)}>{item.status==='concluida'?<CheckCircle2 size={15}/>:<ChevronRight size={15}/>} Abrir inspeção</button>
                 </div>)}
@@ -299,7 +299,7 @@ export default function InspectionsKanban({
               </div>
               <h3 title={client||'Cliente não informado'}>{client||'Cliente não informado'}</h3>
               <div className="sgq-kanban-card-meta">
-                <span>Inspeção {item.numero}</span><span>{group?.nota_fiscal?'NF '+group.nota_fiscal:'NF não informada'}</span>
+                <span>{group?.nota_fiscal?'NF '+group.nota_fiscal:'NF não informada'}</span><span>Chegada {formatArrival(group?.chegada_cd)}</span>
               </div>
               <div className="sgq-kanban-card-products">
                 <div className="sgq-kanban-products-title">
