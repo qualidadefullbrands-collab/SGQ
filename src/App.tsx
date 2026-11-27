@@ -772,6 +772,7 @@ export default function App() {
   const [activeStage, setActiveStage] = useState<'dados'|'amostragem'|'verificacoes'|'dimensionais'|'testes'|'fotos'|'resultado'|'retencao'>('dados')
   const [detail, setDetail] = useState<any>(null)
   const [detailLoading,setDetailLoading]=useState(false)
+  const [detailStageLoading,setDetailStageLoading]=useState<string|null>(null)
   type WordReadiness={ready:boolean;pending:string[];error?:string}
   const [wordStatus,setWordStatus]=useState<WordReadiness|null>(null)
   function parseWordStatus(response:any):WordReadiness {
@@ -890,6 +891,7 @@ export default function App() {
   const itemLinksLoadedUser=useRef<string|null>(null)
   const equipmentLoadedUser=useRef<string|null>(null)
   const detailRequests=useRef(new Map<string,Promise<void>>())
+  const detailStageRequests=useRef(new Map<string,Promise<void>>())
   const stockRequest=useRef<Promise<void>|null>(null)
   const photosLinksExpiration=useRef(new Map<string,number>())
   const photoLinksRequest=useRef(new Map<string,Promise<void>>())
@@ -1365,7 +1367,7 @@ export default function App() {
     try{await req}finally{if(stockRequest.current===req)stockRequest.current=null}
   }
 
-  async function loadPhotoLinks(id:string,force=false){
+  async function loadPhotoLinks(id:string,force=false,photosOverride?:any[]){
     if(!force&&(photosLinksExpiration.current.get(id)||0)>Date.now())return
     const running=photoLinksRequest.current.get(id)
     if(running)return running
@@ -1373,7 +1375,7 @@ export default function App() {
       const res=await apiGet<{photoUrls:Record<string,string|null>}>(`/api/inspecoes/${encodeURIComponent(id)}/fotos/links`)
       if(res.error||!res.data)return
       const links=res.data.photoUrls??{}
-      setDetail((d:any)=>d?.id===id?{...d,photos:(d.photos??[]).map((p:any)=>({
+      setDetail((d:any)=>d?.id===id?{...d,photos:(photosOverride??d.photos??[]).map((p:any)=>({
         ...p,signed_url:links[p.storage_path]??null
       }))}:d)
       photosLinksExpiration.current.set(id,Date.now()+45*60*1000)
