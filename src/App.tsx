@@ -3822,27 +3822,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>}
           </div>
         </section>
-        <InspectionsKanban
-        focusProcessId={focusedProcessId}
-        externalQuery={dashboardSearch}
-        itemLinksLoading={itemLinksLoading}
-        inspections={inspections}
-        processes={processes}
-        itemLinks={processItemLinks}
-        canDelete={!!canDelete}
-        canWrite={!!canWrite}
-        deletingProcessId={deletingProcessId}
-        canMove={!!canWrite}
-        movingInspectionId={kanbanMovingId}
-        onMove={(id,target)=>void moveInspectionOnBoard(id,target)}
-        formatFst={formatFst}
-        onOpen={id=>void openInspection(id)}
-        onCreate={()=>{resetNewInspection();setTab('nova')}}
-        onReuseProcess={id=>{const process=processes.find(p=>p.id===id);if(process)reuseProcess(process)}}
-        onEditProcess={id=>{const process=processes.find(p=>p.id===id);if(process)editProcessFull(process)}}
-        onDeleteProcess={id=>{const process=processes.find(p=>p.id===id);if(process)void deleteProcess(process)}}
-        onDeleteInspection={id=>{const item=inspections.find(i=>i.id===id);if(item)void deleteInspection(item)}}
-      /> </>}
+         </>}
 
       {tab==='quadro' && <InspectionWorkQueue key="inspection-queue"
         externalQuery={dashboardSearch}
