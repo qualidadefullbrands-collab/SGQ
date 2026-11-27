@@ -44,7 +44,7 @@ test('each new inspection component has an independent accessible arrow toggle a
  assert.match(cards,/setExpandedSkuIndex\(current=>current===i\?null:i\)/)
  assert.match(cards,/<ChevronDown className=\{'sgq-sku-chevron '/)
  assert.match(cards,/row\.sku\|\|'Novo código'/)
- assert.match(cards,/row\.nome\|\|'Preencha os dados deste componente'/)
+ assert.match(cards,/row\.nome\|\|'Descrição do SKU'/)
  assert.match(cards,/Number\(row\.quantidade\)\.toLocaleString\('pt-BR'\)/)
  assert.match(cards,/id=\{'sgq-sku-body-'\+i\} className="sgq-sku-collapsible" hidden=\{expandedSkuIndex!==i\}/)
  assert.match(cards,/className="form-grid"/)
