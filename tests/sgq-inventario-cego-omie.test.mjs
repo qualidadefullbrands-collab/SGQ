@@ -10,7 +10,7 @@ const sql=load('supabase/migrations/20261113080000_sgq_inventario_cego_omie_foto
 const edge=load('supabase/functions/sgq-inventario-omie/index.ts')
 
 test('stock preserves previous inventory and adds a separate blind Omie mode',()=>{
- assert.match(app,/import BlindInventoryUnified from '\.\/stock\/BlindInventoryUnified'/)
+ assert.match(app,/const BlindInventoryUnified=lazy/)
  assert.ok(app.includes("stockMode==='cego'&&<Suspense")&&app.includes('<BlindInventoryUnified'))
  assert.match(navigation,/Contagem FST/)
  assert.ok(app.includes("stockMode==='inventario'&&<Suspense")&&app.includes('<InventoryPanel'))
