@@ -172,6 +172,7 @@ export default function InspectionWorkQueue({
         <div><strong>{formatFst(process.codigo)}</strong><span>{process.cliente||'Cliente não informado'}</span></div>
         <button type="button" onClick={()=>onReuseProcess(process.id)}><Plus size={15}/> Criar entrada</button>
       </article>)}</div>
+      {processesWithoutEntry.length>visibleProcesses.length&&<button type="button" className="sgq-center-more" onClick={()=>setProcessLimit(value=>value+8)}>Mostrar mais processos</button>}
     </section>}
   </section>
 }
