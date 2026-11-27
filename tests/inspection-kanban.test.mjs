@@ -38,7 +38,7 @@ test('queue supports local search and avoids drag-and-drop interactions',()=>{
  assert.ok(!queue.includes('draggable='))
 })
 test('queue preserves create, edit and delete permissions',()=>{
- for(const value of ['onCreate','onReuseProcess','onEditProcess','onDeleteProcess','onDeleteInspection','canDelete&&'])
+ for(const value of ['onCreate','onReuseProcess','onEditProcess','onDeleteProcess','onDeleteInspection','canDelete&&','canWrite&&','canWrite:boolean'])
   assert.ok(queue.includes(value),value+' missing')
 })
 test('queue is responsive on desktop, tablet and mobile',()=>{
@@ -46,6 +46,14 @@ test('queue is responsive on desktop, tablet and mobile',()=>{
  assert.ok(css.includes('@media(max-width:640px)'))
  assert.ok(css.includes('.sgq-work-row{grid-template-columns:minmax(0,1fr);gap:11px;'))
 })
+
+test('queue paginates large lists to avoid rendering every inspection at once',()=>{
+ assert.ok(queue.includes('useState(50)'))
+ assert.ok(queue.includes('filteredRows.slice(0,visibleLimit)'))
+ assert.ok(queue.includes('processesWithoutEntry.slice(0,processLimit)'))
+ assert.ok(queue.includes('Mostrar mais'))
+})
+
 test('legacy process grouping is linear rather than filtering all inspections for each process',()=>{
  assert.ok(legacy.includes('const inspectionsByProcess=useMemo'))
  assert.ok(legacy.includes('const own=inspectionsByProcess.get(process.id)||[]'))
