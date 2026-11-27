@@ -339,3 +339,9 @@
  .sgq-kanban-card,.sgq-kanban-progress-track span,.sgq-process-node-toggle>svg{transition:none}
  .sgq-inspection-detail-loading .loading-line{animation:none}
 }
+
+
+.stage-data-loading{display:flex;align-items:center;gap:9px;margin:0 0 14px;padding:10px 13px;border:1px solid #d4e3eb;border-radius:9px;background:#f5f9fc;color:#4b6b80;font-size:12px;font-weight:700}
+.stage-data-loading::before{content:"";width:13px;height:13px;border:2px solid #c7dbe7;border-top-color:#176b98;border-radius:50%;animation:sgq-stage-spin .75s linear infinite}
+@keyframes sgq-stage-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.stage-data-loading::before{animation:none;border-top-color:#c7dbe7}}
