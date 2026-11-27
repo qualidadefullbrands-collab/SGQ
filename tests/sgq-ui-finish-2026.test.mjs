@@ -33,7 +33,7 @@ test('active product navigation exposes inspection workflows only',()=>{
  assert.match(nav,/Inspeções Armazém/)
  for(const name of ['Estoque','Equipamentos','Instruções técnicas','Configurações','Painel','Insights'])
   assert.doesNotMatch(nav,new RegExp(name))
- assert.match(app,/inspectionTabs=\\['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile'\\]/)
+ assert.ok(app.includes("inspectionTabs=['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile']"))
 })
 test('stock divergence has actionable filters and distinguishes missing and excess',()=>{
  assert.match(inventory,/setOnlyDifferences\(old=>!old\)/)
