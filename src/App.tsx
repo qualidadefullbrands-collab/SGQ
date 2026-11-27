@@ -4,19 +4,18 @@ import { apiGet, apiPost, apiPut, apiUrl, supabase, authClient } from './lib/sup
 import {useEquipmentList,equipmentFit} from './equipamentos/equipmentData'
 import {saveOfflineDraft,readOfflineDraft,clearOfflineDraft,enqueueOfflineOperation,offlineOperations,connectionFailure,retryOfflinePhotoOperation,type OfflineOperation} from './lib/offline'
 import {replayOfflineOperations,offlineInspectionVersion} from './lib/offlineSync'
-import InventoryPanel from './stock/InventoryPanel'
-import BlindInventoryUnified from './stock/BlindInventoryUnified'
-import BlindInventoryReconciliation from './stock/BlindInventoryReconciliation'
-import BlindInventoryStatus from './stock/BlindInventoryStatus'
-import StockWorkspaceNav from './stock/StockWorkspaceNav'
-import InspectionsKanban from './components/InspectionsKanban'
 import InspectionWorkQueue from './components/InspectionWorkQueue'
 import InspectionJourney from './components/InspectionJourney'
 import ReportReadinessPanel from './components/ReportReadinessPanel'
 import NewInspectionGuide from './components/NewInspectionGuide'
-import SgqDashboard from './components/SgqDashboard'
 import './SgqOperationsTheme.css'
-import './config/SettingsPage.css'
+const InventoryPanel=lazy(()=>import('./stock/InventoryPanel'))
+const BlindInventoryUnified=lazy(()=>import('./stock/BlindInventoryUnified'))
+const BlindInventoryReconciliation=lazy(()=>import('./stock/BlindInventoryReconciliation'))
+const BlindInventoryStatus=lazy(()=>import('./stock/BlindInventoryStatus'))
+const StockWorkspaceNav=lazy(()=>import('./stock/StockWorkspaceNav'))
+const InspectionsKanban=lazy(()=>import('./components/InspectionsKanban'))
+const SgqDashboard=lazy(()=>import('./components/SgqDashboard'))
 
 const AuditoriasPage=lazy(()=>import('./auditorias/AuditoriasPage'))
 const EquipmentPage=lazy(()=>import('./equipamentos/EquipmentPage'))
@@ -3748,6 +3747,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       )}
 
       {tab==='painel' && (
+        <Suspense fallback={<div className="workspace">Carregando painel…</div>}>
         <SgqDashboard
           inspections={inspections}
           processCount={processes.length}
@@ -3783,6 +3783,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             onDeleteInspection={id=>{const i=inspections.find(x=>x.id===id);if(i)void deleteInspection(i)}}
           />
         </SgqDashboard>
+        </Suspense>
       )}
 
       {tab==='inspecoes' && <>
@@ -4732,22 +4733,24 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
             </div>
           </div>
 
-          <StockWorkspaceNav
-            active={stockMode}
-            onChange={next=>{setStockMode(next);if(next!=='posicoes')setSelectedSample(null)}}
-          />
+          <Suspense fallback={<div className="workspace">Carregando navegação de estoque…</div>}>
+            <StockWorkspaceNav
+              active={stockMode}
+              onChange={next=>{setStockMode(next);if(next!=='posicoes')setSelectedSample(null)}}
+            />
+          </Suspense>
           {['cego','status_cegos','conciliacao'].includes(stockMode) && (
             <p className="sgq-stock-boundary" role="note">
               <strong>Referência de quantidade:</strong> controles físicos do SGQ para a mesma localização.
               A consulta ao Omie confere apenas código e descrição do produto.
             </p>
           )}
-          {stockMode==='cego'&&<BlindInventoryUnified canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/>}
-          {stockMode==='conciliacao'&&<BlindInventoryReconciliation canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/>}
-          {stockMode==='status_cegos'&&<BlindInventoryStatus onOpenCount={()=>setStockMode('cego')} onOpenReconciliation={()=>setStockMode('conciliacao')}/>}
-          {stockMode==='inventario'&&<InventoryPanel samples={samples} canWrite={!!canWrite}
+          {stockMode==='cego'&&<Suspense fallback={<div className="workspace">Carregando…</div>}><BlindInventoryUnified canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/></Suspense>}
+          {stockMode==='conciliacao'&&<Suspense fallback={<div className="workspace">Carregando…</div>}><BlindInventoryReconciliation canWrite={!!canWrite} canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}/></Suspense>}
+          {stockMode==='status_cegos'&&<Suspense fallback={<div className="workspace">Carregando…</div>}><BlindInventoryStatus onOpenCount={()=>setStockMode('cego')} onOpenReconciliation={()=>setStockMode('conciliacao')}/></Suspense>}
+          {stockMode==='inventario'&&<Suspense fallback={<div className="workspace">Carregando inventário…</div>}><InventoryPanel samples={samples} canWrite={!!canWrite}
             canApprove={!!profile&&['administrador','gestor'].includes(profile.perfil)}
-            onRefreshStock={loadStock}/>}
+            onRefreshStock={loadStock}/></Suspense>}
           {stockMode==='posicoes'&&<>
           {stockSkuConflicts.length>0&&<section className="sgq-stock-sku-conflicts" aria-label="Conferência de identificação de produtos">
             <div className="sgq-sku-conflict-heading">
