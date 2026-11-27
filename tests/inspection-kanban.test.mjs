@@ -3,83 +3,55 @@ import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8')
 const app=read('src/App.tsx')
-const board=read('src/components/InspectionsKanban.tsx')
-const css=read('src/components/InspectionsKanban.css')
+const queue=read('src/components/InspectionWorkQueue.tsx')
+const css=read('src/components/InspectionWorkQueue.css')
+const legacy=read('src/components/InspectionsKanban.tsx')
 
-test('inspection board has explicit status lanes and no drag-dependent workflow',()=>{
- for(const [status,label] of [['aberta','Não iniciadas'],['em_andamento','Em andamento'],['concluida','Concluídas']]){
-  assert.ok(board.includes("status:'"+status+"'"))
-  assert.ok(board.includes("label:'"+label+"'"))
- }
- assert.match(board,/columnsToShow=useMemo/)
- assert.match(board,/items:visible\.filter\(i=>i\.status===c\.status\)/)
- assert.match(board,/i\.status!=='cancelada'/)
- assert.doesNotMatch(board,/label:'Canceladas'/)
- assert.match(board,/column\.items\.slice\(/)
- assert.match(board,/shownByLane/)
- assert.match(board,/Ver mais/)
- assert.doesNotMatch(board,/onDragStart|onDragOver|onDrop|draggable=/)
+test('main inspection screen uses the Central de Inspeções instead of the old Kanban',()=>{
+ const start=app.indexOf("{tab==='quadro'")
+ const end=app.indexOf("{tab==='nova'",start)
+ assert.ok(start>=0&&end>start)
+ const route=app.slice(start,end)
+ assert.ok(route.includes('<InspectionWorkQueue'))
+ assert.ok(!route.includes('<InspectionsKanban'))
 })
-
-test('Kanban cards separate FST, entry, customer, SKUs and inspection actions',()=>{
- assert.match(board,/sgq-kanban-fst/)
- assert.match(board,/sgq-kanban-entry/)
- assert.match(board,/sgq-kanban-card-products/)
- assert.match(board,/linkedItemsByGroup/)
- assert.match(board,/sgq-kit-type/)
- assert.match(board,/Revisar/)
- assert.match(board,/Conjunto · \{products\.length\} SKUs/)
- assert.match(board,/Abrir inspeção/)
- assert.match(board,/Continuar inspeção/)
- assert.match(board,/Iniciar inspeção/)
- assert.match(board,/Voltar para não iniciada/)
- assert.doesNotMatch(board,/\{item\.numero\}<\/span>/)
+test('work queue defaults to actionable inspections and provides explicit status filters',()=>{
+ assert.ok(queue.includes("useState<Filter>('ativas')"))
+ for(const id of ["id:'ativas'","id:'aberta'","id:'em_andamento'","id:'concluida'","id:'todas'"])assert.ok(queue.includes(id))
+ assert.ok(queue.includes('aria-pressed={filter===option.id}'))
 })
-
-test('process hierarchy remains a separate view with direct entry actions',()=>{
- assert.match(board,/useState<'processos'\|'kanban'>\(initialView\)/)
- assert.match(board,/view==='processos'\?'Processos':'Inspeções'/)
- assert.match(board,/processTree=useMemo\(/)
- assert.match(board,/processes\.map\(process=>/)
- assert.match(board,/grupos_inspecao\?\.processo_id===process\.id/)
- assert.match(board,/sgq-process-node/)
- assert.match(board,/sgq-process-children/)
- assert.match(board,/Entrada \{sub\.letter/)
- assert.match(board,/onOpen\(item\.id\)/)
- assert.match(board,/onReuseProcess\(process\.id\)/)
+test('kit membership is explicit and multiple SKUs are never inferred to be a kit',()=>{
+ assert.ok(queue.includes("String(group?.tipo||'')==='kit_componentes'"))
+ assert.ok(queue.includes('const needsReview=products.length>1&&!isKit'))
+ assert.ok(queue.includes('Kit · '))
+ assert.ok(queue.includes('Relação de SKUs a confirmar'))
 })
-
-test('search is local to the inspection workspace and includes SKU and customer',()=>{
- assert.match(board,/className="sgq-kanban-search"/)
- assert.match(board,/Buscar FST, cliente, SKU ou NF/)
- assert.match(board,/setQuery\(e\.target\.value\)/)
- assert.match(board,/\.\.\.products\.flatMap\(x=>\[x\.sku,x\.descricao\]\)/)
- assert.match(board,/process\?\.cliente/)
- assert.doesNotMatch(app,/id="sgq-global-search"/)
+test('each queue row retains FST, entry, customer, invoice, arrival and component SKU context',()=>{
+ for(const value of ['row.processCode','row.client','row.invoice','row.arrival','row.group?.subprocesso_codigo','row.products.map','Entrada {entry}','SKU independente'])
+  assert.ok(queue.includes(value),value+' missing')
 })
-
-test('Kanban preserves create, open, edit and deletion permissions',()=>{
- for(const callback of ['onOpen','onCreate','onReuseProcess','onEditProcess','onDeleteProcess','onDeleteInspection'])
-  assert.ok(board.includes(callback),callback+' missing')
- assert.match(board,/onDeleteInspection\(inspection\.id\)/)
- assert.match(board,/onDeleteProcess\(process\.id\)/)
- assert.match(board,/canDelete&&/)
- assert.match(board,/disabled=\{deletingProcessId!==null\}/)
+test('queue offers direct inspection actions and keeps completed result visible',()=>{
+ for(const value of ['Preparar inspeção','Continuar inspeção','Ver resultado','onOpen(row.item.id)','row.item.resultado'])
+  assert.ok(queue.includes(value),value+' missing')
 })
-
-test('inspection status changes use explicit accessible buttons instead of drag and drop',()=>{
- assert.match(board,/canMoveCard/)
- assert.match(board,/onMove\?\.\(id,target\)/)
- assert.match(board,/type="button" disabled=\{!!movingInspectionId\}/)
- assert.match(board,/aria-label=\{'Amostragem '/)
- assert.match(board,/role="progressbar"/)
+test('queue supports local search and avoids drag-and-drop interactions',()=>{
+ assert.ok(queue.includes('Buscar FST, cliente, SKU ou NF'))
+ assert.ok(queue.includes('setQuery(event.target.value)'))
+ assert.ok(!queue.includes('onDragStart='))
+ assert.ok(!queue.includes('onDrop='))
+ assert.ok(!queue.includes('draggable='))
 })
-
-test('Kanban and process hierarchy are responsive with reduced-motion support',()=>{
- assert.match(css,/grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/)
- assert.match(css,/@media\(max-width:1180px\)/)
- assert.match(css,/@media\(max-width:760px\)/)
- assert.match(css,/prefers-reduced-motion/)
- assert.match(css,/\.sgq-kanban-card:hover/)
- assert.match(css,/\.sgq-kanban-search/)
+test('queue preserves create, edit and delete permissions',()=>{
+ for(const value of ['onCreate','onReuseProcess','onEditProcess','onDeleteProcess','onDeleteInspection','canDelete&&'])
+  assert.ok(queue.includes(value),value+' missing')
+})
+test('queue is responsive on desktop, tablet and mobile',()=>{
+ assert.ok(css.includes('@media(max-width:1120px)'))
+ assert.ok(css.includes('@media(max-width:640px)'))
+ assert.ok(css.includes('.sgq-work-row{grid-template-columns:minmax(0,1fr)}'))
+})
+test('legacy process grouping is linear rather than filtering all inspections for each process',()=>{
+ assert.ok(legacy.includes('const inspectionsByProcess=useMemo'))
+ assert.ok(legacy.includes('const own=inspectionsByProcess.get(process.id)||[]'))
+ assert.ok(!legacy.includes("const own=inspections.filter(item=>item.status!=='cancelada'&&item.grupos_inspecao?.processo_id===process.id)"))
 })
