@@ -16,13 +16,19 @@ test('one authenticated SGQ shell, without environment selection screen',()=>{
   assert.match(app,/sgq-operational-shell/)
 })
 
-test('Inspeções Armazém is directly below Estoque in main side navigation',()=>{
-  const stock=app.indexOf("> Estoque</button>")
-  const warehouse=app.indexOf("> Inspeções Armazém</button>")
-  const quality=app.indexOf('QUALIDADE</div>',stock)
-  assert.ok(stock>0&&warehouse>stock&&quality>warehouse,'warehouse nav must be below stock and above quality grouping')
-  assert.match(app,/tab==='auditorias' && \(/)
-  assert.match(app,/<AuditoriasPage userId=\{userId\|\|''\} profileName=\{profile\.nome\} canDelete=\{!!canDelete\} canManageTemplates=\{!!canManageIts\}\/>/)
+test('main navigation and routes are restricted to inspection workflows',()=>{
+  const start=app.indexOf('<aside className="sgq-side-nav')
+  const end=app.indexOf('</aside>',start)
+  assert.ok(start>=0&&end>start,'inspection navigation must exist')
+  const nav=app.slice(start,end)
+  assert.match(nav,/Quadro de inspeções/)
+  assert.match(nav,/Processos/)
+  assert.match(nav,/Inspeções Armazém/)
+  for(const label of ['Estoque','Instruções técnicas','Equipamentos','Configurações','Painel','Insights'])
+    assert.doesNotMatch(nav,new RegExp(label))
+  assert.match(app,/inspectionTabs=\['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile'\]/)
+  assert.match(app,/tab==='auditorias' && \\(/)
+  assert.match(app,/<AuditoriasPage userId=\{userId\|\|''\} profileName=\{profile\.nome\} canDelete=\{!!canDelete\} canManageTemplates=\{!!canManageIts\}\\/>/)
 })
 
 test('Contlog work continues through same secured API and original storage buckets',()=>{
