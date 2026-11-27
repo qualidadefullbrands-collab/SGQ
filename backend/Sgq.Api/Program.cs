@@ -3444,9 +3444,9 @@ app.MapPost("/api/inspecoes/{id}/laudo", async (string id,HttpRequest request,IH
         var collectionName=request.Query["nomeConjunto"].ToString().Trim();
         if(collectionName.Length>100)
             return Results.Json(Error("O nome do conjunto deve ter até 100 caracteres."),statusCode:400);
-        // Compatibilidade com frontends em cache: o download padrão de qualquer
-        // entrada associada ao FST deve usar o Word consolidado A+B.
-        // Saída isolada é uma opção EXPLÍCITA para futuras inspeções independentes.
+        // Compatibilidade com frontends em cache: o modo padrão permanece consolidado.
+        // O frontend novo envia individual=1 para entradas novas; as entradas antigas
+        // sinalizadas em grupos_inspecao.relatorio_consolidado continuam no Word A+B/C.
         var inspectionRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
             $"select=grupo_inspecao_id,grupos_inspecao(processo_id)&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
         var (inspection,found)=FirstRow(inspectionRows);
