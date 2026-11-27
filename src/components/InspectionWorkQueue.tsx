@@ -9,7 +9,7 @@ type Inspection={
 }
 type ItemLink={grupo_inspecao_id:string;grupos_inspecao?:{tipo?:string}|null;processo_itens?:{id?:string;codigo_cliente?:string|null;quantidade?:number|null;produtos?:{sku?:string|null;nome?:string|null}|null}|null}
 type Props={
-  inspections:Inspection[];processes:Process[];canDelete:boolean;deletingProcessId:string|null
+  inspections:Inspection[];processes:Process[];canDelete:boolean;canWrite:boolean;deletingProcessId:string|null
   externalQuery?:string;itemLinksLoading?:boolean;focusProcessId?:string|null
   onOpen:(id:string)=>void;onCreate:()=>void;onReuseProcess:(id:string)=>void;onEditProcess:(id:string)=>void
   onDeleteProcess:(id:string)=>void;onDeleteInspection:(id:string)=>void
@@ -27,23 +27,23 @@ function arrivalDate(value:string|null|undefined){
   const raw=String(value).slice(0,10),[year,month,day]=raw.split('-')
   return year&&month&&day?day+'/'+month+'/'+year:raw
 }
-function InspectionActions({inspection,process,canDelete,deletingProcessId,onReuseProcess,onEditProcess,onDeleteProcess,onDeleteInspection}:{
-  inspection:Inspection;process:Process|undefined;canDelete:boolean;deletingProcessId:string|null
+function InspectionActions({inspection,process,canDelete,canWrite,deletingProcessId,onReuseProcess,onEditProcess,onDeleteProcess,onDeleteInspection}:{
+  inspection:Inspection;process:Process|undefined;canDelete:boolean;canWrite:boolean;deletingProcessId:string|null
   onReuseProcess:(id:string)=>void;onEditProcess:(id:string)=>void;onDeleteProcess:(id:string)=>void;onDeleteInspection:(id:string)=>void
 }){
-  if(!process&&!canDelete)return null
+  if((!process||!canWrite)&&!canDelete)return null
   return <details className="sgq-work-actions-menu">
     <summary aria-label="Mais ações da inspeção" title="Mais ações"><MoreHorizontal size={17}/></summary>
     <div>
-      {process&&<button type="button" onClick={()=>onReuseProcess(process.id)}><Copy size={14}/> Nova entrada</button>}
-      {process&&<button type="button" onClick={()=>onEditProcess(process.id)}><Edit3 size={14}/> Editar processo</button>}
+      {process&&canWrite&&<button type="button" onClick={()=>onReuseProcess(process.id)}><Copy size={14}/> Nova entrada</button>}
+      {process&&canWrite&&<button type="button" onClick={()=>onEditProcess(process.id)}><Edit3 size={14}/> Editar processo</button>}
       {canDelete&&<button type="button" className="danger-item" onClick={()=>onDeleteInspection(inspection.id)}><Trash2 size={14}/> Excluir inspeção</button>}
       {canDelete&&process&&<button type="button" className="danger-item" disabled={deletingProcessId!==null} onClick={()=>onDeleteProcess(process.id)}><Trash2 size={14}/> Excluir processo</button>}
     </div>
   </details>
 }
 export default function InspectionWorkQueue({
-  inspections,processes,canDelete,deletingProcessId,externalQuery,itemLinksLoading=false,focusProcessId=null,
+  inspections,processes,canDelete,canWrite,deletingProcessId,externalQuery,itemLinksLoading=false,focusProcessId=null,
   onOpen,onCreate,onReuseProcess,onEditProcess,onDeleteProcess,onDeleteInspection,formatFst,itemLinks=[]
 }:Props){
   const [query,setQuery]=useState('')
@@ -104,7 +104,7 @@ export default function InspectionWorkQueue({
     <header className="sgq-center-header">
       <div><span className="sgq-center-eyebrow"><ClipboardCheck size={15}/> QUALIDADE · OPERAÇÃO</span>
         <h1>Central de inspeções</h1><p>Veja o que precisa começar, continuar ou ter o resultado consultado.</p></div>
-      <button type="button" className="sgq-center-create" onClick={onCreate}><Plus size={17}/> Nova inspeção</button>
+      {canWrite&&<button type="button" className="sgq-center-create" onClick={onCreate}><Plus size={17}/> Nova inspeção</button>}
     </header>
     <div className="sgq-center-toolbar">
       <label className="sgq-center-search"><Search size={17}/>
@@ -123,7 +123,7 @@ export default function InspectionWorkQueue({
     <section className="sgq-center-list" aria-label="Fila de trabalho das inspeções">
       {filteredRows.map(row=>{
         const status=row.item.status,result=row.item.resultado==='aprovado'?'Aprovada':row.item.resultado==='reprovado'?'Reprovada':null
-        const action=status==='aberta'?'Preparar inspeção':status==='em_andamento'?'Continuar inspeção':'Ver resultado'
+        const action=!canWrite?(status==='concluida'?'Ver resultado':'Consultar inspeção'):status==='aberta'?'Preparar inspeção':status==='em_andamento'?'Continuar inspeção':'Ver resultado'
         const entry=row.group?.subprocesso_codigo||'—'
         const classification=row.isKit?'Kit · '+row.products.length+' componentes':row.needsReview?'Relação de SKUs a confirmar':row.products.length===1?'SKU independente':'Produto'
         return <article className="sgq-work-row" key={row.item.id}>
@@ -154,14 +154,14 @@ export default function InspectionWorkQueue({
             <button type="button" className="sgq-work-open" onClick={()=>onOpen(row.item.id)}>
               {status==='concluida'?<FileText size={15}/>:status==='em_andamento'?<CheckCircle2 size={15}/>:<ClipboardCheck size={15}/>}{action}
             </button>
-            <InspectionActions inspection={row.item} process={row.process} canDelete={canDelete} deletingProcessId={deletingProcessId}
+            <InspectionActions inspection={row.item} process={row.process} canDelete={canDelete} canWrite={canWrite} deletingProcessId={deletingProcessId}
               onReuseProcess={onReuseProcess} onEditProcess={onEditProcess} onDeleteProcess={onDeleteProcess} onDeleteInspection={onDeleteInspection}/>
           </div>
         </article>
       })}
       {!filteredRows.length&&<div className="sgq-center-empty">{search?'Nenhuma inspeção corresponde à busca.':'Não há inspeções nesta situação.'}</div>}
     </section>
-    {processesWithoutEntry.length>0&&filter!=='concluida'&&filter!=='em_andamento'&&<section className="sgq-center-unassigned">
+    {canWrite&&processesWithoutEntry.length>0&&filter!=='concluida'&&filter!=='em_andamento'&&<section className="sgq-center-unassigned">
       <header><div><h2>Processos sem entrada</h2><p>Registros que ainda precisam ser transformados em uma inspeção.</p></div><span>{processesWithoutEntry.length}</span></header>
       <div className="sgq-center-unassigned-list">{processesWithoutEntry.map(process=><article key={process.id}>
         <div><strong>{formatFst(process.codigo)}</strong><span>{process.cliente||'Cliente não informado'}</span></div>
