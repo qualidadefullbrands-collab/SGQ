@@ -48,6 +48,8 @@ export default function InspectionWorkQueue({
 }:Props){
   const [query,setQuery]=useState('')
   const [filter,setFilter]=useState<Filter>('ativas')
+  const [visibleLimit,setVisibleLimit]=useState(50)
+  const [processLimit,setProcessLimit]=useState(8)
   const search=normalize(query||externalQuery||'')
   const processById=useMemo(()=>new Map(processes.map(process=>[process.id,process])),[processes])
   const productsByGroup=useMemo(()=>{
@@ -99,6 +101,8 @@ export default function InspectionWorkQueue({
   const processesWithoutEntry=useMemo(()=>processes.filter(process=>!activeProcessIds.has(process.id)&&
     (!search||normalize([process.codigo,formatFst(process.codigo),process.cliente,process.nota_fiscal].join(' ')).includes(search)))
     .sort((a,b)=>Number(b.id===focusProcessId)-Number(a.id===focusProcessId)),[processes,activeProcessIds,search,focusProcessId,formatFst])
+  const visibleRows=filteredRows.slice(0,visibleLimit)
+  const visibleProcesses=processesWithoutEntry.slice(0,processLimit)
   const countLabel=filter==='ativas'?counts.ativas:filter==='todas'?counts.todas:counts[filter]
   return <section className="sgq-inspection-center" aria-label="Central de inspeções">
     <header className="sgq-center-header">
@@ -108,7 +112,7 @@ export default function InspectionWorkQueue({
     </header>
     <div className="sgq-center-toolbar">
       <label className="sgq-center-search"><Search size={17}/>
-        <input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar FST, cliente, SKU ou NF" aria-label="Buscar inspeções por FST, cliente, SKU ou nota fiscal"/>
+        <input value={query} onChange={event=>{setQuery(event.target.value);setVisibleLimit(50);setProcessLimit(8)}} placeholder="Buscar FST, cliente, SKU ou NF" aria-label="Buscar inspeções por FST, cliente, SKU ou nota fiscal"/>
         {query&&<button type="button" onClick={()=>setQuery('')} aria-label="Limpar busca">×</button>}
       </label>
       <div className="sgq-center-total"><strong>{countLabel}</strong><span>{countLabel===1?'inspeção':'inspeções'} nesta visualização</span></div>
@@ -117,11 +121,11 @@ export default function InspectionWorkQueue({
       {filterOptions.map(option=>{
         const count=option.id==='ativas'?counts.ativas:option.id==='todas'?counts.todas:counts[option.id]
         return <button key={option.id} type="button" className={filter===option.id?'is-active':''}
-          aria-pressed={filter===option.id} onClick={()=>setFilter(option.id)}><span>{option.label}</span><b>{count}</b></button>
+          aria-pressed={filter===option.id} onClick={()=>{setFilter(option.id);setVisibleLimit(50)}}><span>{option.label}</span><b>{count}</b></button>
       })}
     </nav>
     <section className="sgq-center-list" aria-label="Fila de trabalho das inspeções">
-      {filteredRows.map(row=>{
+      {visibleRows.map(row=>{
         const status=row.item.status,result=row.item.resultado==='aprovado'?'Aprovada':row.item.resultado==='reprovado'?'Reprovada':null
         const action=!canWrite?(status==='concluida'?'Ver resultado':'Consultar inspeção'):status==='aberta'?'Preparar inspeção':status==='em_andamento'?'Continuar inspeção':'Ver resultado'
         const entry=row.group?.subprocesso_codigo||'—'
@@ -159,11 +163,12 @@ export default function InspectionWorkQueue({
           </div>
         </article>
       })}
+      {filteredRows.length>visibleRows.length&&<button type="button" className="sgq-center-more" onClick={()=>setVisibleLimit(value=>value+50)}>Mostrar mais {Math.min(50,filteredRows.length-visibleRows.length)} inspeções</button>}
       {!filteredRows.length&&<div className="sgq-center-empty">{search?'Nenhuma inspeção corresponde à busca.':'Não há inspeções nesta situação.'}</div>}
     </section>
     {canWrite&&processesWithoutEntry.length>0&&filter!=='concluida'&&filter!=='em_andamento'&&<section className="sgq-center-unassigned">
       <header><div><h2>Processos sem entrada</h2><p>Registros que ainda precisam ser transformados em uma inspeção.</p></div><span>{processesWithoutEntry.length}</span></header>
-      <div className="sgq-center-unassigned-list">{processesWithoutEntry.map(process=><article key={process.id}>
+      <div className="sgq-center-unassigned-list">{visibleProcesses.map(process=><article key={process.id}>
         <div><strong>{formatFst(process.codigo)}</strong><span>{process.cliente||'Cliente não informado'}</span></div>
         <button type="button" onClick={()=>onReuseProcess(process.id)}><Plus size={15}/> Criar entrada</button>
       </article>)}</div>
