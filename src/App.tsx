@@ -3660,7 +3660,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       <aside className="sgq-side-nav sgq-inspection-nav" aria-label="Navegação de inspeções">
         <div className="sgq-side-brand"><span className="sgq-brand-symbol"><ClipboardCheck size={29}/></span><div><b>SGQ</b><small>Inspeções</small></div></div>
         <div className="sgq-side-caption">INSPEÇÕES</div>
-        <button type="button" className={tab==='quadro'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='quadro'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Quadro de inspeções</button>
+        <button type="button" className={tab==='quadro'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='quadro'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>setTab('quadro')} ><CheckCircle2 size={19}/> Central de inspeções</button>
         <button type="button" className={tab==='inspecoes'?'selected':''} aria-current={tab==='inspecoes'?'page':undefined} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
         <button type="button" className={tab==='auditorias'?'selected':''} aria-current={tab==='auditorias'?'page':undefined} onClick={()=>{setTab('auditorias');setError('')}}><Warehouse size={19}/> Inspeções Armazém</button>
         <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button type="button" onClick={()=>void supabase.auth.signOut()}><LogOut size={14}/> Sair</button></div>
@@ -3671,7 +3671,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           <span>SGQ</span>
           <ChevronRight size={15} className="sgq-topbar-chevron" aria-hidden="true"/>
           <strong>{({
-            painel:'Painel',insights:'Insights',inspecoes:'Processos',quadro:'Inspeções',nova:'Nova inspeção',
+            painel:'Painel',insights:'Insights',inspecoes:'Processos',quadro:'Central de inspeções',nova:'Nova inspeção',
             execucao:'Execução da inspeção',estoque:'Estoque',auditorias:'Inspeções Armazém',
             its:'Instruções técnicas',equipamentos:'Equipamentos',configuracoes:'Configurações','fotos-mobile':'Fotos da inspeção',
           } as Record<typeof tab,string>)[tab]}</strong>
