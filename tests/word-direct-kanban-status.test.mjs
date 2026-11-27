@@ -60,7 +60,7 @@ test('inspection status workflow is explicit and does not depend on drag-and-dro
  assert.match(queue,/action=status==='aberta'\\?'Preparar inspeção'/)
  assert.match(queue,/action=status==='em_andamento'\\?'Continuar inspeção'/)
  assert.match(queue,/onOpen\\(row\\.item\\.id\\)/)
- assert.match(api,/app\\.MapPost\\(\\"\\/api\\/inspecoes\\/\\{id\\}\\/iniciar\\"/)
+ assert.ok(api.includes('app.MapPost("/api/inspecoes/{id}/iniciar"'))
  assert.doesNotMatch(queue,/onDragStart=|onDrop=|draggable=/)
 })
 test('dashboard has same Kanban at its bottom and only three operational lanes',()=>{
