@@ -1,5 +1,6 @@
 import {useMemo,useState} from 'react'
 import {AlertTriangle,CheckCircle2,ChevronRight,ClipboardCheck,Copy,Edit3,MoreHorizontal,Package,Play,Plus,Search,Trash2} from 'lucide-react'
+import {indexActiveInspections,workspaceQuery,canTransitionInspection} from '../lib/inspection-board.mjs'
 import './InspectionsKanban.css'
 
 type Process={
@@ -104,12 +105,13 @@ export default function InspectionsKanban({
   mode='page',initialView='processos',externalQuery,focusProcessId=null,onViewAll,onOpen,onCreate,onReuseProcess,onEditProcess,
   onDeleteProcess,onDeleteInspection,formatFst,itemLinks=[],itemLinksLoading=false
 }:Props){
-  const [query,setQuery]=useState(externalQuery||'')
+  const [query,setQuery]=useState('')
   const [view,setView]=useState<'processos'|'kanban'>(initialView)
   const [expandedProcessId,setExpandedProcessId]=useState<string|null>(null)
   const [shownByLane,setShownByLane]=useState<Record<string,number>>({})
   const pageSize=mode==='panel'?8:24
-  const search=normalized(query||externalQuery||'')
+  const effectiveQuery=workspaceQuery(mode,query,externalQuery)
+  const search=normalized(effectiveQuery)
   const processById=useMemo(()=>new Map(processes.map(p=>[p.id,p])),[processes])
   const linkedItemsByGroup=useMemo(()=>{
     const items=new Map<string,Array<{sku:string;descricao:string;quantidade:number|null}>>()
@@ -150,8 +152,9 @@ export default function InspectionsKanban({
     .concat(visible.some(i=>!columns.some(c=>c.status===i.status))?[{
       status:'other',label:'Outras',tone:'other',items:visible.filter(i=>!columns.some(c=>c.status===i.status))
     } as any]:[]),[visible])
+  const inspectionsByProcess=useMemo(()=>indexActiveInspections(inspections),[inspections])
   const processTree=useMemo(()=>processes.map(process=>{
-    const own=inspections.filter(item=>item.status!=='cancelada'&&item.grupos_inspecao?.processo_id===process.id)
+    const own=inspectionsByProcess.get(process.id)||[]
     const groups=new Map<string,{key:string;letter:string;invoice:string|null;arrival:string|null;name:string;items:Inspection[]}>()
     for(const item of own){
       const group=item.grupos_inspecao
@@ -163,9 +166,9 @@ export default function InspectionsKanban({
     }
     const subprocesses=[...groups.values()].sort((a,b)=>a.letter.localeCompare(b.letter,'pt-BR')||a.name.localeCompare(b.name,'pt-BR'))
     const searchable=normalized([
-      process.codigo,formatFst(process.codigo),process.cliente,
+      process.codigo,formatFst(process.codigo),process.cliente,process.nota_fiscal,process.chegada_cd,
       ...subprocesses.flatMap(sub=>[
-        sub.letter,sub.letter?formatFst(process.codigo)+'-'+sub.letter:'',sub.invoice,sub.name,
+        sub.letter,sub.letter?formatFst(process.codigo)+'-'+sub.letter:'',sub.invoice,sub.arrival,sub.name,
         ...sub.items.map(item=>item.numero),
         ...(linkedItemsByGroup.get(sub.key)||[]).flatMap(x=>[x.sku,x.descricao])
       ])
@@ -175,13 +178,12 @@ export default function InspectionsKanban({
       anyStarted:own.some(item=>item.status==='em_andamento')}
   }).filter(entry=>!search||entry.searchable.includes(search))
     .sort((a,b)=>Number(b.process.id===focusProcessId)-Number(a.process.id===focusProcessId)),
-  [inspections,processes,search,focusProcessId,linkedItemsByGroup])
+  [inspectionsByProcess,processes,search,focusProcessId,linkedItemsByGroup,formatFst])
   const activeProcessIds=useMemo(()=>new Set(inspections.map(i=>i.grupos_inspecao?.processo_id).filter(Boolean)),[inspections])
   const emptyProcesses=processes.filter(p=>!activeProcessIds.has(p.id)&&
     (!search||normalized([p.codigo,p.cliente,p.nota_fiscal].join(' ')).includes(search)))
   const totalMatches=visible.length+emptyProcesses.length
-  const canMoveCard=(item:Inspection)=>Boolean(canMove&&onMove&&!movingInspectionId&&
-    (item.status==='aberta'||item.status==='em_andamento'))
+  const canMoveCard=(item:Inspection)=>canTransitionInspection(item.status,Boolean(canMove&&onMove),Boolean(movingInspectionId))
   const moveCard=(id:string,target:'aberta'|'em_andamento')=>{
     const item=inspections.find(i=>i.id===id)
     if(!item||!canMoveCard(item)||item.status===target)return
@@ -346,6 +348,6 @@ export default function InspectionsKanban({
         </article>)}
       </div>
     </section>}
-    {mode==='page'&&view==='kanban'&&!totalMatches&&search&&<div className="sgq-kanban-no-results">Nenhum resultado para “{query||externalQuery}”.</div>}
+    {mode==='page'&&view==='kanban'&&!totalMatches&&search&&<div className="sgq-kanban-no-results">Nenhum resultado para “{effectiveQuery}”.</div>}
   </section>
 }

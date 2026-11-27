@@ -12,10 +12,9 @@ test('contagem física persiste após falha Omie e foto pode ser reenviada sem d
   await page.getByRole('textbox', { name: 'E-mail' }).fill(email)
   await page.getByLabel('Senha', { exact: true }).fill(password)
   await page.getByRole('button', { name: 'Entrar' }).click()
-  await expect(page.locator('[data-sgq-screen="painel"]')).toBeVisible()
-
-  await page.getByRole('complementary', { name: 'Navegação principal do SGQ' })
-    .getByRole('button', { name: 'Estoque' }).click()
+  await expect(page.locator('[data-sgq-screen="quadro"]')).toBeVisible()
+  await page.goto('/e2e/fixtures/legacy-harness.html?module=estoque')
+  await expect(page.locator('[data-qa-module="estoque"]')).toBeVisible()
   await page.getByRole('navigation', { name: 'Áreas de estoque e inventário' })
     .getByRole('button', { name: /Contagem FST/ }).click()
 

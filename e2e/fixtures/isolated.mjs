@@ -38,8 +38,11 @@ const fixtureData = {
   bootstrap: {
     data: {
       profile: { id: QA_USER_ID, nome: 'Operador Sintético QA', perfil: 'gestor' },
-      processes: [],
-      inspections: [],
+      processes: [{id:'qa-p1',codigo:'FST99991',cliente:'Cliente QA',chegada_cd:'2026-11-20'}],
+      inspections: [
+        {id:'qa-i1',numero:'QA-I1',status:'aberta',resultado:null,tamanho_amostra:10,total_inspecionado:0,criado_em:'2026-11-20',grupos_inspecao:{id:'qa-g1',processo_id:'qa-p1',nome:'Produto A',tipo:'individual',subprocesso_codigo:'A',nota_fiscal:'111',chegada_cd:'2026-11-20',processos:{codigo:'FST99991',cliente:'Cliente QA'}}},
+        {id:'qa-i2',numero:'QA-I2',status:'concluida',resultado:'aprovado',tamanho_amostra:10,total_inspecionado:10,criado_em:'2026-11-21',grupos_inspecao:{id:'qa-g2',processo_id:'qa-p1',nome:'Kit B',tipo:'kit_componentes',subprocesso_codigo:'B',nota_fiscal:'222',chegada_cd:'2026-11-21',processos:{codigo:'FST99991',cliente:'Cliente QA'}}},
+      ],
       itemLinks: [],
     }, error: null,
   },
@@ -95,6 +98,11 @@ export const test = base.extend({
       }
       if (path === '/api/app/bootstrap') return reply(route, 200, fixtureData.bootstrap)
       if (path === '/api/app/catalogos') return reply(route, 200, fixtureData.catalogs)
+      if (path === '/api/app/inspection-items') return reply(route,200,{data:{itemLinks:[
+        {grupo_inspecao_id:'qa-g1',grupos_inspecao:{tipo:'individual'},processo_itens:{produtos:{sku:'QA-INDEP',nome:'Produto individual'}}},
+        {grupo_inspecao_id:'qa-g2',grupos_inspecao:{tipo:'kit_componentes'},processo_itens:{produtos:{sku:'QA-KIT-A',nome:'Componente A'}}},
+        {grupo_inspecao_id:'qa-g2',grupos_inspecao:{tipo:'kit_componentes'},processo_itens:{produtos:{sku:'QA-KIT-B',nome:'Componente B'}}},
+      ]},error:null})
       if (path === '/api/app/estoque') return reply(route, 200, fixtureData.stock)
       if (/^\/api\/equipamentos/.test(path)) return reply(route, 200, { data: [], error: null })
       // Nenhuma consulta é delegada à API real; simula conjunto vazio.

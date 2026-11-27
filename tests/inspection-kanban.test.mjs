@@ -41,7 +41,7 @@ test('process hierarchy remains a separate view with direct entry actions',()=>{
  assert.match(board,/view==='processos'\?'Processos':'Inspeções'/)
  assert.match(board,/processTree=useMemo\(/)
  assert.match(board,/processes\.map\(process=>/)
- assert.match(board,/grupos_inspecao\?\.processo_id===process\.id/)
+ assert.match(board,/inspectionsByProcess\.get\(process\.id\)/)
  assert.match(board,/sgq-process-node/)
  assert.match(board,/sgq-process-children/)
  assert.match(board,/Entrada \{sub\.letter/)

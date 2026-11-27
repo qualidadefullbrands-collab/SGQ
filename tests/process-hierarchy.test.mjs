@@ -12,7 +12,7 @@ test('process view shows parent FST, entry letter, customer and CD arrival separ
  assert.match(board,/initialView='processos'/)
  assert.match(board,/processTree=useMemo\(/)
  assert.match(board,/processes\.map\(process=>/)
- assert.match(board,/grupos_inspecao\?\.processo_id===process\.id/)
+ assert.match(board,/inspectionsByProcess\.get\(process\.id\)/)
  assert.match(board,/sgq-process-node/)
  assert.match(board,/sgq-process-children/)
  assert.match(board,/processLabel/)
