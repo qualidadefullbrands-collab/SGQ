@@ -21,7 +21,7 @@ test('main navigation and routes are restricted to inspection workflows',()=>{
   const end=app.indexOf('</aside>',start)
   assert.ok(start>=0&&end>start,'inspection navigation must exist')
   const nav=app.slice(start,end)
-  assert.match(nav,/Quadro de inspeções/)
+  assert.match(nav,/Central de inspeções/)
   assert.match(nav,/Processos/)
   assert.match(nav,/Inspeções Armazém/)
   for(const label of ['Estoque','Instruções técnicas','Equipamentos','Configurações','Painel','Insights'])
