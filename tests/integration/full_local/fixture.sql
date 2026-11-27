@@ -192,6 +192,58 @@ create policy qa_inspection_update on public.inspecoes for update to authenticat
   using (owner_id=(select auth.uid()))
   with check (owner_id=(select auth.uid()));
 
+-- Local-only schema extensions to exercise the actual inspection-create API.
+-- All inserts remain owner scoped. No production migrations are changed.
+alter table public.processos alter column id set default gen_random_uuid(),
+ alter column owner_id set default auth.uid(),
+ add column nota_fiscal text, add column origem text, add column transporte text,
+ add column chegada_cd date, add column status text, add column data_processo date,
+ add column criado_por uuid, add column atualizado_em timestamptz;
+alter table public.processos add unique(codigo);
+alter table public.grupos_inspecao alter column id set default gen_random_uuid(),
+ alter column owner_id set default auth.uid(),
+ add column tipo text default 'individual', add column tamanho_lote_estatistico numeric,
+ add column status text;
+alter table public.grupos_inspecao add unique(processo_id,subprocesso_codigo);
+alter table public.produtos alter column id set default gen_random_uuid(),
+ alter column owner_id set default auth.uid();
+alter table public.produtos add unique(sku);
+alter table public.processo_itens alter column id set default gen_random_uuid(),
+ alter column owner_id set default auth.uid(),
+ add column processo_id uuid references public.processos(id),
+ add column codigo_cliente text, add column quantidade_pv numeric,
+ add column pv_numero text, add column pv_fst text, add column lote text,
+ add column material text, add column capacidade text, add column distribuicao_caixas jsonb;
+alter table public.grupo_inspecao_itens alter column id set default gen_random_uuid(),
+ alter column owner_id set default auth.uid(), add column quantidade_componente numeric, add column papel text;
+alter table public.inspecoes alter column id set default gen_random_uuid(),
+ alter column owner_id set default auth.uid(), add column processo_item_id uuid references public.processo_itens(id),
+ add column limite_aceitacao numeric, add column nivel_inspecao_origem text,
+ add column regime_inspecao text, add column tipo_plano text,
+ add column nqa_critico numeric, add column nqa_grave numeric, add column nqa_toleravel numeric,
+ add column iniciada_em timestamptz, add column observacao_interna text,
+ add column parametros_amostragem jsonb;
+create table public.grupo_inspecao_its(
+ id uuid primary key default gen_random_uuid(), owner_id uuid not null default auth.uid(),
+ grupo_inspecao_id uuid references public.grupos_inspecao(id),
+ it_versao_id uuid references public.it_versoes(id), principal boolean
+);
+alter table public.grupo_inspecao_its enable row level security;
+grant select on public.grupo_inspecao_its to authenticated;
+create policy qa_select_owner on public.grupo_inspecao_its for select to authenticated using(owner_id=(select auth.uid()));
+do $$
+declare tbl text;
+begin
+ foreach tbl in array array['processos','grupos_inspecao','produtos','processo_itens','grupo_inspecao_itens','grupo_inspecao_its','inspecoes'] loop
+  execute format('grant insert on public.%I to authenticated',tbl);
+  execute format('create policy qa_create_owner on public.%I for insert to authenticated with check(owner_id=(select auth.uid()))',tbl);
+ end loop;
+ foreach tbl in array array['processos','produtos'] loop
+  execute format('grant update on public.%I to authenticated',tbl);
+  execute format('create policy qa_update_owner on public.%I for update to authenticated using(owner_id=(select auth.uid())) with check(owner_id=(select auth.uid()))',tbl);
+ end loop;
+end $$;
+
 insert into public.profiles(id,owner_id,nome,perfil,ativo) values
  ('__OWNER_UUID__','__OWNER_UUID__','Inspetor QA Sintético','gestor',true);
 

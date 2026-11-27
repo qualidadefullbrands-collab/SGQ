@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {indexActiveInspections,workspaceQuery,canTransitionInspection} from '../src/lib/inspection-board.mjs'
+import {indexActiveInspections,workspaceQuery,canTransitionInspection,workQueue,workQueueCounts} from '../src/lib/inspection-board.mjs'
 
 test('process index keeps separate inspections in a shared FST, excludes cancelled or unlinked entries, and never mutates inputs',()=>{
   const items=Object.freeze([
@@ -42,4 +42,19 @@ test('status transition guard rejects terminal and unknown statuses, unauthorize
     assert.equal(canTransitionInspection(status,true,true),false)
   }
   for(const status of ['concluida','cancelada','unknown']) assert.equal(canTransitionInspection(status,true,false),false)
+})
+
+test('work queue prioritizes ongoing work and oldest arrivals, with independent completed history',()=>{
+ const items=[
+  {id:'new',status:'aberta',criado_em:'2026-11-20'},
+  {id:'old',status:'aberta',criado_em:'2026-11-10'},
+  {id:'active',status:'em_andamento',criado_em:'2026-11-25'},
+  {id:'done-old',status:'concluida',criado_em:'2026-11-11'},
+  {id:'done-new',status:'concluida',criado_em:'2026-11-22'},
+  {id:'cancelled',status:'cancelada',criado_em:'2026-11-27'}
+ ]
+ assert.deepEqual(workQueue(items,'pendentes').map(x=>x.id),['active','old','new'])
+ assert.deepEqual(workQueue(items,'concluida').map(x=>x.id),['done-new','done-old'])
+ assert.deepEqual(workQueueCounts(items),{aberta:2,em_andamento:1,concluida:2,pendentes:3,todas:5})
+ assert.equal(items[0].id,'new')
 })

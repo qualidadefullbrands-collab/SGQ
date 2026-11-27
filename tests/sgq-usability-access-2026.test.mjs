@@ -53,7 +53,7 @@ test('legacy dashboard is not exposed while the product scope is inspections onl
  const end=app.indexOf('</aside>',start)
  const nav=app.slice(start,end)
  assert.doesNotMatch(nav,/Painel|Estoque|Insights/)
- assert.match(app,/inspectionTabs=\['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile'\]/)
+ assert.match(app,/inspectionTabs=\['quadro','inspecoes','nova','execucao','equipamentos','fotos-mobile'\]/)
 })
 test('AI assistants receive additional context without treating it as verified evidence',()=>{
  assert.match(app,/contextoAdicional:aiConclusionExtraContext\.trim\(\)/)

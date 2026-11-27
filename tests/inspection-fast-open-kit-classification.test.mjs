@@ -7,7 +7,7 @@ const api=read('backend/Sgq.Api/Program.cs')
 const board=read('src/components/InspectionsKanban.tsx')
 
 test('opening an inspection fetches only its summary and defers stage data',()=>{
- assert.match(app,/apiGet<any>\('\/api\/inspecoes\/\'\+id\+'\/resumo'\)/)
+ assert.match(app,/apiGet<any>\('\/api\/inspecoes\/\'\+id\+'\/resumo'\+\(groupHint/)
  assert.match(api,/MapGet\("\/api\/inspecoes\/\{id\}\/resumo"/)
  assert.match(api,/MapGet\("\/api\/inspecoes\/\{id\}\/etapa\/\{stage\}"/)
  assert.match(app,/async function loadInspectionStage\(stage:typeof activeStage\)/)
@@ -53,10 +53,11 @@ test('kit versus independent SKUs requires an explicit decision and remembers ex
  assert.match(board,/Revisar SKUs/)
 })
 
-test('inspection-only shell has no links to stock, IT administration or equipment administration',()=>{
+test('inspection-only shell restores equipment and hides warehouse audit navigation',()=>{
  const start=app.indexOf('<aside className="sgq-side-nav')
  const end=app.indexOf('</aside>',start)
  const nav=app.slice(start,end)
- for(const label of ['Estoque','Instruções técnicas','Equipamentos','Configurações','Painel','Insights'])assert.doesNotMatch(nav,new RegExp(label))
- assert.match(app,/inspectionTabs=\['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile'\]/)
+ assert.match(nav,/Equipamentos/)
+ for(const label of ['Estoque','Instruções técnicas','Inspeções Armazém','Configurações','Painel','Insights'])assert.doesNotMatch(nav,new RegExp(label))
+ assert.match(app,/inspectionTabs=\['quadro','inspecoes','nova','execucao','equipamentos','fotos-mobile'\]/)
 })

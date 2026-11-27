@@ -416,4 +416,79 @@ class FullLocalIntegration(unittest.TestCase):
         self.assertFalse(result.content.startswith(b"PK"))
         print("SGQ_FULL_LOCAL_ASSERT_PASS: real GoTrue, PostgREST RLS, Storage, ASP.NET, Word, and fail-safe evidence")
 
+    def test_13_independent_batch_creates_separate_inspections_and_one_caderno(self):
+        body={"codigo":"FST-QA-BATCH","cliente":"Cliente QA", "notaFiscal":"QA-777",
+              "origem":"Brasil","transporte":"Rodoviario","chegadaCd":"2026-11-20",
+              "dataInspecao":"2026-11-21","itVersionId":"66666666-6666-4666-8666-666666666666",
+              "inspectionLevel":"II","requestId":str(uuid.uuid4()),"criarIndependentes":True,
+              "ehConjunto":False,"iniciar":True,"itens":[
+                  {"sku":"QA-BATCH-A","nome":"Produto independente A","quantidade":40,"quantidadePorCaixa":40,"caixasRecebidas":1,"caixasInspecionadas":1},
+                  {"sku":"QA-BATCH-B","nome":"Produto independente B","quantidade":300,"quantidadePorCaixa":100,"caixasRecebidas":3,"caixasInspecionadas":1}
+              ]}
+        endpoint=self.api+"/api/inspecoes/criar"
+        headers=self.headers(self.owner_token)
+        first=self.http.post(endpoint,headers=headers,json=body)
+        self.assertEqual(first.status_code,200,fail_text(first))
+        data=first.json()["data"]
+        self.assertEqual(data["quantidade"],2)
+        rows=data["inspecoes"]
+        self.assertNotEqual(rows[0]["id"],rows[1]["id"])
+        self.assertEqual(rows[0]["processo_id"],rows[1]["processo_id"])
+        self.assertEqual([x["status"] for x in rows],["em_andamento","aberta"])
+        self.assertEqual([x["plano"]["lote"] for x in rows],[40,300])
+        retry=self.http.post(endpoint,headers=headers,json=body)
+        self.assertEqual(retry.status_code,200,fail_text(retry))
+        self.assertEqual([x["id"] for x in retry.json()["data"]["inspecoes"]],[x["id"] for x in rows])
+        changed={**body,"notaFiscal":"QA-ALTERADA"}
+        conflict=self.http.post(endpoint,headers=headers,json=changed)
+        self.assertEqual(conflict.status_code,409,fail_text(conflict))
+        for index,row in enumerate(rows):
+            group=row["grupo_inspecao_id"]
+            query=self.http.get(self.sb+"/rest/v1/grupos_inspecao",headers=headers,
+                params={"id":"eq."+group,"select":"tipo,subprocesso_codigo,grupo_inspecao_itens(processo_itens(produtos(sku)))"})
+            self.assertEqual(query.status_code,200,fail_text(query))
+            stored=query.json()[0]
+            self.assertEqual(stored["tipo"],"individual")
+            self.assertEqual(stored["subprocesso_codigo"],["A","B"][index])
+            self.assertEqual([x["processo_itens"]["produtos"]["sku"] for x in stored["grupo_inspecao_itens"]],[body["itens"][index]["sku"]])
+            # Mark synthetic outcomes and attach distinct real Storage evidence.
+            # Production completion logic is not bypassed; this is a disposable local fixture.
+            ident=str(uuid.UUID(row["id"]))
+            result=["aprovado","reprovado"][index]
+            self.run_sql("update public.inspecoes set status='concluida',resultado='"+result+
+                         "',total_inspecionado=tamanho_amostra,total_nao_conforme="+str(index)+
+                         ",dimensionais_finalizados=true,testes_finalizados=true where id='"+ident+"';")
+            path=f"{self.owner}/{ident}/batch-{index}.png"
+            upload=self.http.post(self.sb+"/storage/v1/object/inspecao-fotos/"+path,headers={
+                **headers,"Content-Type":"image/png","x-upsert":"false"},content=self.image)
+            self.assertIn(upload.status_code,(200,201),fail_text(upload))
+            photo=self.http.post(self.sb+"/rest/v1/inspecao_fotos",headers=headers,
+                json={"inspecao_id":ident,"storage_path":path,"legenda":f"EVIDENCIA BATCH {index}"})
+            self.assertIn(photo.status_code,(200,201),fail_text(photo))
+        doc,words=self.parse_docx(self.http.post(self.api+"/api/processos/"+rows[0]["processo_id"]+"/laudo",headers=headers))
+        for expected in ("QA-BATCH-A","QA-BATCH-B","EVIDENCIA BATCH 0","EVIDENCIA BATCH 1","APROVADO","REPROVADO"):
+            self.assertIn(expected,words)
+        self.assertGreaterEqual(len(doc.inline_shapes),2)
+
+    def test_14_confirmed_kit_creates_one_inspection_and_two_component_links(self):
+        body={"codigo":"FST-QA-KIT","cliente":"Cliente QA","notaFiscal":"QA-888",
+              "origem":"Brasil","transporte":"Rodoviario","chegadaCd":"2026-11-20",
+              "dataInspecao":"2026-11-21","itVersionId":"66666666-6666-4666-8666-666666666666",
+              "inspectionLevel":"II","requestId":str(uuid.uuid4()),"ehConjunto":True,"iniciar":False,
+              "itens":[{"sku":"QA-KIT-BASE","nome":"Base","quantidade":100,"unidadesPorConjunto":1,"caixasRecebidas":1,"caixasInspecionadas":1},
+                       {"sku":"QA-KIT-PECA","nome":"Peça","quantidade":200,"unidadesPorConjunto":2,"caixasRecebidas":2,"caixasInspecionadas":1}]}
+        headers=self.headers(self.owner_token)
+        bad=self.http.post(self.api+"/api/inspecoes/criar",headers=headers,json={**body,"ehConjunto":False})
+        self.assertEqual(bad.status_code,400,fail_text(bad))
+        result=self.http.post(self.api+"/api/inspecoes/criar",headers=headers,json=body)
+        self.assertEqual(result.status_code,200,fail_text(result))
+        row=result.json()["data"]
+        self.assertEqual(row["plano"]["lote"],100)
+        query=self.http.get(self.sb+"/rest/v1/grupos_inspecao",headers=headers,
+            params={"id":"eq."+row["grupo_inspecao_id"],"select":"tipo,grupo_inspecao_itens(unidades_por_conjunto,processo_itens(produtos(sku)))"})
+        self.assertEqual(query.status_code,200,fail_text(query))
+        stored=query.json()[0]
+        self.assertEqual(stored["tipo"],"kit_componentes")
+        self.assertEqual({x["processo_itens"]["produtos"]["sku"]:x["unidades_por_conjunto"] for x in stored["grupo_inspecao_itens"]},{"QA-KIT-BASE":1,"QA-KIT-PECA":2})
+
 if __name__=="__main__":unittest.main()
