@@ -1667,7 +1667,9 @@ async Task<IResult> CreateInspectionSingle(CreateInspectionRequest input,HttpReq
                     quantidade_skus=items.Count,
                     request_id=requestId,
                     batch_id=input.BatchId,
-                    batch_fingerprint=input.BatchFingerprint
+                    batch_fingerprint=input.BatchFingerprint,
+                    batch_sku_set=input.BatchSkuSet,
+                    batch_sku_count=input.BatchSkuCount
                 }
             }, "return=representation");
 
@@ -1711,6 +1713,8 @@ async Task<IResult> CreateIndependentInspectionBatch(CreateInspectionRequest inp
         var groups=input.Itens.GroupBy(x=>x.Sku.Trim().ToUpperInvariant()).ToArray();
         if(groups.Length<2 || groups.Length>26)
             return Results.Json(Error("O cadastro em lote exige de 2 a 26 SKUs distintos."),statusCode:400);
+        if(string.IsNullOrWhiteSpace(input.ProcessoId)&&!Regex.IsMatch(input.Codigo.Trim(),@"^(FST)?[0-9]+$",RegexOptions.IgnoreCase))
+            return Results.Json(Error("Informe um FST numérico válido antes de criar as entradas independentes."),statusCode:400);
         if(!Guid.TryParse(input.ItVersionId,out _) ||
            groups.Any(g=>input.ItPorSku?.TryGetValue(g.Key,out var version)==true && !Guid.TryParse(version,out _)))
             return Results.Json(Error("Confirme a IT aplicável a cada SKU antes de salvar."),statusCode:400);
@@ -1723,7 +1727,13 @@ async Task<IResult> CreateIndependentInspectionBatch(CreateInspectionRequest inp
         var lockSlot=batchLocks[Math.Abs(batchGuid.GetHashCode()%batchLocks.Length)];
         await lockSlot.WaitAsync(request.HttpContext.RequestAborted);
         gate=lockSlot;
+        var skuSet=string.Join("|",groups.Select(g=>g.Key).OrderBy(x=>x,StringComparer.Ordinal));
         var fingerprint=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(input))));
+        var versionIds=new[]{input.ItVersionId}.Concat(groups.Select(g=>input.ItPorSku?.TryGetValue(g.Key,out var it)==true?it:input.ItVersionId))
+            .Select(x=>Guid.Parse(x).ToString()).Distinct().ToArray();
+        var versionRows=await RestAsync(client,token,HttpMethod.Get,"it_versoes",$"select=id&id=in.({string.Join(",",versionIds)})");
+        if(versionRows is not {ValueKind:JsonValueKind.Array} || versionRows.Value.GetArrayLength()!=versionIds.Length)
+            return Results.Json(Error("Uma das ITs selecionadas não está disponível."),statusCode:400);
         var saved=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
             $"select=id,grupo_inspecao_id,parametros_amostragem&parametros_amostragem->>batch_id=eq.{batchId}&excluido_em=is.null");
         var savedRows=saved is {ValueKind:JsonValueKind.Array}?saved.Value.EnumerateArray().ToArray():Array.Empty<JsonElement>();
@@ -1732,11 +1742,13 @@ async Task<IResult> CreateIndependentInspectionBatch(CreateInspectionRequest inp
             return Results.Json(Error("Este cadastro já foi iniciado. Retome os mesmos dados para evitar duplicação; retifique as entradas salvas separadamente."),statusCode:409);
         var byId=!string.IsNullOrWhiteSpace(input.ProcessoId);
         var parentRows=await RestAsync(client,token,HttpMethod.Get,"processos",
-            $"select=id,excluido_em&{(byId?"id":"codigo")}=eq.{Uri.EscapeDataString(byId?input.ProcessoId!:input.Codigo.Trim())}&limit=1");
+            $"select=id,codigo,excluido_em&{(byId?"id":"codigo")}=eq.{Uri.EscapeDataString(byId?input.ProcessoId!:input.Codigo.Trim())}&limit=1");
         var (parent,found)=FirstRow(parentRows);
         if(byId&&!found)return Results.Json(Error("FST principal não localizado."),statusCode:404);
         if(found){
-            if(parent!.Value.TryGetProperty("excluido_em",out var deleted)&&deleted.ValueKind!=JsonValueKind.Null)
+            if(!Regex.IsMatch(parent!.Value.GetProperty("codigo").GetString()??"",@"^(FST)?[0-9]+$",RegexOptions.IgnoreCase))
+                return Results.Json(Error("O FST existente não possui código numérico válido para o laudo."),statusCode:409);
+            if(parent.Value.TryGetProperty("excluido_em",out var deleted)&&deleted.ValueKind!=JsonValueKind.Null)
                 return Results.Json(Error("Processo arquivado não pode receber entradas."),statusCode:409);
             var existing=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
                 $"select=id,subprocesso_codigo&processo_id=eq.{Uri.EscapeDataString(parent.Value.GetProperty("id").GetString()!)}");
@@ -1756,7 +1768,7 @@ async Task<IResult> CreateIndependentInspectionBatch(CreateInspectionRequest inp
                 Codigo=input.Codigo,ProcessoId=input.ProcessoId,SubprocessoCodigo=null,
                 EhConjunto=false,Iniciar=input.Iniciar&&index==0,
                 RequestId=new Guid(key[..16]).ToString(),
-                BatchId=batchId,BatchFingerprint=fingerprint,
+                BatchId=batchId,BatchFingerprint=fingerprint,BatchSkuSet=skuSet,BatchSkuCount=groups.Length,
                 Cliente=input.Cliente,NotaFiscal=input.NotaFiscal,Origem=input.Origem,Transporte=input.Transporte,
                 ChegadaCd=input.ChegadaCd,DataInspecao=input.DataInspecao,
                 ItVersionId=input.ItPorSku?.TryGetValue(group.Key,out var it)==true?it:input.ItVersionId,
@@ -2333,9 +2345,12 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
             $"select=*&inspecao_id=eq.{Uri.EscapeDataString(id)}&checklist_id=eq.{Uri.EscapeDataString(checkId)}&limit=1"):null;
         var userId=actingUser;
 
-        var checkRows=await RestAsync(client,token,HttpMethod.Get,"it_checklist",
-            $"select=classificacao_sugerida,grupo&id=eq.{Uri.EscapeDataString(checkId)}&limit=1");
-        var (check,checkFound)=FirstRow(checkRows);
+        var checkTask=RestAsync(client,token,HttpMethod.Get,"it_checklist",
+            $"select=classificacao_sugerida,grupo,it_versao_id&id=eq.{Uri.EscapeDataString(checkId)}&limit=1");
+        var inspectionTask=RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,limite_rejeicao,it_versao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+        await Task.WhenAll(checkTask,inspectionTask);
+        var (check,checkFound)=FirstRow(checkTask.Result);
         if(!checkFound) return Results.Json(Error("Verificação não encontrada."),statusCode:404);
 
         var automaticSeverity=check!.Value.TryGetProperty("classificacao_sugerida",out var cs) && cs.ValueKind==JsonValueKind.String
@@ -2343,10 +2358,11 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
         var group=check.Value.TryGetProperty("grupo",out var gp)&&gp.ValueKind==JsonValueKind.String?gp.GetString()??"": "";
         var dimensionalSummary=string.Equals(group.Trim(),"Dimensional",StringComparison.OrdinalIgnoreCase);
 
-        var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=tamanho_amostra,total_inspecionado,total_nao_conforme,nivel_inspecao,limite_rejeicao&id=eq.{Uri.EscapeDataString(id)}&limit=1");
-        var (inspection,inspectionFound)=FirstRow(insRows);
+        var (inspection,inspectionFound)=FirstRow(inspectionTask.Result);
         if(!inspectionFound) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
+        var itVersionId=inspection!.Value.TryGetProperty("it_versao_id",out var iv)&&iv.ValueKind==JsonValueKind.String?iv.GetString():null;
+        if(string.IsNullOrWhiteSpace(itVersionId)||!check.Value.TryGetProperty("it_versao_id",out var cv)||cv.GetString()!=itVersionId)
+            return Results.Json(Error("A verificação não pertence à IT desta inspeção."),statusCode:409);
         var sample=inspection!.Value.TryGetProperty("tamanho_amostra",out var sm)&&sm.ValueKind==JsonValueKind.Number?sm.GetInt32():0;
         var currentUniqueNc=inspection.Value.TryGetProperty("total_nao_conforme",out var unc)&&unc.ValueKind==JsonValueKind.Number?unc.GetInt32():0;
         var priorInspected=inspection.Value.TryGetProperty("total_inspecionado",out var insCount)&&insCount.ValueKind==JsonValueKind.Number?insCount.GetInt32():0;
@@ -2378,20 +2394,13 @@ app.MapPut("/api/inspecoes/{id}/checklist/{checkId}", async (string id,string ch
 
         // A cobertura da amostra é controlada pelas verificações não dimensionais.
         // Dimensionais têm escopo próprio e fixo de 10 medições por parâmetro.
-        JsonElement? activeChecks=null;
-        // O it_versao_id é obtido separadamente para manter a consulta explícita e simples.
-        var versionRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=it_versao_id&id=eq.{Uri.EscapeDataString(id)}&limit=1");
-        var (versionInspection,vFound)=FirstRow(versionRows);
-        var itVersionId=vFound?versionInspection!.Value.GetProperty("it_versao_id").GetString():null;
-        if(!string.IsNullOrWhiteSpace(itVersionId))
-        {
-            activeChecks=await RestAsync(client,token,HttpMethod.Get,"it_checklist",
-                $"select=id,grupo&it_versao_id=eq.{Uri.EscapeDataString(itVersionId!)}&ativo=eq.true");
-        }
-
-        var allResults=await RestAsync(client,token,HttpMethod.Get,"inspecao_checklist_resultados",
+        var activeChecksTask=RestAsync(client,token,HttpMethod.Get,"it_checklist",
+            $"select=id,grupo&it_versao_id=eq.{Uri.EscapeDataString(itVersionId!)}&ativo=eq.true");
+        var allResultsTask=RestAsync(client,token,HttpMethod.Get,"inspecao_checklist_resultados",
             $"select=checklist_id,resultado,quantidade_avaliada,quantidade_nc&inspecao_id=eq.{Uri.EscapeDataString(id)}");
+        await Task.WhenAll(activeChecksTask,allResultsTask);
+        var activeChecks=activeChecksTask.Result;
+        var allResults=allResultsTask.Result;
         var resultById=new Dictionary<string,JsonElement>(StringComparer.OrdinalIgnoreCase);
         if(allResults is {ValueKind:JsonValueKind.Array})
             foreach(var row in allResults.Value.EnumerateArray())
@@ -4858,6 +4867,8 @@ public class CreateInspectionRequest
     public Dictionary<string,string>? NivelPorSku { get; set; }
     internal string? BatchId { get; set; }
     internal string? BatchFingerprint { get; set; }
+    internal string? BatchSkuSet { get; set; }
+    internal int? BatchSkuCount { get; set; }
     public bool Iniciar { get; set; } = true;
     public string? RequestId { get; set; }
     public string Codigo { get; set; } = "";

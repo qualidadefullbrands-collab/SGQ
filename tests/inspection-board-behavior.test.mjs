@@ -58,3 +58,8 @@ test('work queue prioritizes ongoing work and oldest arrivals, with independent 
  assert.deepEqual(workQueueCounts(items),{aberta:2,em_andamento:1,concluida:2,pendentes:3,todas:5})
  assert.equal(items[0].id,'new')
 })
+
+test('partial or conflicting historical evidence never changes the queue priority',()=>{
+ const items=[{id:'partial',status:'em_andamento',criado_em:'2026-11-01'},{id:'complete',status:'concluida',criado_em:'2026-11-02'}]
+ assert.deepEqual(workQueue(items,'pendentes').map(x=>x.id),['partial'])
+})

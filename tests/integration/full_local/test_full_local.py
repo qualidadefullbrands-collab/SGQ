@@ -417,7 +417,7 @@ class FullLocalIntegration(unittest.TestCase):
         print("SGQ_FULL_LOCAL_ASSERT_PASS: real GoTrue, PostgREST RLS, Storage, ASP.NET, Word, and fail-safe evidence")
 
     def test_13_independent_batch_creates_separate_inspections_and_one_caderno(self):
-        body={"codigo":"FST-QA-BATCH","cliente":"Cliente QA", "notaFiscal":"QA-777",
+        body={"codigo":"FST99997","cliente":"Cliente QA", "notaFiscal":"QA-777",
               "origem":"Brasil","transporte":"Rodoviario","chegadaCd":"2026-11-20",
               "dataInspecao":"2026-11-21","itVersionId":"66666666-6666-4666-8666-666666666666",
               "inspectionLevel":"II","requestId":str(uuid.uuid4()),"criarIndependentes":True,
@@ -427,6 +427,8 @@ class FullLocalIntegration(unittest.TestCase):
               ]}
         endpoint=self.api+"/api/inspecoes/criar"
         headers=self.headers(self.owner_token)
+        invalid=self.http.post(endpoint,headers=headers,json={**body,"codigo":"FST-QA-BATCH"})
+        self.assertEqual(invalid.status_code,400,fail_text(invalid))
         first=self.http.post(endpoint,headers=headers,json=body)
         self.assertEqual(first.status_code,200,fail_text(first))
         data=first.json()["data"]
@@ -466,12 +468,12 @@ class FullLocalIntegration(unittest.TestCase):
                 json={"inspecao_id":ident,"storage_path":path,"legenda":f"EVIDENCIA BATCH {index}"})
             self.assertIn(photo.status_code,(200,201),fail_text(photo))
         doc,words=self.parse_docx(self.http.post(self.api+"/api/processos/"+rows[0]["processo_id"]+"/laudo",headers=headers))
-        for expected in ("QA-BATCH-A","QA-BATCH-B","EVIDENCIA BATCH 0","EVIDENCIA BATCH 1","APROVADO","REPROVADO"):
+        for expected in ("FST99997-A","FST99997-B","QA-BATCH-A","QA-BATCH-B","EVIDENCIA BATCH 0","EVIDENCIA BATCH 1","APROVADO","REPROVADO"):
             self.assertIn(expected,words)
         self.assertGreaterEqual(len(doc.inline_shapes),2)
 
     def test_14_confirmed_kit_creates_one_inspection_and_two_component_links(self):
-        body={"codigo":"FST-QA-KIT","cliente":"Cliente QA","notaFiscal":"QA-888",
+        body={"codigo":"FST99996","cliente":"Cliente QA","notaFiscal":"QA-888",
               "origem":"Brasil","transporte":"Rodoviario","chegadaCd":"2026-11-20",
               "dataInspecao":"2026-11-21","itVersionId":"66666666-6666-4666-8666-666666666666",
               "inspectionLevel":"II","requestId":str(uuid.uuid4()),"ehConjunto":True,"iniciar":False,

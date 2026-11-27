@@ -201,7 +201,7 @@ export default function InspectionsKanban({
     <header className="sgq-kanban-toolbar">
       <div className="sgq-kanban-title">
         {mode==='panel'?<h2>Inspeções</h2>:<><h1>{view==='processos'?'Processos':'Central de inspeções'}</h1><p>{view==='processos'?'Entradas e dados de cada FST.':'Retome as inspeções em andamento ou escolha o próximo trabalho da fila.'}</p></>}
-        <span className="sgq-kanban-total">{mode==='panel'?inspections.filter(i=>i.status!=='cancelada').length:processes.length}</span>
+        <span className="sgq-kanban-total">{mode==='panel'?inspections.filter(i=>i.status!=='cancelada').length:view==='processos'?processTree.length:workCounts[workFilter]}</span>
       </div>
       {mode==='panel'?<button type="button" className="secondary small" onClick={onViewAll}>Ver todas</button>:
       <div className="sgq-kanban-tools">
@@ -331,7 +331,7 @@ export default function InspectionsKanban({
                   </button>}
                 <button className="sgq-kanban-open" type="button" onClick={()=>onOpen(item.id)}>
                   {active?<Play size={14}/>:done?<CheckCircle2 size={15}/>:<ChevronRight size={16}/>}
-                  {active?'Continuar inspeção':done?'Ver inspeção':'Abrir inspeção'}
+                  {active?(mode==='page'&&target>0&&inspected<target?'Continuar amostragem':'Continuar inspeção'):done?'Ver inspeção':'Abrir inspeção'}
                 </button>
               </div>
             </article>

@@ -73,7 +73,7 @@ type InspectionRow = {
   codigo_amostragem: string | null
   criado_em: string
   concluida_em?: string | null
-  parametros_amostragem?: {lote_sequencial?:string|null;ordem_produto?:number;total_produtos?:number;produto_codigo?:string}|null
+  parametros_amostragem?: {lote_sequencial?:string|null;ordem_produto?:number;total_produtos?:number;produto_codigo?:string;batch_id?:string|null;batch_sku_set?:string|null;batch_sku_count?:number|null}|null
   grupos_inspecao?: {
     id: string
     nome: string
@@ -968,6 +968,19 @@ export default function App() {
     }
     return [...groups.values()].filter(group=>group.type==='kit_componentes'&&[...group.skus].sort().join('|')===skuSetFingerprint).length
   },[processItemLinks,skuSetFingerprint])
+  const independentHistoryCount=useMemo(()=>{
+    if(!skuSetFingerprint||distinctSkuCount<2)return 0
+    const confirmed=new Map<string,Set<string>>()
+    for(const row of inspections){
+      const batch=row.parametros_amostragem
+      const groupId=row.grupos_inspecao?.id
+      if(row.status==='cancelada'||row.grupos_inspecao?.tipo!=='individual'||!groupId||!batch?.batch_id||
+        batch.batch_sku_set!==skuSetFingerprint||batch.batch_sku_count!==distinctSkuCount)continue
+      const ids=confirmed.get(batch.batch_id)||new Set<string>()
+      ids.add(groupId);confirmed.set(batch.batch_id,ids)
+    }
+    return [...confirmed.values()].filter(ids=>ids.size===distinctSkuCount).length
+  },[inspections,skuSetFingerprint,distinctSkuCount])
   const priorSkuSetFingerprint=useRef(skuSetFingerprint)
   useEffect(()=>{
     if(priorSkuSetFingerprint.current!==skuSetFingerprint){
@@ -2597,7 +2610,7 @@ export default function App() {
     if(distinctSkuCount>1&&isComponentSet===null){setPopupMessage('Defina se os SKUs formam um mesmo kit ou se são produtos independentes.');return}
     const independentBatch=distinctSkuCount>1&&isComponentSet===false
     if(independentBatch&&(editingInspectionId||editingProcessId)){setPopupMessage('Não é possível dividir uma inspeção existente automaticamente. Preserve o histórico e crie entradas novas.');return}
-    if(independentBatch&&(!parentFstCode(inspection.codigo)||!inspection.itVersionId||skuRows.filter(skuRowHasData).some(row=>!row.sku.trim()))){setPopupMessage('Confirme o FST, a IT e o código de todos os SKUs antes de criar as inspeções independentes.');return}
+    if(independentBatch&&(!/^\d+$/.test(parentFstCode(inspection.codigo))||!inspection.itVersionId||skuRows.filter(skuRowHasData).some(row=>!row.sku.trim()))){setPopupMessage('Confirme o FST, a IT e o código de todos os SKUs antes de criar as inspeções independentes.');return}
     if(independentBatch&&skuKeys.length>26){setPopupMessage('O FST admite até 26 entradas. Revise a quantidade de SKUs.');return}
     submitLock.current=true
     try {
@@ -4083,7 +4096,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <span><strong>São produtos independentes</strong><small>O SGQ cria as entradas automaticamente: uma inspeção por SKU e um único Word do FST, com anexos separados.</small></span>
                 </label>
               </div>
-              {kitHistoryCount>0&&isComponentSet===null&&<p className="field-hint sgq-kit-history-hint">Esta combinação exata já foi confirmada como conjunto em {kitHistoryCount} inspeção(ões) anterior(es). Confirme se continua sendo um kit.</p>}
+              {isComponentSet===null&&(kitHistoryCount>0||independentHistoryCount>0)&&<p className="field-hint sgq-kit-history-hint">{kitHistoryCount>0&&independentHistoryCount>0?'Há classificações anteriores diferentes para estes mesmos SKUs. Confirme a relação neste recebimento.':kitHistoryCount>0?'Sugestão: kit. Esta combinação exata já foi confirmada como conjunto em '+kitHistoryCount+' inspeção(ões).':'Sugestão: independentes. Esta combinação exata já foi registrada separadamente em '+independentHistoryCount+' cadastro(s).'} O SGQ não decide apenas pelo FST.</p>}
               {isComponentSet===null&&<p className="field-hint">Escolha uma classificação antes de salvar. O SGQ não presume que SKUs do mesmo PV formem um kit.</p>}
               {isComponentSet===false&&<div className="sgq-independent-review">
                 <strong>{distinctSkuCount} inspeções · um FST · um documento com anexos separados</strong>

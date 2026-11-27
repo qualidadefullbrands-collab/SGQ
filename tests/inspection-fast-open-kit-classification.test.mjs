@@ -46,6 +46,8 @@ test('kit versus independent SKUs requires an explicit decision and remembers ex
  assert.match(app,/distinctSkuCount>1&&isComponentSet===null/)
  assert.match(app,/distinctSkuCount>1&&isComponentSet===false/)
  assert.match(app,/kitHistoryCount/)
+ assert.match(app,/independentHistoryCount/)
+ assert.match(app,/batch\.batch_sku_set!==skuSetFingerprint/)
  assert.match(app,/group\.type==='kit_componentes'/)
  assert.match(app,/ehConjunto:isComponentSet===true/)
  assert.match(api,/distinctSkuCount>1&&!input\.EhConjunto/)
