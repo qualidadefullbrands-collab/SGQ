@@ -948,11 +948,15 @@ export default function App() {
   }, [skuRows])
 
   const [isComponentSet,setIsComponentSet] = useState<boolean|null>(null)
-  const distinctSkuCount=useMemo(()=>new Set(skuRows.filter(skuRowHasData).map(row=>row.sku.trim().toUpperCase()).filter(Boolean)).size,[skuRows])
+  const skuSetFingerprint=useMemo(()=>[...new Set(skuRows.filter(skuRowHasData).map(row=>row.sku.trim().toUpperCase()).filter(Boolean))].sort().join('|'),[skuRows])
+  const distinctSkuCount=skuSetFingerprint?skuSetFingerprint.split('|').length:0
+  const priorSkuSetFingerprint=useRef(skuSetFingerprint)
   useEffect(()=>{
-    if(distinctSkuCount<2)setIsComponentSet(false)
-    else if(isComponentSet===false)setIsComponentSet(null)
-  },[distinctSkuCount])
+    if(priorSkuSetFingerprint.current!==skuSetFingerprint){
+      setIsComponentSet(distinctSkuCount>1?null:false)
+      priorSkuSetFingerprint.current=skuSetFingerprint
+    }
+  },[skuSetFingerprint,distinctSkuCount])
   const previewPlan = useMemo(
     () => samplingPlan(statisticalLot, inspection.inspectionLevel),
     [statisticalLot, inspection.inspectionLevel],
