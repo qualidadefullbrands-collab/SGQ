@@ -11,7 +11,7 @@ const docs=source('server/app.py')
 
 test('central queue keeps each inspection entry distinct and shows component-level kit context',()=>{
  assert.match(queue,/sgq-work-code-line/)
- assert.match(queue,/Entrada \\{entry\\}/)
+ assert.ok(queue.includes('Entrada {entry}'))
  assert.match(queue,/productsByGroup/)
  assert.match(queue,/row\\.isKit/)
  assert.match(queue,/Kit · /)
