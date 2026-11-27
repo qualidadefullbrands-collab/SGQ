@@ -27,8 +27,8 @@ test('main navigation and routes are restricted to inspection workflows',()=>{
   for(const label of ['Estoque','Instruções técnicas','Equipamentos','Configurações','Painel','Insights'])
     assert.doesNotMatch(nav,new RegExp(label))
   assert.match(app,/inspectionTabs=\['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile'\]/)
-  assert.match(app,/tab==='auditorias' && \\(/)
-  assert.match(app,/<AuditoriasPage userId=\{userId\|\|''\} profileName=\{profile\.nome\} canDelete=\{!!canDelete\} canManageTemplates=\{!!canManageIts\}\\/>/)
+  assert.ok(app.includes("tab==='auditorias' && <AuditoriasPage"))
+  assert.ok(app.includes("<AuditoriasPage userId={userId||''} profileName={profile.nome} canDelete={!!canDelete} canManageTemplates={!!canManageIts}/>"))
 })
 
 test('Contlog work continues through same secured API and original storage buckets',()=>{
