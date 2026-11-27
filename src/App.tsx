@@ -1116,6 +1116,9 @@ export default function App() {
       setOmieInboxSeen(new Set())
       equipmentLoadedUser.current=null
       setDetailLoading(false)
+      setDetailStageLoading(null)
+      detailRequests.current.clear()
+      detailStageRequests.current.clear()
       setSamples([])
       setItVersions([])
       setGroups([])
@@ -2739,7 +2742,6 @@ export default function App() {
       setInspections(rows=>rows.map(i=>i.id===id?{...i,status:target}:i))
       setDetail((prev:any)=>prev?.id===id?{...prev,status:target}:prev)
       setMessage(target==='em_andamento'?'Inspeção iniciada.':'Inspeção movida para Não iniciadas.')
-      void refreshLists()
     }catch{
       setPopupMessage('Não foi possível alterar o status. Verifique a conexão.')
     }finally{
@@ -2755,15 +2757,16 @@ export default function App() {
     const started=await apiPost<any>(`/api/inspecoes/${selectedInspectionId}/iniciar`,{})
     if(started.error){setPopupMessage(started.error.message);return}
     setDetail((d:any)=>d?{...d,status:'em_andamento'}:d)
+    setInspections(rows=>rows.map(item=>item.id===selectedInspectionId?{...item,status:'em_andamento'}:item))
     setActiveStage(targetStage)
     setMessage('Inspeção iniciada.')
-    void refreshLists()
+    if(['verificacoes','dimensionais','testes','fotos','resultado','retencao'].includes(targetStage))await loadInspectionStage(targetStage)
   }
 
   function selectInspectionStage(stage:typeof activeStage) {
     if(detail?.status==='aberta'&&stage!=='dados'&&stage!=='fotos'){void startSavedInspection(stage);return}
     setActiveStage(stage)
-    if(stage==='fotos'&&selectedInspectionId)void loadPhotoLinks(selectedInspectionId)
+    if(['verificacoes','dimensionais','testes','fotos','resultado','retencao'].includes(stage))void loadInspectionStage(stage)
     const nav=document.getElementById('inspection-stage-nav')
     if(nav) window.scrollTo({top:Math.max(0,window.scrollY+nav.getBoundingClientRect().top-90),behavior:'smooth'})
   }
@@ -3572,9 +3575,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       onExit={()=>setTab('quadro')}/>
   </Suspense>
 
-  const checklistDone = detail ? (detail.checklist?.length ?? 0) === 0 || (detail.checklistResults?.length ?? 0) >= detail.checklist.length : false
-  const dimsDone = detail ? (detail.params?.length ?? 0) === 0 || detail.dimensionais_finalizados : false
-  const testsDone = detail ? (detail.tests?.length ?? 0) === 0 || !!detail.testes_finalizados : false
+  const loadedDetailStages=new Set<string>(detail?.loadedStages??[])
+  const checklistDone = detail ? loadedDetailStages.has('verificacoes') && ((detail.checklist?.length ?? 0) === 0 || (detail.checklistResults?.length ?? 0) >= detail.checklist.length) : false
+  const dimsDone = detail ? loadedDetailStages.has('dimensionais') && ((detail.params?.length ?? 0) === 0 || detail.dimensionais_finalizados) : false
+  const testsDone = detail ? loadedDetailStages.has('testes') && ((detail.tests?.length ?? 0) === 0 || !!detail.testes_finalizados) : false
   const samplingDone = detail ? (detail.total_inspecionado ?? 0) >= (detail.tamanho_amostra ?? 0) || (!!detail.limite_rejeicao && detail.total_nao_conforme >= detail.limite_rejeicao) : false
 
   return (
@@ -4171,6 +4175,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
 
           <section id="sec-verificacoes" className={'panel section-card inspection-stage'+(activeStage==='verificacoes' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
+            {detailStageLoading==='verificacoes'&&<div className="stage-data-loading">Carregando checklist…</div>}
             <div className="section-title"><div><h2>Verificações</h2></div></div>
             <div className="checklist compact-checklist">
               {(detail.checklist ?? []).map((item:any)=>{
@@ -4235,6 +4240,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
 
           <section id="sec-dimensionais" className={'panel section-card inspection-stage'+(activeStage==='dimensionais' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
+            {detailStageLoading==='dimensionais'&&<div className="stage-data-loading">Carregando parâmetros dimensionais…</div>}
             <div className="section-title">
               <div><h2>Análises dimensionais</h2><span className="section-note">10 medições por parâmetro. Sem desvio aprovado, o sistema calcula a média e aprova por critério interno.</span></div>
               {detail.dimensionais_finalizados && <span className="pill">Concluído</span>}
@@ -4370,6 +4376,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
 
           <section id="sec-testes" className={'panel section-card inspection-stage'+(activeStage==='testes' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
+            {detailStageLoading==='testes'&&<div className="stage-data-loading">Carregando testes especiais…</div>}
             <div className="section-title"><div><h2>Testes especiais</h2><span className="section-note">Selecione C, NC ou NA. O resultado é salvo automaticamente.</span></div>{detail.testes_finalizados && <span className="pill">Concluído</span>}</div>
             {(detail.tests ?? []).map((test:any)=>{
               const r=detail.testResults?.find((x:any)=>x.teste_id===test.id)
@@ -4392,6 +4399,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           </section>
 
           <section id="sec-fotos" className={'panel section-card inspection-stage'+(activeStage==='fotos'?'':' inspection-stage-hidden')}>
+            {detailStageLoading==='fotos'&&<div className="stage-data-loading">Carregando fotos…</div>}
             <div className="section-title">
               <div><h2>Fotos da inspeção</h2><span className="section-note">Fotografias e identificação visual do produto.</span></div>
               <div className="row-actions"><span className="pill">{detail.photos?.length ?? 0} enviada(s)</span>
@@ -4469,6 +4477,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
 
           {detail.status!=='aberta' && (detail.status!=='concluida'||allowDimensionalRectification) && (
             <section id="sec-resultado" className={'panel section-card result-panel inspection-stage'+(activeStage==='resultado' && detail.status!=='aberta'?'':' inspection-stage-hidden')}>
+              {detailStageLoading==='resultado'&&<div className="stage-data-loading">Carregando dados para conclusão…</div>}
               <h2>Resultado final</h2>
               <div className="readiness">
                 <span className={samplingDone?'done':''}>Amostragem</span>
@@ -4509,6 +4518,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
           )}
           {detail.status==='concluida' && (
             <section className={'panel section-card retention-panel inspection-stage'+(activeStage==='retencao'?'':' inspection-stage-hidden')}>
+              {detailStageLoading==='retencao'&&<div className="stage-data-loading">Carregando retenções…</div>}
               <div className="section-title">
                 <h2>Retenção de amostras (opcional)</h2>
                 <span className={'result-badge '+detail.resultado}>{statusLabel(detail.resultado)}</span>
