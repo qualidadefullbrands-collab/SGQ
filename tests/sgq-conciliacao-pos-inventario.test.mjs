@@ -9,7 +9,7 @@ const sql=read('supabase/migrations/20261113193000_sgq_conciliacao_pos_inventari
 
 test('post-inventory reconciliation is visible as a separate SGQ stock tab',()=>{
  assert.match(app,/const BlindInventoryReconciliation=lazy/
- assert.match(app,/stockMode==='conciliacao'&&<BlindInventoryReconciliation/)
+ assert.ok(app.includes("stockMode==='conciliacao'&&<Suspense")&&app.includes('<BlindInventoryReconciliation'))
  assert.match(navigation,/Conciliação SGQ/)
  assert.match(ui,/Conciliação pós-inventário/)
  assert.match(app,/canApprove=\{!!profile&&\['administrador','gestor'\]\.includes\(profile\.perfil\)\}/)
