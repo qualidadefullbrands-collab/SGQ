@@ -648,6 +648,8 @@ export default function App() {
   const [inspections, setInspections] = useState<InspectionRow[]>([])
   const [processItemLinks,setProcessItemLinks]=useState<Array<{grupo_inspecao_id:string;grupos_inspecao?:{tipo?:string}|null;processo_itens?:{id?:string;codigo_cliente?:string|null;quantidade?:number|null;produtos?:{sku?:string|null;nome?:string|null}|null}|null}>>([])
   const [itemLinksLoading,setItemLinksLoading]=useState(false)
+  const [kitHistoryLinks,setKitHistoryLinks]=useState<Array<{grupo_inspecao_id:string;grupos_inspecao?:{tipo?:string}|null;processo_itens?:{id?:string;codigo_cliente?:string|null;quantidade?:number|null;produtos?:{sku?:string|null;nome?:string|null}|null}|null}>>([])
+  const [kitHistoryLoading,setKitHistoryLoading]=useState(false)
   const [omieInbox,setOmieInbox]=useState<OmieInboxOrder[]>([])
   const [omieInboxSeen,setOmieInboxSeen]=useState<Set<string>>(new Set())
   const [omieInboxError,setOmieInboxError]=useState('')
@@ -888,6 +890,8 @@ export default function App() {
   const loadAppRequest = useRef<Promise<void> | null>(null)
   const catalogsRequest=useRef<Promise<void>|null>(null)
   const itemLinksRequest=useRef<Promise<void>|null>(null)
+  const kitHistoryRequest=useRef<Promise<void>|null>(null)
+  const kitHistoryLoadedUser=useRef<string|null>(null)
   const catalogsLoadedUser=useRef<string|null>(null)
   const itemLinksLoadedUser=useRef<string|null>(null)
   const equipmentLoadedUser=useRef<string|null>(null)
@@ -954,7 +958,7 @@ export default function App() {
   const kitHistoryCount=useMemo(()=>{
     if(!skuSetFingerprint)return 0
     const groups=new Map<string,{type:string;skus:Set<string>}>()
-    for(const link of processItemLinks){
+    for(const link of kitHistoryLinks){
       const groupId=link.grupo_inspecao_id
       const sku=String(link.processo_itens?.produtos?.sku||link.processo_itens?.codigo_cliente||'').trim().toUpperCase()
       if(!sku)continue
@@ -963,7 +967,7 @@ export default function App() {
       groups.set(groupId,current)
     }
     return [...groups.values()].filter(group=>group.type==='kit_componentes'&&[...group.skus].sort().join('|')===skuSetFingerprint).length
-  },[processItemLinks,skuSetFingerprint])
+  },[kitHistoryLinks,skuSetFingerprint])
   const priorSkuSetFingerprint=useRef(skuSetFingerprint)
   useEffect(()=>{
     if(priorSkuSetFingerprint.current!==skuSetFingerprint){
@@ -1335,33 +1339,69 @@ export default function App() {
     try{await req}finally{if(catalogsRequest.current===req)catalogsRequest.current=null}
   }
 
-  async function loadInspectionItems(force=false){
+  async function loadInspectionItems(force=false,sourceInspections:InspectionRow[]=inspections){
     if(!userId)return
-    if(!force&&itemLinksLoadedUser.current===userId)return
-    if(itemLinksRequest.current)return itemLinksRequest.current
+    const groupIds=[...new Set(sourceInspections.map(item=>item.grupos_inspecao?.id).filter((id):id is string=>Boolean(id)))].sort()
+    const signature=userId+':'+groupIds.join(',')
+    if(!force&&itemLinksLoadedUser.current===signature)return
+    if(itemLinksRequest.current){
+      await itemLinksRequest.current
+      if(!force&&itemLinksLoadedUser.current===signature)return
+    }
     const request=(async()=>{
       setItemLinksLoading(true)
       try{
-        const res=await apiGet<any>('/api/app/inspection-items')
-        if(res.data){
-          const rows=res.data.itemLinks??[]
-          setProcessItemLinks(rows)
-          itemLinksLoadedUser.current=userId
-          void saveOfflineDraft(userId,'app:inspection-items',{itemLinks:rows}).catch(()=>undefined)
-        }else{
-          const cached=await readOfflineDraft<any>(userId,'app:inspection-items').catch(()=>null)
-          if(cached){
-            setProcessItemLinks(cached.itemLinks||[])
-            itemLinksLoadedUser.current=userId
-          }
+        if(!groupIds.length){
+          setProcessItemLinks([])
+          itemLinksLoadedUser.current=signature
+          return
         }
+        const batches:string[][]=[]
+        for(let index=0;index<groupIds.length;index+=100)batches.push(groupIds.slice(index,index+100))
+        const responses=await Promise.all(batches.map(ids=>
+          apiGet<any>('/api/app/inspection-items?groupIds='+encodeURIComponent(ids.join(',')))))
+        if(responses.some(result=>result.error||!result.data))throw new Error('Falha ao carregar os SKUs das inspeções.')
+        const rows=responses.flatMap(result=>result.data?.itemLinks??[])
+        setProcessItemLinks(rows)
+        itemLinksLoadedUser.current=signature
+        void saveOfflineDraft(userId,'app:inspection-items',{itemLinks:rows}).catch(()=>undefined)
       }catch{
         const cached=await readOfflineDraft<any>(userId,'app:inspection-items').catch(()=>null)
-        if(cached){setProcessItemLinks(cached.itemLinks||[]);itemLinksLoadedUser.current=userId}
+        if(cached){
+          const allowed=new Set(groupIds)
+          const rows=(cached.itemLinks||[]).filter((link:any)=>allowed.has(link.grupo_inspecao_id))
+          setProcessItemLinks(rows)
+          itemLinksLoadedUser.current=signature
+        }
       }finally{setItemLinksLoading(false)}
     })()
     itemLinksRequest.current=request
     try{await request}finally{if(itemLinksRequest.current===request)itemLinksRequest.current=null}
+  }
+
+  async function loadKitHistory(force=false){
+    if(!userId)return
+    if(!force&&kitHistoryLoadedUser.current===userId)return
+    if(kitHistoryRequest.current){
+      await kitHistoryRequest.current
+      if(!force&&kitHistoryLoadedUser.current===userId)return
+    }
+    const request=(async()=>{
+      setKitHistoryLoading(true)
+      try{
+        const res=await apiGet<any>('/api/app/kit-history')
+        if(res.error||!res.data)throw new Error(res.error?.message||'Falha ao carregar histórico de kits.')
+        const rows=res.data.itemLinks??[]
+        setKitHistoryLinks(rows)
+        kitHistoryLoadedUser.current=userId
+        void saveOfflineDraft(userId,'app:kit-history',{itemLinks:rows}).catch(()=>undefined)
+      }catch{
+        const cached=await readOfflineDraft<any>(userId,'app:kit-history').catch(()=>null)
+        if(cached){setKitHistoryLinks(cached.itemLinks||[]);kitHistoryLoadedUser.current=userId}
+      }finally{setKitHistoryLoading(false)}
+    })()
+    kitHistoryRequest.current=request
+    try{await request}finally{if(kitHistoryRequest.current===request)kitHistoryRequest.current=null}
   }
 
   async function loadStock(){
