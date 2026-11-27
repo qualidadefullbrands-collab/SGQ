@@ -42,13 +42,13 @@ test('multiple SKUs are not presumed a kit',()=>{
  assert.match(api,/var distinctSkuCount=items.Select/)
  assert.match(api,/distinctSkuCount>1&&!input\.EhConjunto/)
  assert.match(api,/var isComponentSet = input\.EhConjunto && distinctSkuCount > 1;/)
- assert.match(ui,/ehConjunto:isComponentSet/)
- assert.match(ui,/Os SKUs desta entrada formam um conjunto/)
+ assert.match(ui,/ehConjunto:isComponentSet===true/)
+ assert.match(ui,/Formam um mesmo kit/)
 })
 
 test('SGQ entry names, photo theme, and editable IT interface are preserved',()=>{
- assert.match(board,/Novo Processo/)
- assert.match(board,/Nova Entrada/)
+ assert.match(board,/Nova inspeção/)
+ assert.match(board,/Nova entrada/)
  assert.match(photos,/sgq-mobile-photo sgq-operational-shell/)
  assert.match(editor,/Em Revisão/)
  assert.match(editor,/Rascunho/)
