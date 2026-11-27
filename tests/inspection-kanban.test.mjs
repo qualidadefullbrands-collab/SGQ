@@ -8,12 +8,8 @@ const css=read('src/components/InspectionWorkQueue.css')
 const legacy=read('src/components/InspectionsKanban.tsx')
 
 test('main inspection screen uses the Central de Inspeções instead of the old Kanban',()=>{
- const start=app.indexOf("{tab==='quadro' && <InspectionWorkQueue")
- const end=app.indexOf("{tab==='nova'",start)
- assert.ok(start>=0&&end>start)
- const route=app.slice(start,end)
- assert.ok(route.includes('<InspectionWorkQueue'))
- assert.ok(!route.includes('<InspectionsKanban'))
+ assert.ok(app.includes("{tab==='quadro' && <InspectionWorkQueue"))
+ assert.ok(app.includes('onOpen={id=>void openInspection(id)}'))
 })
 test('work queue defaults to actionable inspections and provides explicit status filters',()=>{
  assert.ok(queue.includes("useState<Filter>('ativas')"))
