@@ -46,11 +46,14 @@ test('equipment cards are interactive and KPI panels filter the list',()=>{
  assert.match(equipment,/equipment-editor-inline/)
  assert.match(styles,/max-height:calc\(100dvh - 32px\)/)
 })
-test('dashboard KPIs render process and inventory previews in place',()=>{
+test('legacy dashboard is not exposed while the product scope is inspections only',()=>{
  assert.match(panel,/setPanelSection\('processos'\)/)
  assert.match(panel,/setPanelSection\('estoque'\)/)
- assert.match(panel,/sgq-dashboard-inline-card/)
- assert.match(panel,/stockPositions\.slice\(0,12\)/)
+ const start=app.indexOf('<aside className="sgq-side-nav')
+ const end=app.indexOf('</aside>',start)
+ const nav=app.slice(start,end)
+ assert.doesNotMatch(nav,/Painel|Estoque|Insights/)
+ assert.match(app,/inspectionTabs=\['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile'\]/)
 })
 test('AI assistants receive additional context without treating it as verified evidence',()=>{
  assert.match(app,/contextoAdicional:aiConclusionExtraContext\.trim\(\)/)
