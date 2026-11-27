@@ -4095,6 +4095,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
                   <span><strong>São produtos independentes</strong><small>Uma entrada e uma inspeção própria para cada SKU, dentro do mesmo FST.</small></span>
                 </label>
               </div>
+              {kitHistoryLoading&&<p className="field-hint sgq-kit-history-hint">Consultando combinações de kits já confirmadas…</p>}
               {kitHistoryCount>0&&isComponentSet===null&&<p className="field-hint sgq-kit-history-hint">Esta combinação exata já foi confirmada como conjunto em {kitHistoryCount} inspeção(ões) anterior(es). Confirme se continua sendo um kit.</p>}
               {isComponentSet===null&&<p className="field-hint">Escolha uma classificação antes de salvar. O SGQ não presume que SKUs do mesmo PV formem um kit.</p>}
               {isComponentSet===false&&<p className="field-hint">Para produtos independentes, mantenha apenas um SKU nesta entrada e cadastre os demais em novas entradas do mesmo FST.</p>}
