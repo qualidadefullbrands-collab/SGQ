@@ -1349,6 +1349,11 @@ async Task<bool> OperationalQuantitiesPersisted(
 }
 
 app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRequest request, IHttpClientFactory factory) =>
+    input.CriarIndependentes
+        ? await CreateIndependentInspectionBatch(input,request,factory)
+        : await CreateInspectionSingle(input,request,factory));
+
+async Task<IResult> CreateInspectionSingle(CreateInspectionRequest input,HttpRequest request,IHttpClientFactory factory)
 {
     try
     {
@@ -1369,6 +1374,8 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
             if(alreadyCreated)
             {
                 var firstParams=existing!.Value.GetProperty("parametros_amostragem");
+                if(input.BatchFingerprint!=null&&(!firstParams.TryGetProperty("batch_fingerprint",out var oldFingerprint)||oldFingerprint.GetString()!=input.BatchFingerprint))
+                    return Results.Json(Error("O cadastro original deste SKU não corresponde à tentativa atual."),statusCode:409);
                 // Uma inspeção por conjunto: um request_id sempre corresponde a um registro.
                 // Gravações antigas por SKU permanecem intactas para reconciliação, sem reuso neste fluxo.
                 if(firstParams.ValueKind==JsonValueKind.Object
@@ -1632,7 +1639,9 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
                     somente_it_obrigatoria = true,
                     modelo_inspecao=isComponentSet?"conjunto":"individual",
                     quantidade_skus=items.Count,
-                    request_id=requestId
+                    request_id=requestId,
+                    batch_id=input.BatchId,
+                    batch_fingerprint=input.BatchFingerprint
                 }
             }, "return=representation");
 
@@ -1659,7 +1668,84 @@ app.MapPost("/api/inspecoes/criar", async (CreateInspectionRequest input, HttpRe
     {
         return Results.Json(Error("Falha ao criar inspeção no backend.", e.Message), statusCode: 500);
     }
-});
+}
+
+// Independent SKUs use the same creation engine, with a stable ID for each SKU.
+// The caderno/Word remains consolidated by parent FST. Each entry keeps its own IT,
+// sampling plan, evidence and result. No existing inspection is regrouped.
+async Task<IResult> CreateIndependentInspectionBatch(CreateInspectionRequest input,HttpRequest request,IHttpClientFactory factory)
+{
+    try{
+        if(input.EhConjunto || !Guid.TryParse(input.RequestId,out var batchGuid) ||
+           (string.IsNullOrWhiteSpace(input.Codigo)&&string.IsNullOrWhiteSpace(input.ProcessoId)))
+            return Results.Json(Error("Confirme produtos independentes, FST e identificador do cadastro."),statusCode:400);
+        if(InvalidOperationalUnits(input.Itens) || input.Itens.Any(x=>string.IsNullOrWhiteSpace(x.Sku)))
+            return Results.Json(Error("Informe o código de cada SKU e confira as quantidades inteiras."),statusCode:400);
+        var groups=input.Itens.GroupBy(x=>x.Sku.Trim().ToUpperInvariant()).ToArray();
+        if(groups.Length<2 || groups.Length>26)
+            return Results.Json(Error("O cadastro em lote exige de 2 a 26 SKUs distintos."),statusCode:400);
+        if(!Guid.TryParse(input.ItVersionId,out _) ||
+           groups.Any(g=>input.ItPorSku?.TryGetValue(g.Key,out var version)==true && !Guid.TryParse(version,out _)))
+            return Results.Json(Error("Confirme a IT aplicável a cada SKU antes de salvar."),statusCode:400);
+        if(input.ChegadaCd.HasValue && (input.DataInspecao??DateOnly.FromDateTime(DateTime.UtcNow))<input.ChegadaCd.Value)
+            return Results.Json(Error("A data da inspeção não pode ser anterior à chegada ao CD."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var batchId=batchGuid.ToString("N");
+        var fingerprint=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(input))));
+        var saved=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
+            $"select=id,grupo_inspecao_id,parametros_amostragem&parametros_amostragem->>batch_id=eq.{batchId}&excluido_em=is.null");
+        var savedRows=saved is {ValueKind:JsonValueKind.Array}?saved.Value.EnumerateArray().ToArray():Array.Empty<JsonElement>();
+        if(savedRows.Any(row=>!row.GetProperty("parametros_amostragem").TryGetProperty("batch_fingerprint",out var old) ||
+            old.GetString()!=fingerprint))
+            return Results.Json(Error("Este cadastro já foi iniciado. Retome os mesmos dados para evitar duplicação; retifique as entradas salvas separadamente."),statusCode:409);
+        var byId=!string.IsNullOrWhiteSpace(input.ProcessoId);
+        var parentRows=await RestAsync(client,token,HttpMethod.Get,"processos",
+            $"select=id,excluido_em&{(byId?"id":"codigo")}=eq.{Uri.EscapeDataString(byId?input.ProcessoId!:input.Codigo.Trim())}&limit=1");
+        var (parent,found)=FirstRow(parentRows);
+        if(byId&&!found)return Results.Json(Error("FST principal não localizado."),statusCode:404);
+        if(found){
+            if(parent!.Value.TryGetProperty("excluido_em",out var deleted)&&deleted.ValueKind!=JsonValueKind.Null)
+                return Results.Json(Error("Processo arquivado não pode receber entradas."),statusCode:409);
+            var existing=await RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
+                $"select=id,subprocesso_codigo&processo_id=eq.{Uri.EscapeDataString(parent.Value.GetProperty("id").GetString()!)}");
+            var used=existing is {ValueKind:JsonValueKind.Array}?existing.Value.EnumerateArray()
+                .Select(x=>x.TryGetProperty("subprocesso_codigo",out var sub)&&sub.ValueKind==JsonValueKind.String?sub.GetString():"")
+                .Where(x=>!string.IsNullOrWhiteSpace(x)).ToHashSet(StringComparer.OrdinalIgnoreCase):new HashSet<string?>(StringComparer.OrdinalIgnoreCase);
+            if(used.Count+groups.Length-savedRows.Length>26)
+                return Results.Json(Error("O FST não possui letras de entrada suficientes para todos os SKUs."),statusCode:409);
+        }
+        var created=new List<JsonElement>();
+        for(var index=0;index<groups.Length;index++){
+            var group=groups[index];
+            var key=SHA256.HashData(Encoding.UTF8.GetBytes(batchId+"|"+group.Key));
+            var child=new CreateInspectionRequest {
+                Codigo=input.Codigo,ProcessoId=input.ProcessoId,SubprocessoCodigo=null,
+                EhConjunto=false,Iniciar=input.Iniciar&&index==0,
+                RequestId=new Guid(key[..16]).ToString(),
+                BatchId=batchId,BatchFingerprint=fingerprint,
+                Cliente=input.Cliente,NotaFiscal=input.NotaFiscal,Origem=input.Origem,Transporte=input.Transporte,
+                ChegadaCd=input.ChegadaCd,DataInspecao=input.DataInspecao,
+                ItVersionId=input.ItPorSku?.TryGetValue(group.Key,out var it)==true?it:input.ItVersionId,
+                InspectionLevel=input.NivelPorSku?.TryGetValue(group.Key,out var level)==true?level:input.InspectionLevel,
+                ObservacaoInterna=input.ObservacaoInterna,Itens=group.ToList()
+            };
+            foreach(var item in child.Itens)item.UnidadesPorConjunto=1;
+            var result=await CreateInspectionSingle(child,request,factory);
+            var status=(result as IStatusCodeHttpResult)?.StatusCode??200;
+            var json=JsonSerializer.SerializeToElement((result as IValueHttpResult)?.Value);
+            if(status>=400 || json.ValueKind!=JsonValueKind.Object || !json.TryGetProperty("data",out var data) || data.ValueKind!=JsonValueKind.Object){
+                var reason=json.ValueKind==JsonValueKind.Object&&json.TryGetProperty("error",out var error)&&error.ValueKind==JsonValueKind.Object&&error.TryGetProperty("message",out var message)?message.GetString():"Falha no cadastro.";
+                return Results.Json(Error($"{created.Count} de {groups.Length} inspeções confirmadas. {reason} Retente o mesmo cadastro sem alterar os dados; as inspeções já confirmadas não serão duplicadas."),statusCode:status>=400?status:500);
+            }
+            created.Add(data);
+        }
+        return Results.Ok(new{data=new{id=created[0].GetProperty("id").GetString(),inspecoes=created,quantidade=created.Count},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao preparar as inspeções independentes.",e.Message),statusCode:500);}
+}
 
 // Fast, authorized numeric-only save for the all-SKU operational grid.
 // Avoid Omie/catalog lookups and per-item product updates for unchanged SKUs.
@@ -4734,6 +4820,11 @@ public class CreateInspectionRequest
     public string? ProcessoId { get; set; }
     public string? SubprocessoCodigo { get; set; }
     public bool EhConjunto { get; set; } = false;
+    public bool CriarIndependentes { get; set; }
+    public Dictionary<string,string>? ItPorSku { get; set; }
+    public Dictionary<string,string>? NivelPorSku { get; set; }
+    internal string? BatchId { get; set; }
+    internal string? BatchFingerprint { get; set; }
     public bool Iniciar { get; set; } = true;
     public string? RequestId { get; set; }
     public string Codigo { get; set; } = "";
