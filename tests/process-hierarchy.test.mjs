@@ -32,7 +32,7 @@ test('processes without inspection entry are separated from active inspection wo
  assert.ok(queue.includes('Criar entrada'))
 })
 test('main inspection route uses the new queue and retains process editing callbacks',()=>{
- const start=app.indexOf("{tab==='quadro'")
+ const start=app.indexOf("{tab==='quadro' && <InspectionWorkQueue")
  const end=app.indexOf("{tab==='nova'",start)
  const route=app.slice(start,end)
  assert.ok(route.includes('<InspectionWorkQueue'))
