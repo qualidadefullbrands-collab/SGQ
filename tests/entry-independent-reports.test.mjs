@@ -55,3 +55,11 @@ test('SGQ entry names, photo theme, and editable IT interface are preserved',()=
  assert.doesNotMatch(editor,/Editor de IT · Demonstração com documento oficial/)
  assert.doesNotMatch(editor,/Nenhum ajuste salva ou publica a IT original/)
 })
+
+
+test('report scope migration preserves legacy A/B/C and defaults new entries to individual reports',()=>{
+ const migration=read('supabase/migrations/20261127155339_sgq_report_scope.sql')
+ assert.ok(migration.includes('add column if not exists relatorio_consolidado boolean not null default false'))
+ assert.ok(migration.includes('set relatorio_consolidado = true'))
+ assert.ok(migration.includes('where subprocesso_codigo is not null'))
+})
