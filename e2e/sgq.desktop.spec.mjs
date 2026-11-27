@@ -40,7 +40,7 @@ test('navegação principal mantém somente áreas relacionadas a inspeções', 
   const { page } = isolated
   await signIn(isolated)
   const nav = page.getByRole('complementary', { name: 'Navegação de inspeções' })
-  await expect(nav.getByRole('button', { name: 'Quadro de inspeções' })).toBeVisible()
+  await expect(nav.getByRole('button', { name: 'Central de inspeções' })).toBeVisible()
   await expect(nav.getByRole('button', { name: 'Processos' })).toBeVisible()
   await expect(nav.getByRole('button', { name: 'Inspeções Armazém' })).toBeVisible()
   await expect(nav.getByRole('button', { name: 'Estoque' })).toHaveCount(0)
