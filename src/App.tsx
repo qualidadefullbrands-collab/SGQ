@@ -2166,28 +2166,33 @@ export default function App() {
     setSelectedInspectionId(id)
     setDetail(null)
     setDetailLoading(true)
+    setDetailStageLoading(null)
     setTab('execucao')
     const request=(async()=>{
       try{
-        const loaded=await apiGet<any>('/api/inspecoes/'+id+'/detalhe')
+        const loaded=await apiGet<any>('/api/inspecoes/'+id+'/resumo')
         let data=loaded.data
         if(loaded.error||!data?.inspecao){
           data=await readOfflineDraft<any>(userId||'','full:detail:'+id).catch(()=>null)
+          if(!data?.inspecao)data=await readOfflineDraft<any>(userId||'','full:summary:'+id).catch(()=>null)
           if(!data?.inspecao){
             setError(loaded.error?.message??'Inspeção não disponível offline.')
             setTab('quadro')
             return
           }
-        }else void saveOfflineDraft(userId||'','full:detail:'+id,data).catch(()=>undefined)
+        }else void saveOfflineDraft(userId||'','full:summary:'+id,data).catch(()=>undefined)
         editingBaseline.current=offlineInspectionVersion(data)
         const photoUrls=data.photoUrls??{}
         const photosWithUrls=(data.photos??[]).map((p:any)=>({...p,signed_url:photoUrls[p.storage_path]??null}))
+        const hasFullStageData=Boolean(data.checklist||data.params||data.tests||data.photos||data.registers||data.ncs||data.retained)
+        const loadedStages=data.loadedStages??(hasFullStageData?['verificacoes','dimensionais','testes','fotos','retencao','resultado']:[])
         const next={
           ...data.inspecao,items:data.items??[],checklist:data.checklist??[],
           checklistResults:data.checklistResults??[],params:data.params??[],
           dimResults:data.dimResults??[],dimConfigs:data.dimConfigs??[],
           tests:data.tests??[],testResults:data.testResults??[],photos:photosWithUrls,
-          registers:data.registers??[],ncs:data.ncs??[],retained:data.retained??[]
+          registers:data.registers??[],ncs:data.ncs??[],retained:data.retained??[],
+          loadedStages
         }
         photosLinksExpiration.current.delete(id)
         setDetail(next)
@@ -2206,13 +2211,68 @@ export default function App() {
           for(const key of Object.keys(retention))retention[key].qty=String(suggestedQty)
         }else setRetentionSuggestion({quantidade:null,fonte:null})
         setRetentionRows(retention)
-      }finally{
-        setDetailLoading(false)
-      }
+      }finally{setDetailLoading(false)}
     })()
     detailRequests.current.set(id,request)
     try{await request}finally{
       if(detailRequests.current.get(id)===request)detailRequests.current.delete(id)
+    }
+  }
+
+  async function loadInspectionStage(stage:typeof activeStage){
+    const id=selectedInspectionId
+    if(!id||!detail||detail.id!==id)return
+    if((detail.loadedStages??[]).includes(stage))return
+    const requestKey=id+':'+stage
+    const running=detailStageRequests.current.get(requestKey)
+    if(running){await running;return}
+    setDetailStageLoading(stage)
+    const request=(async()=>{
+      try{
+        if(stage==='resultado'){
+          const full=await apiGet<any>('/api/inspecoes/'+id+'/detalhe')
+          if(full.error||!full.data?.inspecao)throw new Error(full.error?.message||'Não foi possível carregar os dados do resultado.')
+          const data=full.data
+          const urls=data.photoUrls??{}
+          const photos=(data.photos??[]).map((p:any)=>({...p,signed_url:urls[p.storage_path]??null}))
+          const allStages=['verificacoes','dimensionais','testes','fotos','retencao','resultado']
+          setDetail((current:any)=>current?.id===id?{
+            ...current,...data.inspecao,items:data.items??current.items,
+            checklist:data.checklist??[],checklistResults:data.checklistResults??[],
+            params:data.params??[],dimResults:data.dimResults??[],dimConfigs:data.dimConfigs??[],
+            tests:data.tests??[],testResults:data.testResults??[],photos,
+            registers:data.registers??[],ncs:data.ncs??[],retained:data.retained??[],
+            loadedStages:allStages
+          }:current)
+          void saveOfflineDraft(userId||'','full:detail:'+id,data).catch(()=>undefined)
+          photosLinksExpiration.current.delete(id)
+          return
+        }
+        const result=await apiGet<any>('/api/inspecoes/'+id+'/etapa/'+stage)
+        if(result.error||!result.data)throw new Error(result.error?.message||'Não foi possível carregar esta etapa.')
+        const fields:Record<string,string[]> = {
+          verificacoes:['checklist','checklistResults','registers','ncs'],
+          dimensionais:['params','dimResults','dimConfigs'],
+          testes:['tests','testResults'],
+          fotos:['photos'],
+          retencao:['retained']
+        }
+        const patch:Record<string,any>={}
+        for(const key of fields[stage]??[])patch[key]=result.data[key]??[]
+        setDetail((current:any)=>current?.id===id?{
+          ...current,...patch,loadedStages:[...new Set([...(current.loadedStages??[]),stage])]
+        }:current)
+        if(stage==='fotos'){
+          photosLinksExpiration.current.delete(id)
+          void loadPhotoLinks(id,false,result.data.photos??[])
+        }
+      }catch(error:any){
+        setError(error?.message||'Falha ao carregar a etapa da inspeção.')
+      }finally{setDetailStageLoading(null)}
+    })()
+    detailStageRequests.current.set(requestKey,request)
+    try{await request}finally{
+      if(detailStageRequests.current.get(requestKey)===request)detailStageRequests.current.delete(requestKey)
     }
   }
 
