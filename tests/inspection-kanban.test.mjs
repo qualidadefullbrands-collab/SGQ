@@ -13,7 +13,7 @@ test('main inspection screen uses the Central de Inspeções instead of the old 
 })
 
 test('Processos screen no longer embeds the legacy Kanban',()=>{
- const start=app.indexOf("{tab==='inspecoes' && (")
+ const start=app.indexOf("{tab==='inspecoes' && <>")
  const end=app.indexOf("{tab==='quadro' && <InspectionWorkQueue",start)
  assert.ok(start>=0&&end>start)
  assert.ok(!app.slice(start,end).includes('<InspectionsKanban'))
