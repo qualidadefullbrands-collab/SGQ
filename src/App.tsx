@@ -3776,6 +3776,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         processes={processes}
         itemLinks={processItemLinks}
         canDelete={!!canDelete}
+        canWrite={!!canWrite}
         deletingProcessId={deletingProcessId}
         canMove={!!canWrite}
         movingInspectionId={kanbanMovingId}
