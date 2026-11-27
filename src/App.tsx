@@ -80,6 +80,7 @@ type InspectionRow = {
     tipo: string
     processo_id: string
     subprocesso_codigo?: string | null
+    relatorio_consolidado?: boolean
     nota_fiscal?: string | null
     origem?: string | null
     transporte?: string | null
@@ -792,14 +793,16 @@ export default function App() {
   }
   async function refreshWordStatus(){
     const processId=detail?.grupos_inspecao?.processo_id as string|undefined
-    if(!processId){
-      setWordStatus({ready:false,pending:['FST principal não identificado nesta inspeção.']})
+    const groupId=detail?.grupos_inspecao?.id as string|undefined
+    const consolidated=detail?.grupos_inspecao?.relatorio_consolidado===true
+    if(!processId||(!consolidated&&!groupId)){
+      setWordStatus({ready:false,pending:['FST ou entrada principal não identificada nesta inspeção.']})
       return
     }
     setWordCheckBusy(true)
     try{
-      // Laudo padrão do FST: A e B compartilham um único documento.
-      const response=await apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status')
+      const suffix=consolidated?'':'?entrada='+encodeURIComponent(groupId!)
+      const response=await apiGet<any>('/api/processos/'+encodeURIComponent(processId)+'/laudo-status'+suffix)
       setWordStatus(parseWordStatus(response))
     }catch(e:any){
       setWordStatus({ready:false,pending:[],error:'Falha de comunicação ao verificar o Word: '+String(e?.message||'sem resposta')})
@@ -3545,7 +3548,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       return setError('Esta inspeção não possui IT vinculada. Vincule uma IT para gerar o Word oficial.')
     }
     const parentId=detail.grupos_inspecao?.processo_id as string|undefined
-    const consolidated=Boolean(parentId&&detail.grupos_inspecao?.subprocesso_codigo)
+    const consolidated=Boolean(parentId&&detail.grupos_inspecao?.relatorio_consolidado===true)
     // Entradas A/B/C legadas são componentes do MESMO FST e geram um laudo único.
     const collectionName=consolidated?'':askCollectionName()
     if(collectionName===null)return
@@ -3554,7 +3557,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
       const session=await supabase.auth.getSession()
       const token=session.data.session?.access_token
       if(!token){setError('Sua sessão expirou. Entre novamente no SGQ.');return}
-      const suffix=collectionName?'?nomeConjunto='+encodeURIComponent(collectionName):''
+      const suffix=consolidated?'':'?individual=1'+(collectionName?'&nomeConjunto='+encodeURIComponent(collectionName):'')
       const url=consolidated
         ?`${apiUrl}/api/processos/${encodeURIComponent(parentId!)}/laudo`
         :`${apiUrl}/api/inspecoes/${selectedInspectionId}/laudo${suffix}`
@@ -4150,7 +4153,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               status={wordStatus}
               checking={wordCheckBusy}
               generating={wordDownloading}
-              consolidated={Boolean(detail.grupos_inspecao?.processo_id && detail.grupos_inspecao?.subprocesso_codigo)}
+              consolidated={detail.grupos_inspecao?.relatorio_consolidado===true}
               onCheck={()=>void refreshWordStatus()}
               onGenerate={()=>void downloadInspectionWord()}
             />
