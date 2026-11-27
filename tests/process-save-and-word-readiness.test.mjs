@@ -8,15 +8,15 @@ const board=source('src/components/InspectionsKanban.tsx')
 const api=source('backend/Sgq.Api/Program.cs')
 const docs=source('server/app.py')
 
-test('each subprocess remains a distinct inspection card in a FST-labeled lane group',()=>{
- assert.match(board,/function groupByFst\(items:Inspection\[\]\)/)
- assert.match(board,/groupByFst\(column\.items\.slice/)
- assert.match(board,/children\.map\(item=>/)
- assert.match(board,/key=\{item\.id\}/)
- assert.match(board,/sgq-kanban-independent-inspection/)
+test('each inspection remains a distinct card with FST and entry labels and direct actions',()=>{
+ assert.match(board,/column\.items\.slice[^\n]*\.map\(item=>/)
+ assert.match(board,/className="sgq-kanban-card" key=\{item\.id\}/)
+ assert.match(board,/className="sgq-kanban-fst"/)
+ assert.match(board,/className="sgq-kanban-entry"/)
  assert.match(board,/onOpen\(item\.id\)/)
  assert.match(board,/item\.status==='concluida'/)
- assert.match(board,/draggable=\{canMoveCard\(item\)\}/)
+ assert.match(board,/moveCard\(item\.id,active\?'aberta':'em_andamento'\)/)
+ assert.doesNotMatch(board,/draggable=|onDragStart=/)
 })
 
 test('subprocess invoice is populated from its own group, not stale parent process',()=>{

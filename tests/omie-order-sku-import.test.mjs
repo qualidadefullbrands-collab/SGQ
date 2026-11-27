@@ -6,7 +6,7 @@ const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8')
 const edge=read('supabase/functions/sgq-omie-fst/index.ts')
 const app=read('src/App.tsx')
 const lookup=app.slice(app.indexOf('async function lookupFstClient('),app.indexOf('async function saveProcessEdit('))
-const productSection=app.slice(app.indexOf('<h2>Produtos / componentes</h2>'),app.indexOf('<div className="sku-editor">'))
+const productSection=app.slice(app.indexOf('id="sgq-new-inspection-products"'),app.indexOf('<div className="sku-editor">'))
 
 test('Omie listing is used only to resolve exact project and sales order, then full ConsultarPedido loads det',()=>{
  assert.match(edge,/const expected="FST"\+key/)

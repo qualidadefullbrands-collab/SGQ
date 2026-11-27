@@ -49,14 +49,15 @@ test('Word spinner is visible through download and dismissed on all exits',()=>{
  assert.match(app,/sgq-word-spinner/)
  assert.match(style,/\.sgq-word-loading/)
 })
-test('dragging only moves between queued and in progress, not completed or cancelled',()=>{
+test('explicit status actions only move between queued and in progress, not completed or cancelled',()=>{
  const reverse=part(api,'app.MapPost("/api/inspecoes/{id}/voltar-nao-iniciada"','app.MapGet("/api/amostragem/plano"')
  assert.match(reverse,/status=eq\.em_andamento/)
  assert.match(reverse,/new \{status="aberta",iniciada_em=\(DateTimeOffset\?\)null\}/)
  assert.match(reverse,/status=in\.\(em_andamento,concluida\)/)
  assert.match(reverse,/return Results\.Ok/)
- assert.match(board,/onDragStart=/)
- assert.match(board,/onDrop=/)
+ assert.doesNotMatch(board,/onDragStart=|onDrop=|draggable=/)
+ assert.match(board,/canTransitionInspection\(item\.status,Boolean\(canMove&&onMove\),Boolean\(movingInspectionId\)\)/)
+ assert.match(board,/moveCard\(item\.id,active\?'aberta':'em_andamento'\)/)
  assert.match(board,/const canMoveCard=/)
  assert.match(board,/onMove\?\.\(id,target\)/)
  assert.match(app,/target==='em_andamento'\?'iniciar':'voltar-nao-iniciada'/)
