@@ -2225,7 +2225,10 @@ export default function App() {
   async function loadInspectionStage(stage:typeof activeStage){
     const id=selectedInspectionId
     if(!id||!detail||detail.id!==id)return
-    if((detail.loadedStages??[]).includes(stage))return
+    if((detail.loadedStages??[]).includes(stage)){
+      if(stage==='fotos')void loadPhotoLinks(id)
+      return
+    }
     const requestKey=id+':'+stage
     const running=detailStageRequests.current.get(requestKey)
     if(running){await running;return}
