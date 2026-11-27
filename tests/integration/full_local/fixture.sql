@@ -244,6 +244,29 @@ begin
  end loop;
 end $$;
 
+-- Additional real PostgreSQL fixtures for reclassification. Test-only owner RLS.
+alter table public.it_versoes add column status text not null default 'publicada';
+alter table public.inspecoes add column excluido_por uuid,
+ add column total_conforme numeric default 0,
+ add column concluida_em timestamptz,
+ add column retencao_decisao boolean,
+ add column justificativa_decisao text;
+alter table public.audit_log alter column entidade_id type text using entidade_id::text;
+do $$
+declare tbl text;
+begin
+ foreach tbl in array array['grupos_inspecao','grupo_inspecao_itens','grupo_inspecao_its'] loop
+  execute format('grant update on public.%I to authenticated',tbl);
+  execute format('create policy qa_reclass_update on public.%I for update to authenticated using(owner_id=(select auth.uid())) with check(owner_id=(select auth.uid()))',tbl);
+ end loop;
+ foreach tbl in array array['inspecao_nao_conformidades','inspecao_registros','inspecao_chat_mensagens','amostras','laudos','sgq_documento_integracoes'] loop
+  execute format('create table public.%I(id uuid primary key default gen_random_uuid(),owner_id uuid not null default auth.uid(),inspecao_id uuid references public.inspecoes(id),grupo_inspecao_id uuid references public.grupos_inspecao(id))',tbl);
+  execute format('alter table public.%I enable row level security',tbl);
+  execute format('grant select on public.%I to authenticated',tbl);
+  execute format('create policy qa_reclass_read on public.%I for select to authenticated using(owner_id=(select auth.uid()))',tbl);
+ end loop;
+end $$;
+
 insert into public.profiles(id,owner_id,nome,perfil,ativo) values
  ('__OWNER_UUID__','__OWNER_UUID__','Inspetor QA Sintético','gestor',true);
 

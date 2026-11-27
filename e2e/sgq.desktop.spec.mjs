@@ -106,3 +106,35 @@ test('central operacional exibe SKUs, kits, entradas independentes e busca sem r
  await nav.getByRole('button',{name:'Central de inspeções',exact:true}).click()
  await expect(page.getByRole('heading',{name:'Central de inspeções'})).toBeVisible()
 })
+
+test('reclassificação de kit é acessível na inspeção e exige prévia e confirmação',async({isolated})=>{
+ const {page}=isolated
+ await signIn(isolated)
+ const version='22222222-2222-4222-8222-222222222222'
+ const products=[{sku:'QA-KIT-A',nome:'Componente A',quantidade:100,unidades:1},{sku:'QA-KIT-B',nome:'Componente B',quantidade:200,unidades:2}]
+ const headers={'access-control-allow-origin':'*','access-control-allow-methods':'GET,POST,OPTIONS','access-control-allow-headers':'*','content-type':'application/json'}
+ const reply=(route,data)=>route.fulfill({status:200,headers,body:JSON.stringify({data,error:null})})
+ await page.route('https://sgq-api.qa.invalid/api/inspecoes/qa-i2/resumo*',route=>reply(route,{inspecao:{id:'qa-i2',numero:'QA-I2',status:'aberta',nivel_inspecao:'II',it_versao_id:version,tamanho_amostra:20,tamanho_lote:100,total_inspecionado:0,total_nao_conforme:0,grupos_inspecao:{id:'qa-g2',tipo:'kit_componentes',processo_id:'qa-p1',subprocesso_codigo:'B',processos:{codigo:'FST99991',cliente:'Cliente QA'}}},items:[]}))
+ await page.route('https://sgq-api.qa.invalid/api/inspecoes/qa-i2/reclassificar',async route=>{
+  if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers})
+  const body=route.request().postDataJSON()
+  if(body.modo==='contexto')return reply(route,{fst:'FST99991',tipo:'kit_componentes',it:version,nivel:'II',entradas:[{id:'qa-i2',entrada:'B',tipo:'kit_componentes',status:'aberta',bloqueio:null,skus:products}]})
+  expect(body.modo).toBe('separar')
+  expect(body.confirmacao).toBeUndefined()
+  return reply(route,{confirmacao:'qa-preview',aviso:'Cadastro reaproveitado',originais:['qa-i2'],destinos:products.map((p,i)=>({entrada:i?'C':'B',sku:p.sku,nome:p.nome,nivel:'II',plano:{lote:p.quantidade,amostra:i?32:20,ac:1,re:2}}))})
+ })
+ await page.getByRole('button',{name:/Histórico/}).click()
+ await page.getByRole('button',{name:'Ver inspeção',exact:true}).click()
+ await page.getByRole('button',{name:'Alterar classificação dos SKUs',exact:true}).click()
+ const dialog=page.getByRole('dialog',{name:'Alterar classificação dos SKUs'})
+ await expect(dialog).toBeVisible()
+ await expect(dialog.getByText('Separar os SKUs em inspeções independentes')).toBeVisible()
+ await dialog.getByRole('button',{name:'Conferir nova classificação'}).click()
+ await expect(dialog.getByText('Entrada C · QA-KIT-B')).toBeVisible()
+ await expect(dialog.getByRole('button',{name:'Aplicar correção'})).toBeDisabled()
+ await dialog.getByLabel('Motivo da correção').fill('Classificação anterior incorreta')
+ await dialog.getByRole('checkbox',{name:/Confirmo que os SKUs/}).check()
+ await expect(dialog.getByRole('button',{name:'Aplicar correção'})).toBeEnabled()
+ await dialog.getByRole('button',{name:'Cancelar',exact:true}).click()
+ await expect(dialog).toHaveCount(0)
+})

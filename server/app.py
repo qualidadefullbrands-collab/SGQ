@@ -330,7 +330,7 @@ async def process_word_status(client:httpx.AsyncClient, token:str, process_id:st
         raise HTTPException(status_code=404,detail="FST não encontrado ou arquivado.")
     parent=parents[0]
     groups=await table_rows(client,token,"grupos_inspecao",{
-        "processo_id":f"eq.{process_id}",
+        "processo_id":f"eq.{process_id}","reclassificado_em":"is.null",
         "select":"id,codigo,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,nome",
         "order":"subprocesso_codigo.asc,codigo.asc"})
     if group_id:
@@ -648,7 +648,7 @@ async def generate_process_document(process_id:str,authorization:str|None=Header
             raise HTTPException(status_code=404,detail="FST não encontrado ou arquivado.")
         parent=parents[0]
         groups=await table_rows(client,token,"grupos_inspecao",{
-            "processo_id":f"eq.{process_id}",
+            "processo_id":f"eq.{process_id}","reclassificado_em":"is.null",
             "select":"id,codigo,subprocesso_codigo,nota_fiscal,nome",
             "order":"subprocesso_codigo.asc,codigo.asc",
         })

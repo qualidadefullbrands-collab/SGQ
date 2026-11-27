@@ -696,7 +696,7 @@ app.MapGet("/api/app/catalogos", async (HttpRequest request,IHttpClientFactory f
         var its=RestAsync(client,token,HttpMethod.Get,"it_versoes",
             "select=id,versao,status,vigencia,nivel_inspecao_padrao,leitura_ia_status,arquivo_nome,instrucoes_trabalho(codigo,titulo)&order=criado_em.desc");
         var groups=RestAsync(client,token,HttpMethod.Get,"grupos_inspecao",
-            "select=id,nome,codigo,tipo,status,tamanho_lote_estatistico,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(codigo,cliente,excluido_em)&order=criado_em.desc");
+            "select=id,nome,codigo,tipo,status,tamanho_lote_estatistico,processo_id,subprocesso_codigo,nota_fiscal,origem,transporte,chegada_cd,processos(codigo,cliente,excluido_em)&reclassificado_em=is.null&order=criado_em.desc");
         await Task.WhenAll(its,groups);
         return Results.Ok(new {data=new {itVersions=its.Result,groups=OperationalGroups(groups.Result)},error=(object?)null});
     }
@@ -1045,6 +1045,39 @@ app.MapPost("/api/processos/{id}/excluir", async (string id,HttpRequest request,
     catch(Exception e){return Results.Json(Error("Falha ao excluir processo.",e.Message),statusCode:500);}
 });
 
+app.MapPost("/api/inspecoes/{id}/reclassificar", async (string id,ReclassifyInspectionRequest input,HttpRequest request,IHttpClientFactory factory)=>
+{
+    try{
+        if(!Guid.TryParse(id,out var inspectionId))return Results.Json(Error("Inspeção inválida."),statusCode:400);
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var result=await RestAsync(client,token,HttpMethod.Post,"rpc/sgq_reclassificar_inspecao","",new {
+            p_inspecao_id=inspectionId,p_modo=input.Modo,p_selecionadas=input.Selecionadas??Array.Empty<Guid>(),
+            p_unidades=input.Unidades??new Dictionary<string,int>(),p_it=input.ItVersionId,p_nivel=input.Nivel,
+            p_confirmacao=input.Confirmacao,p_motivo=input.Motivo
+        });
+        if(result is not {ValueKind:JsonValueKind.Object})return Results.Json(Error("Resposta de reclassificação inválida."),statusCode:500);
+        return Results.Ok(new {data=result,error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(InvalidOperationException e){
+        var index=e.Message.IndexOf(" - ",StringComparison.Ordinal);
+        if(index>=0){
+            try{
+                using var doc=JsonDocument.Parse(e.Message[(index+3)..]);
+                var root=doc.RootElement;
+                var code=root.TryGetProperty("code",out var c)?c.GetString():null;
+                var message=root.TryGetProperty("message",out var m)?m.GetString():null;
+                if(code is "P0001" or "22023" or "42501" or "P0002")
+                    return Results.Json(Error(message??"Reclassificação bloqueada."),statusCode:code=="42501"?403:code=="P0002"?404:409);
+            }catch(JsonException){ }
+        }
+        return Results.Json(Error("Não foi possível reclassificar com segurança. Nenhuma alteração parcial é confirmada."),statusCode:500);
+    }
+    catch(Exception){return Results.Json(Error("Falha ao reclassificar. Confira o cadastro antes de tentar novamente."),statusCode:500);}
+});
+
 app.MapPost("/api/inspecoes/{id}/excluir", async (string id,DeleteInspectionRequest input,HttpRequest request,IHttpClientFactory factory)=>
 {
     try
@@ -1379,11 +1412,13 @@ async Task<IResult> CreateInspectionSingle(CreateInspectionRequest input,HttpReq
         if(requestId!=null)
         {
             var previous=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-                $"select=id,numero,grupo_inspecao_id,status,parametros_amostragem&parametros_amostragem->>request_id=eq.{requestId}&excluido_em=is.null&order=criado_em.asc");
+                $"select=id,numero,grupo_inspecao_id,status,parametros_amostragem,excluido_em&parametros_amostragem->>request_id=eq.{requestId}&order=criado_em.asc");
             var (existing,alreadyCreated)=FirstRow(previous);
             if(alreadyCreated)
             {
                 var firstParams=existing!.Value.GetProperty("parametros_amostragem");
+                if(existing.Value.TryGetProperty("excluido_em",out var archived)&&archived.ValueKind!=JsonValueKind.Null)
+                    return Results.Json(Error("Este cadastro foi substituído ou arquivado. Atualize o FST antes de retomar o rascunho."),statusCode:409);
                 if(input.BatchFingerprint!=null&&(!firstParams.TryGetProperty("batch_fingerprint",out var oldFingerprint)||oldFingerprint.GetString()!=input.BatchFingerprint))
                     return Results.Json(Error("O cadastro original deste SKU não corresponde à tentativa atual."),statusCode:409);
                 // Uma inspeção por conjunto: um request_id sempre corresponde a um registro.
@@ -1910,7 +1945,7 @@ app.MapPut("/api/inspecoes/{id}/dados", async (string id, EditInspectionDataRequ
         var client=factory.CreateClient("supabase");
         var userId=await CurrentUserId(client,token);
         var insRows=await RestAsync(client,token,HttpMethod.Get,"inspecoes",
-            $"select=grupo_inspecao_id,status,it_versao_id,parametros_amostragem&id=eq.{Uri.EscapeDataString(id)}&limit=1");
+            $"select=grupo_inspecao_id,status,it_versao_id,parametros_amostragem&id=eq.{Uri.EscapeDataString(id)}&excluido_em=is.null&limit=1");
         var (ins,found)=FirstRow(insRows);
         if(!found) return Results.Json(Error("Inspeção não encontrada."),statusCode:404);
         var groupId=ins!.Value.GetProperty("grupo_inspecao_id").GetString()!;
@@ -4855,6 +4890,17 @@ public sealed class FinishInspectionRequest
 {
     public string Resultado { get; set; } = "";
     public string? Observacoes { get; set; }
+}
+
+public sealed class ReclassifyInspectionRequest
+{
+    public string Modo {get;set;}="contexto";
+    public Guid[]? Selecionadas {get;set;}
+    public Dictionary<string,int>? Unidades {get;set;}
+    public Guid? ItVersionId {get;set;}
+    public string? Nivel {get;set;}
+    public string? Confirmacao {get;set;}
+    public string? Motivo {get;set;}
 }
 
 public class CreateInspectionRequest
