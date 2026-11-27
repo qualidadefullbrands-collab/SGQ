@@ -1109,6 +1109,9 @@ export default function App() {
       setProcessItemLinks([])
       itemLinksLoadedUser.current=null
       catalogsLoadedUser.current=null
+      omieInboxLoadedAt.current=0
+      setOmieInbox([])
+      setOmieInboxSeen(new Set())
       equipmentLoadedUser.current=null
       setDetailLoading(false)
       setSamples([])
@@ -1653,7 +1656,7 @@ export default function App() {
       }).catch(()=>undefined)
     }
     setExpandedSkuIndex(0)
-    setSkuRows([emptySku()]);setIsComponentSet(false)
+    setSkuRows([emptySku()]);setIsComponentSet(null)
     setTab('nova')
     setMessage('Nova inspeção independente. Confira os valores sugeridos antes de salvar.')
   }
@@ -1668,6 +1671,7 @@ export default function App() {
     }else void saveOfflineDraft(userId||'','full:detail:'+id,source).catch(()=>undefined)
     editingBaseline.current=offlineInspectionVersion(source)
     setInheritedReference(null)
+    setIsComponentSet(source.inspecao?.grupos_inspecao?.tipo==='kit_componentes')
     const data={...source.inspecao,items:source.items??[]}
     const process=data.grupos_inspecao?.processos??{}
     const items=(data.items??[]).map((link:any)=>{
@@ -1792,7 +1796,6 @@ export default function App() {
        refreshId!==listRefreshSequence.current)return
     setProcesses((res.data.processes??[]) as ProcessRow[])
     setInspections((res.data.inspections??[]) as InspectionRow[])
-    // SKU links are refreshed separately only when the inspection board is used.
   }
 
   function openOmieSkuReview(suggestion:OmieSkuImport){
@@ -2218,6 +2221,7 @@ export default function App() {
       return
     }
     setWordStatus(null)
+    setIsComponentSet(detail.grupos_inspecao?.tipo==='kit_componentes')
     const process=detail.grupos_inspecao?.processos ?? {}
     const rows=(detail.items ?? []).map((link:any)=>{
       const item=link.processo_itens
@@ -2398,6 +2402,7 @@ export default function App() {
         }
       }).catch(()=>undefined)
       void refreshLists()
+      void loadInspectionItems(true)
     }catch(e:any){setError(String(e?.message||'Não foi possível salvar.'))}
     finally{setEditSaving(false)}
   }
@@ -2593,7 +2598,7 @@ export default function App() {
     const created=await apiPost<any>('/api/inspecoes/criar',{
       codigo:parentFstCode(inspection.codigo),
       processoId:inspection.processoId||null,
-      subprocessoCodigo:inspection.subprocessoCodigo,ehConjunto:isComponentSet,
+      subprocessoCodigo:inspection.subprocessoCodigo,ehConjunto:isComponentSet===true,
       requestId:createRequestId.current,
       cliente:inspection.cliente.trim() || null,
       notaFiscal:inspection.notaFiscal.trim() || null,
@@ -2649,6 +2654,7 @@ export default function App() {
     else setTab('quadro')
     setInspectionBusy(false)
     void refreshLists()
+    void loadInspectionItems(true)
     }finally{
       submitLock.current=false
       setInspectionBusy(false)
@@ -3652,7 +3658,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               <div className="row-actions">
                 {omieUnread>0 && <span className="pill">{omieUnread} novo(s)</span>}
                 <button type="button" className="secondary small" disabled={omieInboxLoading}
-                  onClick={()=>{setOmieInboxLoading(true);void loadOmieInbox().finally(()=>setOmieInboxLoading(false))}}>
+                  onClick={()=>void loadOmieInbox(true)}>
                   <RefreshCw size={15}/>{omieInboxLoading?'Consultando…':'Atualizar PVs'}
                 </button>
               </div>
@@ -3971,6 +3977,11 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         </section>
       )}
 
+      {tab==='execucao' && detailLoading && <section className="workspace execution sgq-inspection-detail-loading" aria-live="polite" aria-label="Carregando inspeção">
+        <div className="loading-line wide"/><div className="loading-line short"/>
+        <div className="loading-line"/><div className="loading-line wide"/>
+        <div className="loading-line"/><div className="loading-line short"/>
+      </section>}
       {tab==='execucao' && detail && (
         <section className="workspace execution sgq-screen-execucao">
           <div className="page-title">
