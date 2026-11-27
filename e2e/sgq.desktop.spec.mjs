@@ -25,8 +25,10 @@ test('login rejeita credenciais inválidas e mantém usuário anônimo', async (
 test('revisão da biblioteca IT funciona com cadastro totalmente sintético', async ({ isolated }) => {
   const { page } = isolated
   await signIn(isolated)
-  await page.goto('/e2e/fixtures/legacy-harness.html?module=its')
-  await expect(page.locator('[data-qa-module="its"]')).toBeVisible()
+  const nav=page.getByRole('complementary',{name:'Navegação de inspeções'})
+  await nav.getByRole('button',{name:'Instruções técnicas',exact:true}).click()
+  await expect(page.locator('[data-sgq-screen="its"]')).toBeVisible()
+  await expect(nav.getByRole('button',{name:'Instruções técnicas',exact:true})).toHaveAttribute('aria-current','page')
   await expect(page.getByRole('heading', { name: 'Instruções técnicas' })).toBeVisible()
   await expect(page.getByText('IT-QA-001').first()).toBeVisible()
   await expect(page.getByText('Produto de teste sintético')).toBeVisible()
@@ -38,6 +40,13 @@ test('revisão da biblioteca IT funciona com cadastro totalmente sintético', as
   await expect(page.getByText('Produto de teste sintético')).toBeVisible()
   await page.getByRole('button', { name: /Obsoletas/ }).click()
   await expect(page.getByText('Nenhuma versão corresponde aos filtros.')).toBeVisible()
+  await page.getByRole('button',{name:'Limpar filtros'}).click()
+  const refreshed=page.waitForResponse(response=>response.url().includes('/api/app/catalogos')&&response.status()===200)
+  await page.getByRole('button',{name:'Atualizar ITs',exact:true}).click()
+  await refreshed
+  await expect(page.getByText('Produto de teste sintético')).toBeVisible()
+  await nav.getByRole('button',{name:'Central de inspeções',exact:true}).click()
+  await expect(page.locator('[data-sgq-screen="quadro"]')).toBeVisible()
 })
 
 test('navegação de estoque separa contagem e conciliação física do cadastro Omie', async ({ isolated }) => {
@@ -70,7 +79,7 @@ test('central operacional exibe SKUs, kits, entradas independentes e busca sem r
  const {page}=isolated
  await signIn(isolated)
  const nav=page.getByRole('complementary',{name:'Navegação de inspeções'})
- for(const label of ['Estoque','Instruções técnicas','Inspeções Armazém','Configurações','Painel','Insights'])
+ for(const label of ['Estoque','Inspeções Armazém','Configurações','Painel','Insights'])
   await expect(nav.getByRole('button',{name:label,exact:true})).toHaveCount(0)
  const cards=page.locator('.sgq-kanban-card')
  await expect(cards).toHaveCount(1)

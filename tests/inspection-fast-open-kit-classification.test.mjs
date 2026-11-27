@@ -55,11 +55,23 @@ test('kit versus independent SKUs requires an explicit decision and remembers ex
  assert.match(board,/Revisar SKUs/)
 })
 
-test('inspection-only shell restores equipment and hides warehouse audit navigation',()=>{
+test('inspection shell keeps IT and equipment available while hiding warehouse audits',()=>{
  const start=app.indexOf('<aside className="sgq-side-nav')
  const end=app.indexOf('</aside>',start)
  const nav=app.slice(start,end)
  assert.match(nav,/Equipamentos/)
- for(const label of ['Estoque','Instruções técnicas','Inspeções Armazém','Configurações','Painel','Insights'])assert.doesNotMatch(nav,new RegExp(label))
- assert.match(app,/inspectionTabs=\['quadro','inspecoes','nova','execucao','equipamentos','fotos-mobile'\]/)
+ assert.match(nav,/Instruções técnicas/)
+ for(const label of ['Estoque','Inspeções Armazém','Configurações','Painel','Insights'])assert.doesNotMatch(nav,new RegExp(label))
+ assert.match(app,/inspectionTabs=\['quadro','inspecoes','nova','execucao','its','equipamentos','fotos-mobile'\]/)
+})
+
+
+test('IT library is accessible in the real application and refreshes after publishing or importing',()=>{
+ const nav=app.slice(app.indexOf('<aside className="sgq-side-nav'),app.indexOf('</aside>',app.indexOf('<aside className="sgq-side-nav')))
+ assert.match(nav,/setTab\('its'\)/)
+ assert.match(app,/if\(tab==='its'\)void loadCatalogs\(true\)/)
+ assert.match(app,/async function loadCatalogs\(force=false\)/)
+ assert.match(app,/if\(!force&&catalogsLoadedUser.current===userId\)return/)
+ assert.match(app,/Versão da IT publicada e disponível para novas inspeções\.'\)\s*await loadCatalogs\(true\)/)
+ assert.match(app,/Atualizar ITs/)
 })
