@@ -7,7 +7,7 @@ const app=read('src/App.tsx')
 const navigation=read('src/stock/StockWorkspaceNav.tsx')
 
 test('SGQ has dedicated blind-inventory status tab and direct navigation',()=>{
- assert.match(app,/const BlindInventoryStatus=lazy/
+ assert.match(app,/const BlindInventoryStatus=lazy/)
  assert.match(app,/status_cegos/)
  assert.match(navigation,/Acompanhamento/)
  assert.match(ui,/Status do inventário FST/)
