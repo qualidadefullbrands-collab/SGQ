@@ -172,7 +172,7 @@ function skuRowHasData(row:ReturnType<typeof emptySku>){
     row.capacidade.trim()||row.quantidade.trim()||row.quantidadePorCaixa.trim()||
     row.caixasRecebidas.trim()||row.caixasInspecionadas.trim()||row.caixasPadrao.trim()||
     row.caixasFracionadas.trim()||row.caixasLaboratorio.trim()||row.unidadesLaboratorio.trim()||
-    row.unidadesPadrao.trim()||row.unidadesFracionadas.trim()||row.fotoFile)
+    row.unidadesPadrao.trim()||row.unidadesFracionadas.trim()||row.distribuicaoCaixas.trim()||row.fotoPrincipalPath||row.fotoFile)
 }
 // Review first; only apply the Omie quantities to the inspection after the popup closes.
 function prepareOmieSkuReview(suggestion:OmieSkuImport,rows:ReturnType<typeof emptySku>[]):OmieSkuReview {
@@ -891,6 +891,7 @@ export default function App() {
   const itemLinksLoadedUser=useRef<string|null>(null)
   const equipmentLoadedUser=useRef<string|null>(null)
   const detailRequests=useRef(new Map<string,Promise<void>>())
+  const openDetailTarget=useRef<string|null>(null)
   const detailStageRequests=useRef(new Map<string,Promise<void>>())
   const stockRequest=useRef<Promise<void>|null>(null)
   const photosLinksExpiration=useRef(new Map<string,number>())
@@ -1144,6 +1145,7 @@ export default function App() {
       setDetailLoading(false)
       setDetailStageLoading(null)
       detailRequests.current.clear()
+      openDetailTarget.current=null
       detailStageRequests.current.clear()
       setSamples([])
       setItVersions([])
@@ -1444,7 +1446,7 @@ export default function App() {
         .catch(()=>undefined)
       setProcesses((data.processes ?? []) as ProcessRow[])
       setInspections((data.inspections ?? []) as InspectionRow[])
-      setProcessItemLinks(data.itemLinks??[])
+      if(Array.isArray(data.itemLinks))setProcessItemLinks(data.itemLinks)
       setCounts(old=>({
         ...old,processos:(data.processes??[]).length,inspecoes:(data.inspections??[]).length
       }))
@@ -1646,6 +1648,8 @@ export default function App() {
   }
 
   function reuseProcess(p: ProcessRow) {
+    createRequestId.current=crypto.randomUUID()
+    setItPorSku({});setNivelPorSku({});setBatchProgress('')
     autoNfeRef.current=null
     fstLookupRequest.current++
     setOmieSkuImport(null);setOmieSkuReview(null);setOmieSkuReviewError('');setOmieOrderPickerOpen(false);setOmieOrders(null);setOmieSelectedOrder('')
@@ -1678,7 +1682,7 @@ export default function App() {
       dataInspecao:''
     }))
     if(first){
-      void apiGet<any>('/api/inspecoes/'+encodeURIComponent(first.id)+'/detalhe').then(res=>{
+      void apiGet<any>('/api/inspecoes/'+encodeURIComponent(first.id)+'/resumo').then(res=>{
         if(res.error||!res.data)return
         const items=res.data.items??[]
         const quantity=items.reduce((sum:number,link:any)=>sum+Number(link.processo_itens?.quantidade||0),0)
@@ -1695,7 +1699,7 @@ export default function App() {
 
   async function editInspectionFull(id:string){
     setError('')
-    const res=await apiGet<any>('/api/inspecoes/'+id+'/detalhe')
+    const res=await apiGet<any>('/api/inspecoes/'+id+'/resumo')
     let source=res.data
     if(res.error||!source?.inspecao){
       source=await readOfflineDraft<any>(userId||'','full:detail:'+id).catch(()=>null)
@@ -2185,32 +2189,37 @@ export default function App() {
   async function openInspection(id: string) {
     setError('')
     setWordStatus(null)
+    openDetailTarget.current=id
     if(detail?.id===id){
       setSelectedInspectionId(id)
       setTab('execucao')
       return
     }
     const running=detailRequests.current.get(id)
-    if(running){await running;return}
     if(selectedInspectionId!==id){setActiveStage('dados');setAllowDimensionalRectification(false)}
     setSelectedInspectionId(id)
     setDetail(null)
     setDetailLoading(true)
     setDetailStageLoading(null)
     setTab('execucao')
+    if(running){await running;return}
     const request=(async()=>{
       try{
-        const loaded=await apiGet<any>('/api/inspecoes/'+id+'/resumo')
+        const groupHint=inspections.find(item=>item.id===id)?.grupos_inspecao?.id
+        const loaded=await apiGet<any>('/api/inspecoes/'+id+'/resumo'+(groupHint?'?grupo='+encodeURIComponent(groupHint):''))
         let data=loaded.data
+        if(openDetailTarget.current!==id)return
         if(loaded.error||!data?.inspecao){
           data=await readOfflineDraft<any>(userId||'','full:detail:'+id).catch(()=>null)
           if(!data?.inspecao)data=await readOfflineDraft<any>(userId||'','full:summary:'+id).catch(()=>null)
           if(!data?.inspecao){
+            if(openDetailTarget.current!==id)return
             setError(loaded.error?.message??'Inspeção não disponível offline.')
             setTab('quadro')
             return
           }
         }else void saveOfflineDraft(userId||'','full:summary:'+id,data).catch(()=>undefined)
+        if(openDetailTarget.current!==id)return
         editingBaseline.current=offlineInspectionVersion(data)
         const photoUrls=data.photoUrls??{}
         const photosWithUrls=(data.photos??[]).map((p:any)=>({...p,signed_url:photoUrls[p.storage_path]??null}))
@@ -2226,6 +2235,7 @@ export default function App() {
         }
         photosLinksExpiration.current.delete(id)
         setDetail(next)
+        if(next.status==='em_andamento'&&Number(next.total_inspecionado||0)<Number(next.tamanho_amostra||0))setActiveStage('amostragem')
         setSampleNcDraft(String(next.total_nao_conforme??0))
         setFinalObservation(next.observacoes??'')
         setInternalObservation(next.observacao_interna??'')
@@ -2241,7 +2251,7 @@ export default function App() {
           for(const key of Object.keys(retention))retention[key].qty=String(suggestedQty)
         }else setRetentionSuggestion({quantidade:null,fonte:null})
         setRetentionRows(retention)
-      }finally{setDetailLoading(false)}
+      }finally{if(openDetailTarget.current===id)setDetailLoading(false)}
     })()
     detailRequests.current.set(id,request)
     try{await request}finally{
@@ -2647,13 +2657,7 @@ export default function App() {
 
     const itens:any[]=[]
     for (const row of skuRows) {
-      const hasAnyData=Boolean(
-        row.sku.trim() || row.nome.trim() || row.lote.trim() || row.material.trim() ||
-        row.capacidade.trim() || row.quantidade || row.quantidadePorCaixa ||
-        row.caixasRecebidas || row.caixasInspecionadas || row.distribuicaoCaixas.trim() ||
-        row.caixasPadrao || row.unidadesPadrao || row.caixasFracionadas || row.unidadesFracionadas ||
-        row.caixasLaboratorio || row.unidadesLaboratorio || row.fotoFile || row.fotoPrincipalPath
-      )
+      const hasAnyData=skuRowHasData(row)
       if (!hasAnyData) continue
 
       const dist=boxDistributionTotals(row)
