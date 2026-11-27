@@ -1131,7 +1131,9 @@ export default function App() {
       setProcesses([])
       setInspections([])
       setProcessItemLinks([])
+      setKitHistoryLinks([])
       itemLinksLoadedUser.current=null
+      kitHistoryLoadedUser.current=null
       catalogsLoadedUser.current=null
       omieInboxLoadedAt.current=0
       setOmieInbox([])
@@ -1158,9 +1160,10 @@ export default function App() {
   useEffect(()=>{
     if(!userId)return
     if(tab==='quadro'||tab==='inspecoes')void loadInspectionItems()
+    if(tab==='nova')void loadKitHistory()
     if(tab==='nova'||tab==='inspecoes')void loadCatalogs()
     if(tab==='inspecoes')void loadOmieInbox()
-  },[userId,tab])
+  },[userId,tab,inspections])
 
   useEffect(()=>{
     if(!userId){equipmentLoadedUser.current=null;return}
@@ -1458,7 +1461,9 @@ export default function App() {
             setProfile(offline.profile)
             setProcesses(offline.processes||[])
             setInspections(offline.inspections||[])
-            setProcessItemLinks(offline.itemLinks||[])
+            const offlineGroupIds=new Set((offline.inspections||[]).map((item:any)=>item.grupos_inspecao?.id).filter(Boolean))
+            setProcessItemLinks((offline.itemLinks||[]).filter((link:any)=>offlineGroupIds.has(link.grupo_inspecao_id)))
+            setKitHistoryLinks(offline.kitHistoryLinks||[])
             return
           }
         }
@@ -1476,7 +1481,8 @@ export default function App() {
         .catch(()=>undefined)
       setProcesses((data.processes ?? []) as ProcessRow[])
       setInspections((data.inspections ?? []) as InspectionRow[])
-      setProcessItemLinks(data.itemLinks??[])
+      setProcessItemLinks([])
+      itemLinksLoadedUser.current=null
       setCounts(old=>({
         ...old,processos:(data.processes??[]).length,inspecoes:(data.inspections??[]).length
       }))
@@ -1858,7 +1864,11 @@ export default function App() {
     if(res.error||!res.data||version!==loadSequence.current||
        refreshId!==listRefreshSequence.current)return
     setProcesses((res.data.processes??[]) as ProcessRow[])
-    setInspections((res.data.inspections??[]) as InspectionRow[])
+    const nextInspections=(res.data.inspections??[]) as InspectionRow[]
+    setInspections(nextInspections)
+    itemLinksLoadedUser.current=null
+    kitHistoryLoadedUser.current=null
+    void loadInspectionItems(true,nextInspections)
   }
 
   function openOmieSkuReview(suggestion:OmieSkuImport){
