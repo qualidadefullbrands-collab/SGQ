@@ -10,7 +10,7 @@ const api=source('backend/Sgq.Api/Program.cs')
 
 test('phone automatically opens a dedicated photo-only screen without QR codes',()=>{
  assert.match(app,/const MobileFotos=lazy\(\(\)=>import\('\.\/mobile\/MobileFotos'\)\)/)
- assert.match(app,/matchMedia\('\(max-width: 768px\)'\)/)
+ assert.match(app,/matchMedia\('\(max-width: 600px\)'\)/)
  assert.match(app,/tab==='fotos-mobile'/)
  assert.match(app,/<MobileFotos processes=\{processes\} inspections=\{inspections\}/)
  assert.doesNotMatch(mobile,/QrCode|qr_token|scan QR/i)
