@@ -1,69 +1,54 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
-
-const read=(path)=>readFileSync(new URL('../'+path,import.meta.url),'utf8')
+const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8')
 const board=read('src/components/InspectionsKanban.tsx')
+const queue=read('src/components/InspectionWorkQueue.tsx')
 const app=read('src/App.tsx')
-const css=read('src/components/InspectionsKanban.css')
+const css=read('src/components/InspectionWorkQueue.css')
 
-test('process view shows parent FST, entry letter, customer and CD arrival separately',()=>{
- assert.match(board,/useState<'processos'\|'kanban'>\(initialView\)/)
- assert.match(board,/initialView='processos'/)
- assert.match(board,/processTree=useMemo\(/)
- assert.match(board,/processes\.map\(process=>/)
- assert.match(board,/grupos_inspecao\?\.processo_id===process\.id/)
- assert.match(board,/sgq-process-node/)
- assert.match(board,/sgq-process-children/)
- assert.match(board,/processLabel/)
- assert.match(board,/Entrada \{sub\.letter/)
- assert.match(board,/Chegada ao CD:/)
- assert.match(board,/sgq-subprocess-products/)
- assert.match(board,/sub\.invoice\?'NF '/)
- assert.match(board,/sub\.items\.map\(item=>/)
- assert.match(board,/onOpen\(item\.id\)/)
+test('legacy process hierarchy builds a process index in one pass',()=>{
+ assert.ok(board.includes('const inspectionsByProcess=useMemo'))
+ assert.ok(board.includes('const grouped=new Map<string,Inspection[]>()'))
+ assert.ok(board.includes('const own=inspectionsByProcess.get(process.id)||[]'))
+ assert.ok(!board.includes("const own=inspections.filter(item=>item.status!=='cancelada'&&item.grupos_inspecao?.processo_id===process.id)"))
 })
-
-test('existing group IDs preserve one inspection per set without flattening component SKUs',()=>{
- assert.match(board,/const key=group\?\.id\|\|letter\|\|item\.id/)
- assert.match(board,/groups\.get\(key\)/)
- assert.match(board,/prior\.items\.push\(item\)/)
- assert.match(board,/linkedItemsByGroup/)
- assert.match(board,/groupTypeById/)
- assert.match(board,/groupType==='kit_componentes'/)
- assert.match(board,/products\.length>1&&!isKit/)
- assert.match(board,/Revisar SKUs/)
- assert.match(board,/onReuseProcess\(process\.id\)/)
+test('Central de Inspeções keeps parent FST and subprocess identity separate',()=>{
+ assert.ok(queue.includes('formatFst(row.processCode)'))
+ assert.ok(queue.includes('Entrada {entry}'))
+ assert.ok(queue.includes('row.client'))
+ assert.ok(queue.includes('row.arrival'))
+ assert.ok(queue.includes('row.invoice'))
 })
-
-test('Kanban workflow is accessible through buttons and does not depend on drag',()=>{
- assert.match(board,/setView\('kanban'\)/)
- assert.match(board,/aria-pressed=\{view==='kanban'\}/)
- assert.match(board,/mode==='panel'\|\|view==='kanban'/)
- for(const label of ['Não iniciadas','Em andamento','Concluídas'])assert.ok(board.includes(label))
- assert.match(board,/onMove\?\.\(id,target\)/)
- assert.match(board,/Iniciar inspeção/)
- assert.match(board,/Voltar para não iniciada/)
- assert.doesNotMatch(board,/onDragStart|onDragOver|onDrop|draggable=/)
- assert.match(board,/onDeleteInspection\(inspection\.id\)/)
+test('product composition is displayed without flattening component SKUs',()=>{
+ assert.ok(queue.includes('productsByGroup'))
+ assert.ok(queue.includes('row.products.map'))
+ assert.ok(queue.includes("String(group?.tipo||'')==='kit_componentes'"))
+ assert.ok(queue.includes('Relação de SKUs a confirmar'))
 })
-
-test('editing the parent process does not change child invoice or redirect to an open inspection',()=>{
+test('processes without inspection entry are separated from active inspection work',()=>{
+ assert.ok(queue.includes('processesWithoutEntry'))
+ assert.ok(queue.includes('Processos sem entrada'))
+ assert.ok(queue.includes('Criar entrada'))
+})
+test('main inspection route uses the new queue and retains process editing callbacks',()=>{
+ const start=app.indexOf("{tab==='quadro'")
+ const end=app.indexOf("{tab==='nova'",start)
+ const route=app.slice(start,end)
+ assert.ok(route.includes('<InspectionWorkQueue'))
+ assert.ok(route.includes('onEditProcess='))
+ assert.ok(route.includes('onReuseProcess='))
+ assert.ok(!route.includes('<InspectionsKanban'))
+})
+test('editing a parent process does not replace subprocess-specific invoice data',()=>{
  const section=app.split('function editProcessFull(p:ProcessRow)')[1]?.split('const fstLookupRequest')[0]||''
- assert.match(section,/setEditingProcess/)
- assert.doesNotMatch(section,/editInspectionFull\(/)
+ assert.ok(section.includes('setEditingProcess'))
+ assert.ok(!section.includes('editInspectionFull('))
  const save=app.split('async function saveProcessEdit(e: React.FormEvent)')[1]?.split('async function deleteProcess')[0]||''
- assert.match(save,/notaFiscal:null/)
- assert.match(app,/focusProcessId=\{focusedProcessId\}/)
- assert.match(app,/onEditProcess=\{id=>\{const process=processes\.find/)
+ assert.ok(save.includes('notaFiscal:null'))
 })
-
-test('hierarchy is compact, searchable and responsive',()=>{
- assert.match(css,/\.sgq-process-node-heading/)
- assert.match(css,/\.sgq-subprocess-node-heading/)
- assert.match(css,/\.sgq-subprocess-inspection/)
- assert.match(css,/max-width:760px/)
- assert.match(board,/className="sgq-kanban-search"/)
- assert.match(board,/aria-expanded=\{expanded\}/)
- assert.match(board,/aria-controls=\{'sgq-process-children-'/)
+test('Central de Inspeções is responsive and uses a compact single-column mobile row',()=>{
+ assert.ok(css.includes('@media(max-width:1120px)'))
+ assert.ok(css.includes('@media(max-width:640px)'))
+ assert.ok(css.includes('.sgq-work-row{grid-template-columns:minmax(0,1fr)'))
 })
