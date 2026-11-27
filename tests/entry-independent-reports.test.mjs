@@ -18,6 +18,9 @@ test('new independent SKU entries and kits generate one report per inspection en
  assert.ok(api.includes('request.Query["individual"]'))
  assert.ok(api.includes('generate-inspection/'))
  assert.ok(docs.includes('groups=[group for group in groups if group["id"]==group_id]'))
+ const generator=docs.split('@app.get("/generate-inspection/{inspection_id}")')[1]?.split('@app.get("/generate-process/{process_id}")')[0]||''
+ assert.ok(generator.includes('"grupo_inspecao_id":f"eq.{group_id}"'))
+ assert.ok(generator.includes('items.append(item)'))
 })
 
 test('existing legacy A/B/C entries retain their consolidated FST report',()=>{
