@@ -10,7 +10,7 @@ const fst=file('supabase/functions/sgq-omie-fst/index.ts')
 
 test('SGQ uses only one unified inventory screen',()=>{
  assert.match(app,/const BlindInventoryUnified=lazy/
- assert.match(app,/stockMode==='cego'&&<BlindInventoryUnified/)
+ assert.ok(app.includes("stockMode==='cego'&&<Suspense")&&app.includes('<BlindInventoryUnified'))
  for(const part of ['1. Localização','2. Processo FST','3. Selecione o produto','4. Quantidade e foto'])assert.ok(ui.includes(part))
  assert.doesNotMatch(ui,/Ver excluídos|showDeleted|setShowDeleted/)
 })
