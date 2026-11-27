@@ -1178,8 +1178,13 @@ export default function App() {
     if(!userId)return
     if(tab==='quadro'||tab==='inspecoes')void loadInspectionItems()
     if(tab==='nova'||tab==='inspecoes')void loadCatalogs()
+    if(tab==='its')void loadCatalogs(true)
     if(tab==='inspecoes')void loadOmieInbox()
   },[userId,tab])
+
+  useEffect(()=>{
+    if(userId&&(editingInspectionData||editingProcess))void loadCatalogs()
+  },[userId,Boolean(editingInspectionData),Boolean(editingProcess)])
 
   useEffect(()=>{
     if(!userId){equipmentLoadedUser.current=null;return}
@@ -1192,7 +1197,7 @@ export default function App() {
   },[userId,tab,activeStage])
 
   useEffect(()=>{
-    const inspectionTabs=['quadro','inspecoes','nova','execucao','equipamentos','fotos-mobile']
+    const inspectionTabs=['quadro','inspecoes','nova','execucao','its','equipamentos','fotos-mobile']
     if(!inspectionTabs.includes(tab))setTab('quadro')
   },[tab])
 
@@ -1332,10 +1337,14 @@ export default function App() {
     window.setTimeout(()=>URL.revokeObjectURL(url),15000)
   }
 
-  async function loadCatalogs(){
+  async function loadCatalogs(force=false){
     if(!userId)return
-    if(catalogsLoadedUser.current===userId)return
-    if(catalogsRequest.current)return catalogsRequest.current
+    if(!force&&catalogsLoadedUser.current===userId)return
+    if(catalogsRequest.current){
+      if(!force)return catalogsRequest.current
+      await catalogsRequest.current
+      if(catalogsRequest.current)return catalogsRequest.current
+    }
     const req=(async()=>{
       setCatalogsLoading(true)
       try{
@@ -3313,11 +3322,11 @@ export default function App() {
     if (result.error || data?.error) {
       const msg=String(data?.message ?? result.error?.message ?? 'Falha na estruturação automática.')
       setError('Não foi possível estruturar a IT: '+msg)
-      await loadCatalogs()
+      await loadCatalogs(true)
       return false
     }
     setMessage(`IT estruturada: ${data?.checklist ?? 0} verificações, ${data?.dimensionais ?? 0} dimensionais e ${data?.testes ?? 0} testes. Revise antes de publicar.`)
-    await loadCatalogs()
+    await loadCatalogs(true)
     if (openReview) {
       const current=itVersions.find((x)=>x.id===itVersionId)
       if (current) await reviewItVersion({...current,status:'em_revisao',leitura_ia_status:'revisao'})
@@ -3362,7 +3371,7 @@ export default function App() {
     if (saved.error) return setError(saved.error.message)
     setItReview(null)
     setMessage('Versão da IT publicada e disponível para novas inspeções.')
-    await loadCatalogs()
+    await loadCatalogs(true)
   }
 
   async function uploadIt(e: React.FormEvent) {
@@ -3402,7 +3411,7 @@ export default function App() {
     } else {
       setMessage(`IT enviada e estruturada: ${structure?.checklist ?? 0} verificações, ${structure?.dimensionais ?? 0} dimensionais e ${structure?.testes ?? 0} testes.`)
     }
-    await loadCatalogs()
+    await loadCatalogs(true)
   }
 
   useEffect(()=>{if(tab==='estoque'&&stockMode==='posicoes')void refreshStockSkuConflicts()},[tab,stockMode])
@@ -3660,6 +3669,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <div className="sgq-side-caption">INSPEÇÕES</div>
         <button type="button" className={tab==='quadro'||tab==='execucao'||tab==='nova'?'selected':''} aria-current={tab==='quadro'||tab==='execucao'||tab==='nova'?'page':undefined} onClick={()=>setTab('quadro')}><CheckCircle2 size={19}/> Central de inspeções</button>
         <button type="button" className={tab==='inspecoes'?'selected':''} aria-current={tab==='inspecoes'?'page':undefined} onClick={()=>{setFocusedProcessId(null);setTab('inspecoes')}}><ClipboardCheck size={19}/> Processos</button>
+        <button type="button" className={tab==='its'?'selected':''} aria-current={tab==='its'?'page':undefined} onClick={()=>{setTab('its');setError('')}}><FileText size={19}/> Instruções técnicas</button>
         <button type="button" className={tab==='equipamentos'?'selected':''} aria-current={tab==='equipamentos'?'page':undefined} onClick={()=>{setTab('equipamentos');setError('')}}><Wrench size={19}/> Equipamentos</button>
         <div className="sgq-side-footer"><small>{profile.nome || 'Usuário'}</small><button type="button" onClick={()=>void supabase.auth.signOut()}><LogOut size={14}/> Sair</button></div>
       </aside>
@@ -4657,7 +4667,10 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
         <section className="workspace sgq-screen-its">
           <div className="page-title"><div><span className="eyebrow">QUALIDADE · CONTROLE DOCUMENTAL</span><h1>{itDemoOpen?'Nova IT':'Biblioteca de ITs'}</h1>
             {!itDemoOpen&&<p className="page-subtitle">Gerencie versões, vigência e critérios das instruções técnicas.</p>}</div>
-            <button type="button" className={itDemoOpen?'secondary':'primary'} onClick={()=>setItDemoOpen(x=>!x)}>{itDemoOpen?'Voltar à biblioteca':'Nova IT'}</button>
+            <div className="row-actions">
+              {!itDemoOpen&&<button type="button" className="secondary" disabled={catalogsLoading} onClick={()=>void loadCatalogs(true)}><RefreshCw size={16}/> {catalogsLoading?'Atualizando…':'Atualizar ITs'}</button>}
+              <button type="button" className={itDemoOpen?'secondary':'primary'} onClick={()=>setItDemoOpen(x=>!x)}>{itDemoOpen?'Voltar à biblioteca':'Nova IT'}</button>
+            </div>
           </div>
           {itDemoOpen ? (
             <Suspense fallback={<div className="panel section-card">Carregando editor de IT…</div>}>
@@ -4686,6 +4699,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               </div>
             </details>
           )}
+          {catalogsLoading&&!itVersions.length?<div className="panel section-card" role="status">Carregando instruções técnicas…</div>:
           <Suspense fallback={<div className="panel section-card" role="status">Carregando biblioteca de ITs…</div>}>
             <ItLibrary
               versions={itVersions}
@@ -4694,7 +4708,7 @@ ${graphic ? '^FO575,24'+graphic+'^FS' : ''}
               onStructure={id=>void structureItVersion(id)}
               onReview={version=>{const item=itVersions.find(it=>it.id===version.id);if(item)void reviewItVersion(item)}}
             />
-          </Suspense>
+          </Suspense>}
           </>)}
         </section>
       )}
