@@ -10,28 +10,31 @@ const equipment=source('src/equipamentos/EquipmentPage.tsx')
 const inventory=source('src/stock/InventoryPanel.tsx')
 const settings=source('src/config/SettingsPage.tsx')
 
-test('existing subprocess identities use FST-A/B and show CD arrival next to FST',()=>{
+test('existing subprocess identities use separate FST and entry labels and show CD arrival',()=>{
  assert.match(processes,/sgq-process-identity-head/)
  assert.match(processes,/Chegada ao CD:/)
- assert.match(processes,/processLabel\}\{sub\.letter\?'-'\+sub\.letter/)
+ assert.match(processes,/Entrada \\{sub\\.letter/)
  assert.match(processes,/sgq-subprocess-products/)
  assert.match(processes,/product\.sku/)
  assert.match(processes,/product\.descricao/)
- assert.match(processesCss,/sgq-subprocess-product\{\s*display:flex;flex-direction:column/)
+ assert.match(processesCss,/\.sgq-subprocess-product\\{display:inline-flex/)
  assert.doesNotMatch(processes,/> Editar FST</)
  assert.doesNotMatch(processes,/> Adicionar entrada A</)
  assert.doesNotMatch(processes,/<input[^>]*type="search"/)
 })
 
-test('dashboard keeps Kanban, processes and stock visible together',()=>{
- assert.match(dashboard,/<section id="sgq-dashboard-inspections"/)
- assert.match(dashboard,/<section id="sgq-dashboard-process-preview"/)
- assert.match(dashboard,/<section id="sgq-dashboard-stock-preview"/)
- assert.match(dashboard,/scrollIntoView\(\{behavior:'smooth'/)
- assert.doesNotMatch(dashboard,/\{panelSection==='processos'&&<div/)
- assert.doesNotMatch(dashboard,/\{panelSection==='estoque'&&<div/)
+test('active product navigation exposes inspection workflows only',()=>{
+ const start=app.indexOf('<aside className="sgq-side-nav')
+ const end=app.indexOf('</aside>',start)
+ assert.ok(start>=0&&end>start)
+ const nav=app.slice(start,end)
+ assert.match(nav,/Quadro de inspeções/)
+ assert.match(nav,/Processos/)
+ assert.match(nav,/Inspeções Armazém/)
+ for(const name of ['Estoque','Equipamentos','Instruções técnicas','Configurações','Painel','Insights'])
+  assert.doesNotMatch(nav,new RegExp(name))
+ assert.match(app,/inspectionTabs=\\['quadro','inspecoes','nova','execucao','auditorias','fotos-mobile'\\]/)
 })
-
 test('stock divergence has actionable filters and distinguishes missing and excess',()=>{
  assert.match(inventory,/setOnlyDifferences\(old=>!old\)/)
  assert.match(inventory,/Faltas/)
