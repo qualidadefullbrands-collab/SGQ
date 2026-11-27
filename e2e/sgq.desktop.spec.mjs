@@ -7,7 +7,7 @@ async function signIn(isolated) {
   await page.getByRole('textbox', { name: 'E-mail' }).fill(email)
   await page.getByLabel('Senha', { exact: true }).fill(password)
   await page.getByRole('button', { name: 'Entrar' }).click()
-  await expect(page.locator('[data-sgq-screen="painel"]')).toBeVisible()
+  await expect(page.locator('[data-sgq-screen="quadro"]')).toBeVisible()
 }
 
 test('login rejeita credenciais inválidas e mantém usuário anônimo', async ({ isolated }) => {
@@ -22,42 +22,31 @@ test('login rejeita credenciais inválidas e mantém usuário anônimo', async (
   await expect(page.getByRole('heading', { name: 'SGQ · Qualidade' })).toBeVisible()
 })
 
-test('revisão da biblioteca IT funciona com cadastro totalmente sintético', async ({ isolated }) => {
+test('Central de inspeções apresenta fila de trabalho, busca e filtros por situação', async ({ isolated }) => {
   const { page } = isolated
   await signIn(isolated)
-  const nav = page.getByRole('complementary', { name: 'Navegação principal do SGQ' })
-  await nav.getByRole('button', { name: 'Instruções técnicas' }).click()
-  await expect(page.locator('[data-sgq-screen="its"]')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Instruções técnicas' })).toBeVisible()
-  await expect(page.getByText('IT-QA-001').first()).toBeVisible()
-  await expect(page.getByText('Produto de teste sintético')).toBeVisible()
-
-  const search = page.getByRole('searchbox', { name: 'Buscar instrução técnica' })
-  await search.fill('IT-NÃO-EXISTE')
-  await expect(page.getByText('Nenhuma versão corresponde aos filtros.')).toBeVisible()
-  await page.getByRole('button', { name: 'Limpar filtros' }).click()
-  await expect(page.getByText('Produto de teste sintético')).toBeVisible()
-  await page.getByRole('button', { name: /Obsoletas/ }).click()
-  await expect(page.getByText('Nenhuma versão corresponde aos filtros.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Central de inspeções' })).toBeVisible()
+  await expect(page.getByLabel('Buscar inspeções por FST, cliente, SKU ou nota fiscal')).toBeVisible()
+  const filters = page.getByRole('navigation', { name: 'Filtrar inspeções por situação' })
+  await expect(filters.getByRole('button', { name: /Pendentes e em execução/ })).toBeVisible()
+  await expect(filters.getByRole('button', { name: /Não iniciadas/ })).toBeVisible()
+  await expect(filters.getByRole('button', { name: /Em andamento/ })).toBeVisible()
+  await expect(filters.getByRole('button', { name: /Concluídas/ })).toBeVisible()
+  await filters.getByRole('button', { name: /Concluídas/ }).click()
+  await expect(filters.getByRole('button', { name: /Concluídas/ })).toHaveAttribute('aria-pressed', 'true')
 })
 
-test('navegação de estoque separa contagem e conciliação física do cadastro Omie', async ({ isolated }) => {
+test('navegação principal mantém somente áreas relacionadas a inspeções', async ({ isolated }) => {
   const { page } = isolated
   await signIn(isolated)
-  const main = page.locator('[data-sgq-screen="painel"]')
-  await expect(main).toBeVisible()
-
-  const nav = page.getByRole('complementary', { name: 'Navegação principal do SGQ' })
-  await nav.getByRole('button', { name: 'Estoque' }).click()
-  await expect(page.locator('[data-sgq-screen="estoque"]')).toBeVisible()
-
-  const stockNav = page.getByRole('navigation', { name: 'Áreas de estoque e inventário' })
-  await expect(stockNav.getByRole('button', { name: /Contagem FST/ })).toBeVisible()
-  await expect(stockNav.getByRole('button', { name: /Acompanhamento/ })).toBeVisible()
-  await stockNav.getByRole('button', { name: /Conciliação SGQ/ }).click()
-  await expect(stockNav.getByRole('button', { name: /Conciliação SGQ/ })).toHaveAttribute('aria-current', 'page')
-  await expect(page.getByText('A consulta ao Omie confere apenas código e descrição do produto.')).toBeVisible()
-  await expect(page.getByText(/controles físicos do SGQ para a mesma localização/)).toBeVisible()
+  const nav = page.getByRole('complementary', { name: 'Navegação de inspeções' })
+  await expect(nav.getByRole('button', { name: 'Quadro de inspeções' })).toBeVisible()
+  await expect(nav.getByRole('button', { name: 'Processos' })).toBeVisible()
+  await expect(nav.getByRole('button', { name: 'Inspeções Armazém' })).toBeVisible()
+  await expect(nav.getByRole('button', { name: 'Estoque' })).toHaveCount(0)
+  await expect(nav.getByRole('button', { name: 'Insights' })).toHaveCount(0)
+  await expect(nav.getByRole('button', { name: 'Configurações' })).toHaveCount(0)
+  await expect(page.locator('[data-sgq-screen="estoque"]')).toHaveCount(0)
 })
 
 test('acessibilidade automatizada do login não tem violações sérias ou críticas', async ({ isolated }) => {
