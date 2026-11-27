@@ -366,3 +366,9 @@
 .sgq-work-status{color:#365e76;font-size:11px;font-weight:700;white-space:nowrap}
 @media(max-width:1200px){.sgq-operational-shell .sgq-work-list .sgq-kanban-card{grid-template-columns:minmax(110px,1fr) minmax(140px,1.6fr) minmax(120px,1fr)}.sgq-work-list .sgq-kanban-card h3{grid-column:1;grid-row:2}.sgq-work-list .sgq-kanban-card-meta{grid-column:1;grid-row:3}.sgq-work-list .sgq-kanban-card-products{grid-column:2;grid-row:1/3}.sgq-work-list .sgq-kanban-progress{grid-column:2;grid-row:3}.sgq-work-list .sgq-kanban-card-bottom{grid-column:3;grid-row:1/4}}
 @media(max-width:650px){.sgq-work-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.sgq-operational-shell .sgq-work-list .sgq-kanban-card{display:flex;flex-direction:column;align-items:stretch;gap:8px}.sgq-work-list .sgq-kanban-card-top{align-self:auto}}
+
+.sgq-independent-review{display:grid;gap:8px;padding:12px;background:#f4f8fb;border:1px solid #d5e3eb;border-radius:8px;margin-top:12px}
+.sgq-independent-review p{margin:0;color:#426278;font-size:13px}
+.sgq-independent-line{display:grid;grid-template-columns:minmax(80px,.55fr) minmax(0,2fr) minmax(0,1fr);gap:12px;align-items:end;border-top:1px solid #dce6ed;padding:9px 0}
+.sgq-independent-line label{min-width:0}
+@media(max-width:650px){.sgq-independent-line{grid-template-columns:1fr}}
