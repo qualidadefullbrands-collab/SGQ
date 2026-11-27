@@ -658,12 +658,36 @@ app.MapGet("/api/app/inspection-items",async(HttpRequest request,IHttpClientFact
         var token=Token(request);
         var client=factory.CreateClient("supabase");
         await CurrentUserId(client,token);
+        var groupIds=request.Query["groupIds"].ToString()
+            .Split(',',StringSplitOptions.RemoveEmptyEntries)
+            .Select(value=>value.Trim())
+            .Where(value=>Guid.TryParse(value,out _))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(100)
+            .ToArray();
+        if(groupIds.Length==0)
+            return Results.Ok(new{data=new{itemLinks=Array.Empty<object>()},error=(object?)null});
         var itemLinks=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
-            "select=grupo_inspecao_id,grupos_inspecao(tipo),processo_itens(id,codigo_cliente,quantidade,produtos(sku,nome))&limit=10000");
+            $"select=grupo_inspecao_id,grupos_inspecao(tipo),processo_itens(id,codigo_cliente,quantidade,produtos(sku,nome))&grupo_inspecao_id=in.({string.Join(",",groupIds)})&limit=10000");
         return Results.Ok(new{data=new{itemLinks},error=(object?)null});
     }
     catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
     catch(Exception e){return Results.Json(Error("Falha ao carregar os SKUs das inspeções.",e.Message),statusCode:500);}
+});
+
+// Historical kit compositions are loaded only when the user opens a new inspection.
+// This keeps the main inspection queue limited to its current entries.
+app.MapGet("/api/app/kit-history",async(HttpRequest request,IHttpClientFactory factory)=>{
+    try{
+        var token=Token(request);
+        var client=factory.CreateClient("supabase");
+        await CurrentUserId(client,token);
+        var itemLinks=await RestAsync(client,token,HttpMethod.Get,"grupo_inspecao_itens",
+            "select=grupo_inspecao_id,grupos_inspecao!inner(tipo),processo_itens(id,codigo_cliente,quantidade,produtos(sku,nome))&grupos_inspecao.tipo=eq.kit_componentes&limit=10000");
+        return Results.Ok(new{data=new{itemLinks},error=(object?)null});
+    }
+    catch(UnauthorizedAccessException e){return Results.Json(Error(e.Message),statusCode:401);}
+    catch(Exception e){return Results.Json(Error("Falha ao carregar o histórico de kits.",e.Message),statusCode:500);}
 });
 
 // Read-only source for the Insights dashboard. All queries use the user's JWT
