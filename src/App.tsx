@@ -601,7 +601,7 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [tab, setTab] = useState<'painel' | 'insights' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile' | 'quadro' | 'configuracoes'>(()=>new URLSearchParams(window.location.search).get('modo')==='fotos'?'fotos-mobile':'quadro')
+  const [tab, setTab] = useState<'painel' | 'insights' | 'inspecoes' | 'nova' | 'execucao' | 'its' | 'estoque' | 'auditorias' | 'equipamentos' | 'fotos-mobile' | 'quadro' | 'configuracoes'>(()=>new URLSearchParams(window.location.search).get('modo')==='fotos'||window.matchMedia('(max-width: 600px)').matches?'fotos-mobile':'quadro')
   const [itDemoOpen,setItDemoOpen]=useState(false)
   const [dashboardSearch,setDashboardSearch]=useState('')
   const [popupMessage,setPopupMessage]=useState('')
